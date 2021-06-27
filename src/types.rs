@@ -13,19 +13,26 @@ impl Color {
 }
 
 impl Color {
-    pub fn to_argb(&self) -> u32 {
+    pub fn to_rgba(&self) -> u32 {
         let r = (self.r * 256f32) as u8;
         let g = (self.g * 256f32) as u8;
         let b = (self.b * 256f32) as u8;
         let a = (self.a * 256f32) as u8;
-        (a as u32) << 24 + (r as u32) << 16 + (g as u32) << 8 + (b as u32)
+        (r as u32) << 24 + (g as u32) << 16 + (b as u32) << 8 + (a as u32)
     }
-    pub fn to_abgr(&self) -> u32 {
+    pub fn to_rgba_u8(&self) -> [u8; 4] {
         let r = (self.r * 256f32) as u8;
         let g = (self.g * 256f32) as u8;
         let b = (self.b * 256f32) as u8;
         let a = (self.a * 256f32) as u8;
-        (a as u32) << 24 + (b as u32) << 16 + (g as u32) << 8 + (r as u32)
+        [r, g, b, a]
+    }
+    pub fn to_bgra(&self) -> u32 {
+        let r = (self.r * 256f32) as u8;
+        let g = (self.g * 256f32) as u8;
+        let b = (self.b * 256f32) as u8;
+        let a = (self.a * 256f32) as u8;
+        (b as u32) << 24 + (g as u32) << 16 + (r as u32) << 8 + (a as u32)
     }
 }
 
@@ -67,5 +74,11 @@ impl Rect {
             width,
             height,
         }
+    }
+    pub fn right(&self) -> u32 {
+        self.x + self.width
+    }
+    pub fn bottom(&self) -> u32 {
+        self.y + self.height
     }
 }

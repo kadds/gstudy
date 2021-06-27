@@ -31,6 +31,6 @@ fn main() {
 
         let name = format!("src/compile_shaders/{}.{}", filename, ext);
         std::fs::write(&name, &bytes).unwrap();
-        println!("cargo:rerun-if-changed={}", path_str);
     }
+    println!("cargo:rerun-if-changed={}", "src/shaderes/");
 }

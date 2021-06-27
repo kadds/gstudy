@@ -4,20 +4,19 @@ mod renderer;
 mod statistics;
 mod types;
 mod ui;
+mod util;
 
 use futures::executor::block_on;
 use renderer::{Renderer, UpdateContext};
 use std::time::Instant;
-use types::Color;
-use winit::dpi::LogicalPosition;
-use winit::dpi::LogicalSize;
-use winit::dpi::Position;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::EventLoopProxy;
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::platform::run_return::EventLoopExtRunReturn;
-use winit::window::CursorIcon;
-use winit::window::WindowBuilder;
+use types::{Color, Rect, Size};
+use winit::{
+    dpi::{LogicalPosition, LogicalSize, Position},
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop, EventLoopProxy},
+    platform::run_return::EventLoopExtRunReturn,
+    window::{CursorIcon, WindowBuilder},
+};
 
 #[derive(Debug, Clone)]
 pub enum UserEvent {
@@ -26,6 +25,7 @@ pub enum UserEvent {
     UpdateIme(Position),
     ClearColor(Option<Color>),
     FullScreen(bool),
+    MoveCanvas(Rect),
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +53,8 @@ pub struct UIState {
     fps: FpsState,
     update_fps: FpsState,
     clear_color: [f32; 3],
+    last_render_window_rect: egui::Rect,
+    render_window_size: egui::Vec2,
 }
 impl Default for UIState {
     fn default() -> Self {
@@ -65,6 +67,11 @@ impl Default for UIState {
             fps: FpsState::default(),
             update_fps: FpsState::default(),
             clear_color: [0f32, 0f32, 0f32],
+            last_render_window_rect: egui::Rect::from_min_max(
+                egui::Pos2::new(0f32, 0f32),
+                egui::Pos2::new(0f32, 0f32),
+            ),
+            render_window_size: egui::vec2(100f32, 100f32),
         }
     }
 }
@@ -167,6 +174,29 @@ fn draw_ui(
         .show(&ctx, |ui| {
             ctx.inspection_ui(ui);
         });
+
+    egui::Window::new("Render window")
+        .fixed_size(egui::vec2(100f32, 100f32))
+        .resizable(true)
+        .collapsible(false)
+        .show(&ctx, |ui| {
+            let (_, r) = ui.allocate_exact_size(
+                state.render_window_size,
+                egui::Sense::focusable_noninteractive(),
+            );
+            if r.rect != state.last_render_window_rect {
+                state.last_render_window_rect = r.rect;
+                let rect = r.rect;
+                let _ = proxy.send_event(UserEvent::MoveCanvas(Rect::new(
+                    rect.left() as u32,
+                    rect.top() as u32,
+                    rect.width() as u32,
+                    rect.height() as u32,
+                )));
+            }
+        })
+        .unwrap();
+
     state.first_render = false;
 }
 
@@ -181,7 +211,7 @@ fn set_ui(output: &egui::Output, proxy: EventLoopProxy<UserEvent>) {
     if let Some(url) = &output.open_url {
         log::info!("open url {}", url.url);
     }
-    if let Some(pos) = &output.text_cursor {
+    if let Some(pos) = &output.text_cursor_pos {
         let _ = proxy.send_event(UserEvent::UpdateIme(
             LogicalPosition::new(pos.x, pos.y).into(),
         ));
@@ -208,7 +238,7 @@ fn main() {
         Box::new(move |c, u| draw_ui(c, u, &mut ui_state, temp_event_proxy.clone())),
         Box::new(move |v| set_ui(v, event_proxy.clone())),
     ));
-    let canvas = Box::new(canvas::Canvas::new());
+    let canvas = Box::new(canvas::Canvas::new(Size::new(100, 100)));
     let mut renderer = block_on(Renderer::new(&window));
     renderer.add(ui);
     renderer.add(canvas);
@@ -238,7 +268,6 @@ fn main() {
             Event::MainEventsCleared => {
                 let now = Instant::now();
                 if now >= target_tick {
-                    // log::info!("delta {}", (now - target_tick).as_secs_f32());
                     window.request_redraw();
                     *control_flow = ControlFlow::Wait; // the next tick
                     need_redraw = true;
@@ -246,18 +275,12 @@ fn main() {
             }
             Event::RedrawRequested(_) => {
                 if !need_redraw {
-                    log::info!("redraw skip");
+                    log::trace!("redraw skip");
                     return;
                 }
                 if update_tick == target_tick {
                     let (next_tick, need_render) = renderer.update();
-                    if need_render {
-                        // log::info!("need render");
-                        not_render = false;
-                    } else {
-                        // delay
-                        not_render = true;
-                    }
+                    not_render = !need_render;
                     update_tick = next_tick;
                 } else {
                     render_tick = renderer.render()
@@ -271,42 +294,47 @@ fn main() {
                 // log::info!("{:?} u {:?} t {:?}", render_tick, update_tick, target_tick);
                 *control_flow = ControlFlow::WaitUntil(target_tick);
             }
-            Event::UserEvent(e) => match e {
-                UserEvent::FrameRate((rate, is_render)) => {
-                    if is_render {
-                        renderer.set_frame_lock(rate.map(|v| 1f32 / v as f32));
-                    } else {
-                        renderer.set_update_frame_lock(rate.map(|v| 1f32 / v as f32));
+            Event::UserEvent(e) => {
+                renderer.on_user_event(&e);
+                match e {
+                    UserEvent::FrameRate((rate, is_render)) => {
+                        if is_render {
+                            renderer.set_frame_lock(rate.map(|v| 1f32 / v as f32));
+                        } else {
+                            renderer.set_update_frame_lock(rate.map(|v| 1f32 / v as f32));
+                        }
                     }
-                }
-                UserEvent::UpdateCursor(cursor) => match cursor {
-                    Some(c) => {
-                        window.set_cursor_visible(true);
-                        window.set_cursor_icon(c);
+                    UserEvent::UpdateCursor(cursor) => match cursor {
+                        Some(c) => {
+                            window.set_cursor_visible(true);
+                            window.set_cursor_icon(c);
+                        }
+                        None => {
+                            window.set_cursor_visible(false);
+                        }
+                    },
+                    UserEvent::UpdateIme(pos) => {
+                        window.set_ime_position(pos);
                     }
-                    None => {
-                        window.set_cursor_visible(false);
+                    UserEvent::ClearColor(c) => {
+                        renderer.set_clear_color(c.map(|c| wgpu::Color {
+                            r: c.r as f64,
+                            b: c.b as f64,
+                            g: c.g as f64,
+                            a: c.a as f64,
+                        }));
                     }
-                },
-                UserEvent::UpdateIme(pos) => {
-                    window.set_ime_position(pos);
-                }
-                UserEvent::ClearColor(c) => {
-                    renderer.set_clear_color(c.map(|c| wgpu::Color {
-                        r: c.r as f64,
-                        b: c.b as f64,
-                        g: c.g as f64,
-                        a: c.a as f64,
-                    }));
-                }
-                UserEvent::FullScreen(set) => {
-                    if set {
-                        window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-                    } else {
-                        window.set_fullscreen(None);
+                    UserEvent::FullScreen(set) => {
+                        if set {
+                            window
+                                .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                        } else {
+                            window.set_fullscreen(None);
+                        }
                     }
+                    _ => (),
                 }
-            },
+            }
             _ => (),
         }
     });

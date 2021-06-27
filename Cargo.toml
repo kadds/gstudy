@@ -9,7 +9,7 @@ edition = "2018"
 winit = { version = "0.25" }
 wgpu = "0.8"
 futures = "0.3"
-egui = "0.12"
+egui = "0.13"
 env_logger = "0.8"
 log = "0.4"
 lazy_static = "1.4"

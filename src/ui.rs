@@ -2,12 +2,10 @@ use crate::{
     maps,
     renderer::{RenderContext, UpdateContext},
     types::*,
+    util::*,
+    UserEvent,
 };
-use std::{
-    collections::HashMap,
-    num::{NonZeroU32, NonZeroU8},
-    time::Duration,
-};
+use std::{collections::HashMap, num::NonZeroU32, time::Duration};
 
 use egui::{CtxRef, RawInput};
 use winit::event::WindowEvent;
@@ -85,21 +83,11 @@ impl UI {
     }
 }
 
-fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
-    unsafe {
-        ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
-    }
-}
-fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
-    unsafe {
-        ::std::slice::from_raw_parts(
-            (p.as_ptr() as *const T) as *const u8,
-            ::std::mem::size_of::<T>() * p.len(),
-        )
-    }
-}
-
 impl RenderObject for UI {
+    fn zlevel(&self) -> i64 {
+        0
+    }
+
     fn update(&mut self, ctx: UpdateContext) -> bool {
         let inner = self.inner.as_mut().unwrap();
         let mut input = RawInput::default();
@@ -354,6 +342,9 @@ impl RenderObject for UI {
             meshes: None,
         });
     }
+
+    fn on_user_event(&mut self, _event: &UserEvent) {}
+
     fn on_event(&mut self, event: &WindowEvent) {
         let inner = match self.inner.as_mut() {
             Some(inner) => inner,

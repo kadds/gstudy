@@ -1,9 +1,7 @@
+use crate::{statistics::Statistics, UserEvent};
 use std::time::{Duration, Instant};
-
 use wgpu::*;
 use winit::{dpi::PhysicalSize, event::WindowEvent, window::Window};
-
-use crate::statistics::Statistics;
 
 #[derive(Debug)]
 pub struct RenderContext<'a> {
@@ -24,6 +22,8 @@ pub trait RenderObject {
     fn render<'a>(&'a mut self, pass: &mut RenderPass<'a>);
     fn init_renderer(&mut self, device: &mut Device);
     fn on_event(&mut self, event: &WindowEvent);
+    fn on_user_event(&mut self, event: &UserEvent);
+    fn zlevel(&self) -> i64;
 }
 
 pub struct Renderer {
@@ -193,7 +193,8 @@ impl Renderer {
             self.sc_desc.width,
             self.sc_desc.height,
         )));
-        self.objects.push(obj);
+        let idx = self.objects.partition_point(|o| o.zlevel() < obj.zlevel());
+        self.objects.insert(idx, obj);
     }
 
     pub fn set_clear_color(&mut self, color: Option<Color>) {
@@ -216,6 +217,11 @@ impl Renderer {
 
         for r in self.objects.iter_mut() {
             r.on_event(event);
+        }
+    }
+    pub fn on_user_event(&mut self, event: &UserEvent) {
+        for r in self.objects.iter_mut() {
+            r.on_user_event(event);
         }
     }
 }
