@@ -1,25 +1,19 @@
-use std::thread::{self, Thread};
-
 use super::{Module, ModuleInfo};
 
-pub struct RayTracing {
-}
-
-impl RayTracing {
+pub struct SoftwareRenderer {}
+impl SoftwareRenderer {
     pub fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 
-impl Module for RayTracing {
+impl Module for SoftwareRenderer {
     fn info(&self) -> ModuleInfo {
         ModuleInfo {
-            name: "ray tracing",
-            desc: "a ray tracing demo",
+            name: "software renderer",
+            desc: "a software renderer with shader pipeline",
         }
     }
-
     fn run(&mut self) {
     }
 

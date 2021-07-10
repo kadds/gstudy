@@ -1,41 +1,68 @@
-use std::collections::HashMap;
-
-use crate::modules::{ray_tracing::RayTracing, Module, ModuleInfo};
+use crate::modules::*;
 
 pub struct Executor {
-    modules: Vec<(&'static str, Box<dyn Module>)>,
-    current_module: Option<&'static Module>,
+    modules: Vec<Box<dyn Module>>,
+    current_module: Option<usize>,
 }
 
 impl Executor {
     pub fn new() -> Self {
-        let modules = vec![[RayTracing::new()]];
+        let mut modules: Vec<Box<dyn Module>> = Vec::new();
+        modules.push(Box::new(RayTracing::new()));
+        modules.push(Box::new(SoftwareRenderer::new()));
         Self {
-            modules: modules,
+            modules,
             current_module: None,
         }
     }
 
-    pub fn run(&mut self, name: &str) {}
+    pub fn run(&mut self, name: &str) {
+        let module_index = self.match_module(name);
+        if let Some(_) = self.current_module {
+            let m = self.current_module();
+            m.stop();
+        }
+        self.current_module = Some(module_index);
+        let m = self.current_module();
+        m.run();
+    }
 
-    pub fn stop(&mut self) {}
+    fn current_module(&mut self) -> &mut dyn Module {
+        let e = &mut self.modules[self.current_module.unwrap()];
+        e.as_mut()
+    }
 
-    pub fn pause(&mut self) {}
+    pub fn stop(&mut self) {
+        let m = self.current_module();
+        m.stop();
+    }
 
-    pub fn resume(&mut self) {}
+    pub fn pause(&mut self) {
+        let m = self.current_module();
+        m.pause();
+    }
 
-    pub fn restart(&mut self) {}
+    pub fn resume(&mut self) {
+        let m = self.current_module();
+        m.resume();
+    }
 
-    fn match_module(&self, name: &str) -> &dyn Module {
+    pub fn restart(&mut self) {
+        let m = self.current_module();
+        m.stop();
+        m.run();
+    }
+
+    fn match_module(&self, name: &str) -> usize {
         self.modules
             .iter()
-            .find(|(n, _)| *n == name)
+            .enumerate()
+            .find(|it| it.1.info().name == name)
             .unwrap()
-            .1
-            .as_ref()
+            .0
     }
 
     pub fn list(&self) -> Vec<ModuleInfo> {
-        todo!();
+        self.modules.iter().map(|it| it.info()).collect()
     }
 }

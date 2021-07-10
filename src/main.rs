@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 mod canvas;
 mod executor;
 mod maps;
@@ -11,6 +12,7 @@ mod util;
 use canvas::Canvas;
 use executor::Executor;
 use futures::executor::block_on;
+use modules::ModuleInfo;
 use renderer::{RenderContext, Renderer, UpdateContext};
 use std::time::Instant;
 use types::{Color, Size};
@@ -31,6 +33,7 @@ pub enum UserEvent {
     ClearColor(Option<Color>),
     FullScreen(bool),
     CanvasResize(Size),
+    ModuleChanged(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +63,9 @@ pub struct UIState {
     clear_color: [f32; 3],
     render_window_size: Size,
     canvas_size: Size,
+
+    modules: Vec<ModuleInfo>,
+    select_module: Option<&'static str>,
 }
 impl Default for UIState {
     fn default() -> Self {
@@ -75,6 +81,9 @@ impl Default for UIState {
             clear_color: [0f32, 0f32, 0f32],
             render_window_size: Size::new(100, 100),
             canvas_size: Size::new(100, 100),
+
+            modules: Vec::new(),
+            select_module: None,
         }
     }
 }
@@ -164,7 +173,7 @@ fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
     ui.checkbox(&mut state.always_repaint, "");
     ui.end_row();
 
-    ui.label("fullscreen");
+    ui.label("full screen");
     if ui.checkbox(&mut state.fullscreen, "").changed() {
         let _ = event_proxy.send_event(UserEvent::FullScreen(state.fullscreen));
     }
@@ -243,14 +252,95 @@ fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
     }
 }
 
-fn functions_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
+
+fn module_item(ui: &mut egui::Ui, info: &ModuleInfo, select: &mut Option<&'static str>, mut rect: egui::Rect,
+               beg: bool, event_proxy: &mut EventLoopProxy<UserEvent>) -> f32 {
+
+    // init position
+    let fonts = ui.fonts();
+    let row_height0 = fonts[egui::TextStyle::Button].row_height();
+    let row_height1 = fonts[egui::TextStyle::Body].row_height();
+    let space = ui.spacing().item_spacing.y;
+    let line_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+
+    let pos0 = rect.left_top() + ui.spacing().item_spacing;
+    let pos1 = egui::pos2(pos0.x, pos0.y + row_height0 + space);
+    let inner_height = row_height0 + row_height1 + space * 3f32;
+    let height = inner_height + line_stroke.width;
+    rect.set_height(height);
+
+    let mut inner_rect = rect;
+    inner_rect.set_top(rect.top() + line_stroke.width);
+    inner_rect.set_height(inner_height - line_stroke.width * 2f32);
+
+    // allocate ui content rectangle
+    let r = ui.allocate_rect(inner_rect, egui::Sense::click());
+    let mut has_outer_box = false;
+    let widget =
+        loop {
+            if r.hovered() {
+                has_outer_box = true;
+                break ui.visuals().widgets.hovered;
+            } else {
+                if let Some(v) = select {
+                    if *v == info.name {
+                        has_outer_box = true;
+                        break ui.visuals().widgets.active;
+                    }
+                }
+                break ui.visuals().widgets.inactive;
+            }
+        };
+
+
+    // render
+    let painter = ui.painter();
+    if has_outer_box {
+        painter.rect(inner_rect, widget.corner_radius, widget.bg_fill, widget.bg_stroke);
+    }
+
+    let color0 = widget.fg_stroke.color;
+    let color1 = egui::color::tint_color_towards(color0, ui.visuals().window_fill());
+
+    painter.text(pos0, egui::Align2::LEFT_TOP, info.name, egui::TextStyle::Button, color0);
+    painter.text(pos1, egui::Align2::LEFT_TOP, info.desc, egui::TextStyle::Body, color1);
+
+    if !beg {
+        // fill segment
+        let vec = egui::vec2(0f32, line_stroke.width);
+        painter.line_segment([rect.left_top() - vec, rect.right_top() - vec], line_stroke);
+    }
+
+
+    if r.double_clicked() {
+        *select = Some(info.name);
+        let _ = event_proxy.send_event(UserEvent::ModuleChanged(info.name));
+    }
+    height
+}
+
+fn modules_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
     let DrawContext {
         update_context,
         event_proxy,
         state,
         ctx,
     } = context;
-    // todo
+    egui::ScrollArea::auto_sized().show_viewport(ui,|ui, viewport| {
+        let mut height = 0f32;
+        let mut top = viewport.min.y + ui.max_rect().top();
+        let left = ui.max_rect().left();
+        let width = ui.max_rect().width();
+
+        let mut beg = true;
+        for item in &state.modules {
+            let rect = egui::Rect::from_min_size(egui::pos2(left, top as f32),
+            egui::vec2(width, height));
+            height = module_item(ui, item, &mut state.select_module, rect, beg, event_proxy);
+            top += height;
+            beg = false;
+        }
+    });
 }
 
 fn draw(
@@ -276,14 +366,11 @@ fn draw(
                 .show(ui, |ui| control_ui(ui, &mut context));
         });
 
-    egui::Window::new("Functions")
+    egui::Window::new("Modules")
         .resizable(true)
         .scroll(true)
         .show(&ctx, |ui| {
-            egui::Grid::new("grid_fn")
-                .striped(true)
-                .spacing([40.0, 4.0])
-                .show(ui, |ui| functions_ui(ui, &mut context));
+            modules_ui(ui, &mut context);
         });
 
     std::mem::drop(context);
@@ -379,13 +466,16 @@ pub struct UIContext {
 
 impl UIContext {
     pub fn new(canvas: Canvas, event_proxy: EventLoopProxy<UserEvent>) -> Self {
-        Self {
+        let executor = Executor::new();
+        let mut res = Self {
             canvas,
             event_proxy,
             state: UIState::default(),
             finish_state: FinishUIState::default(),
-            executor: Executor::new(),
-        }
+            executor,
+        };
+        res.state.modules = res.executor.list();
+        res
     }
 }
 
@@ -420,6 +510,9 @@ impl FunctorProvider for UIContext {
         match event {
             &UserEvent::CanvasResize(size) => {
                 self.canvas.resize_pixels(size);
+            }
+            &UserEvent::ModuleChanged(name) => {
+                self.executor.run(name);
             }
             _ => (),
         }
