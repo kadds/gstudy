@@ -30,6 +30,10 @@ fn main() {
         let bytes = bytes_u8;
 
         let name = format!("src/compile_shaders/{}.{}", filename, ext);
+        let path = std::path::Path::new(&name).parent().unwrap();
+        if !path.exists() {
+            std::fs::create_dir_all(path).unwrap();
+        }
         std::fs::write(&name, &bytes).unwrap();
         println!("cargo:rerun-if-changed={}", path_str);
     }
