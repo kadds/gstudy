@@ -1,15 +1,20 @@
 mod canvas;
+mod executor;
 mod maps;
+mod modules;
 mod renderer;
 mod statistics;
 mod types;
 mod ui;
 mod util;
 
+use canvas::Canvas;
+use executor::Executor;
 use futures::executor::block_on;
-use renderer::{Renderer, UpdateContext};
+use renderer::{RenderContext, Renderer, UpdateContext};
 use std::time::Instant;
-use types::{Color, Rect, Size};
+use types::{Color, Size};
+use ui::FunctorProvider;
 use winit::{
     dpi::{LogicalPosition, LogicalSize, Position},
     event::{Event, WindowEvent},
@@ -25,20 +30,19 @@ pub enum UserEvent {
     UpdateIme(Position),
     ClearColor(Option<Color>),
     FullScreen(bool),
-    MoveCanvas(Rect),
+    CanvasResize(Size),
 }
 
 #[derive(Debug, Clone)]
 pub struct FpsState {
-    fps_limit: String,
-    fps_error: String,
+    fps_limit: u32,
+    enabled: bool,
 }
-
 impl Default for FpsState {
     fn default() -> Self {
         Self {
-            fps_limit: "60".to_owned(),
-            fps_error: "".to_owned(),
+            fps_limit: 60,
+            enabled: true,
         }
     }
 }
@@ -47,119 +51,243 @@ impl Default for FpsState {
 pub struct UIState {
     show_setting: bool,
     show_inspection: bool,
+    show_memory: bool,
     always_repaint: bool,
     first_render: bool,
     fullscreen: bool,
     fps: FpsState,
     update_fps: FpsState,
     clear_color: [f32; 3],
-    last_render_window_rect: egui::Rect,
-    render_window_size: egui::Vec2,
+    render_window_size: Size,
+    canvas_size: Size,
 }
 impl Default for UIState {
     fn default() -> Self {
         Self {
             show_setting: false,
             show_inspection: false,
+            show_memory: false,
             always_repaint: false,
             first_render: true,
             fullscreen: false,
             fps: FpsState::default(),
             update_fps: FpsState::default(),
             clear_color: [0f32, 0f32, 0f32],
-            last_render_window_rect: egui::Rect::from_min_max(
-                egui::Pos2::new(0f32, 0f32),
-                egui::Pos2::new(0f32, 0f32),
-            ),
-            render_window_size: egui::vec2(100f32, 100f32),
+            render_window_size: Size::new(100, 100),
+            canvas_size: Size::new(100, 100),
         }
     }
+}
+
+pub struct FinishUIState {
+    cursor: egui::CursorIcon,
+}
+impl Default for FinishUIState {
+    fn default() -> Self {
+        Self {
+            cursor: egui::CursorIcon::Default,
+        }
+    }
+}
+
+pub struct DrawContext<'b, 'c> {
+    state: &'b mut UIState,
+    event_proxy: EventLoopProxy<UserEvent>,
+    update_context: &'c UpdateContext<'c>,
+    ctx: egui::CtxRef,
 }
 
 fn draw_fps(
     ui: &mut egui::Ui,
-    first_render: bool,
-    state: &mut FpsState,
     is_render: bool,
-    proxy: &EventLoopProxy<UserEvent>,
+    state: &mut UIState,
+    event_proxy: &EventLoopProxy<UserEvent>,
 ) {
+    let first_render = state.first_render;
+    let (name, state) = if is_render {
+        ("render fps limit", &mut state.fps)
+    } else {
+        ("update fps limit", &mut state.update_fps)
+    };
+    ui.label(name);
     ui.horizontal(|ui| {
-        let name = if is_render {
-            "render fps limit"
-        } else {
-            "update fps limit"
-        };
-        ui.label(name);
-        let fps_ui = ui.text_edit_singleline(&mut state.fps_limit);
-        if fps_ui.lost_focus() || first_render {
-            if state.fps_limit.is_empty() {
-                let _ = proxy.send_event(UserEvent::FrameRate((None, is_render)));
-                state.fps_error = "".to_owned();
-                return;
+        let mut changed = ui.checkbox(&mut state.enabled, "").changed();
+        ui.scope(|ui| {
+            let s = egui::Slider::new(&mut state.fps_limit, 15u32..=250u32).clamp_to_range(true);
+            ui.set_enabled(state.enabled);
+            if ui.add(s).changed() {
+                changed = true;
             }
-            match state.fps_limit.parse::<u32>() {
-                Ok(v) => {
-                    let _ = proxy.send_event(UserEvent::FrameRate((Some(v as u32), is_render)));
-                    state.fps_error = "".to_owned();
-                }
-                Err(_) => {
-                    state.fps_error = format!("error");
-                }
-            };
-        }
-        if !state.fps_error.is_empty() {
-            ui.colored_label(egui::Color32::RED, &state.fps_error);
+        });
+        if changed || first_render {
+            if !state.enabled {
+                let _ = event_proxy.send_event(UserEvent::FrameRate((None, is_render)));
+                return;
+            } else {
+                let _ = event_proxy
+                    .send_event(UserEvent::FrameRate((Some(state.fps_limit), is_render)));
+            }
         }
     });
 }
 
-fn draw_ui(
+fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
+    let DrawContext {
+        update_context,
+        event_proxy,
+        state,
+        ctx,
+    } = context;
+
+    let UpdateContext {
+        render_statistics,
+        update_statistics,
+    } = update_context;
+
+    ui.label("render fps & fs:");
+    ui.label(format!(
+        "{:>5.1} {:>6.1}ms",
+        render_statistics.fps(),
+        render_statistics.frame_secends() * 1000f32
+    ));
+    ui.end_row();
+
+    ui.label("update fps & fs:");
+    ui.label(format!(
+        "{:>5.1} {:>6.1}ms",
+        update_statistics.fps(),
+        update_statistics.frame_secends() * 1000f32
+    ));
+    ui.end_row();
+
+    ui.label("alaways repaint");
+    ui.checkbox(&mut state.always_repaint, "");
+    ui.end_row();
+
+    ui.label("fullscreen");
+    if ui.checkbox(&mut state.fullscreen, "").changed() {
+        let _ = event_proxy.send_event(UserEvent::FullScreen(state.fullscreen));
+    }
+    ui.end_row();
+
+    ui.label("settings");
+    ui.collapsing("built-in functions", |ui| {
+        if ui.button("setting").clicked() {
+            state.show_setting = !state.show_setting;
+        }
+        if ui.button("inspection").clicked() {
+            state.show_inspection = !state.show_inspection;
+        }
+        if ui.button("memory").clicked() {
+            state.show_memory = !state.show_memory;
+        }
+    });
+    ui.end_row();
+
+    draw_fps(ui, true, state, &event_proxy);
+    ui.end_row();
+
+    draw_fps(ui, false, state, &event_proxy);
+    ui.end_row();
+
+    ui.label("clear color");
+    if ui.color_edit_button_rgb(&mut state.clear_color).changed() {
+        let _ = event_proxy.send_event(UserEvent::ClearColor(Some(Color::new(
+            state.clear_color[0],
+            state.clear_color[1],
+            state.clear_color[2],
+            1.0f32,
+        ))));
+    }
+    ui.end_row();
+
+    ui.label("render window width");
+    ui.add(egui::Slider::new(
+        &mut state.render_window_size.width,
+        100..=1024,
+    ));
+    ui.end_row();
+
+    ui.label("render window height");
+    ui.add(egui::Slider::new(
+        &mut state.render_window_size.height,
+        100..=1024,
+    ));
+    ui.end_row();
+
+    let mut c = false;
+    ui.label("canvas width");
+    if ui
+        .add(egui::Slider::new(&mut state.canvas_size.width, 100..=1024))
+        .changed()
+    {
+        c = true;
+    }
+    ui.end_row();
+
+    ui.label("canvas height");
+    if ui
+        .add(egui::Slider::new(&mut state.canvas_size.height, 100..=1024))
+        .changed()
+    {
+        c = true;
+    }
+    if c {
+        let _ = event_proxy.send_event(UserEvent::CanvasResize(state.canvas_size));
+    }
+
+    ui.end_row();
+
+    if render_statistics.changed() || update_statistics.changed() {
+        ctx.request_repaint();
+    }
+}
+
+fn functions_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
+    let DrawContext {
+        update_context,
+        event_proxy,
+        state,
+        ctx,
+    } = context;
+    // todo
+}
+
+fn draw(
     ctx: egui::CtxRef,
-    update_ctx: &UpdateContext,
+    update_context: &UpdateContext,
     state: &mut UIState,
-    proxy: EventLoopProxy<UserEvent>,
+    event_proxy: EventLoopProxy<UserEvent>,
 ) {
+    let mut context = DrawContext {
+        ctx: ctx.clone(),
+        update_context,
+        state,
+        event_proxy: event_proxy.clone(),
+    };
+
     egui::Window::new("Control")
         .resizable(true)
         .scroll(true)
         .show(&ctx, |ui| {
-            ui.label(format!(
-                "render fps:{:.1} fs:{:.1}ms",
-                update_ctx.render_statistics.fps(),
-                update_ctx.render_statistics.frame_secends() * 1000f32
-            ));
-            ui.label(format!(
-                "update fps:{:.1} fs:{:.1}ms",
-                update_ctx.update_statistics.fps(),
-                update_ctx.update_statistics.frame_secends() * 1000f32
-            ));
-            ui.checkbox(&mut state.always_repaint, "always repaint");
-            if ui.checkbox(&mut state.fullscreen, "fullscreen").changed() {
-                let _ = proxy.send_event(UserEvent::FullScreen(state.fullscreen));
-            }
-            if ui.button("setting").clicked() {
-                state.show_setting = !state.show_setting;
-            }
-            if ui.button("inspection").clicked() {
-                state.show_inspection = !state.show_inspection;
-            }
-            draw_fps(ui, state.first_render, &mut state.fps, true, &proxy);
-            draw_fps(ui, state.first_render, &mut state.update_fps, false, &proxy);
-            ui.vertical(|ui| {
-                ui.label("clear color");
-                if ui.color_edit_button_rgb(&mut state.clear_color).changed() {
-                    let _ = proxy.send_event(UserEvent::ClearColor(Some(Color::new(
-                        state.clear_color[0],
-                        state.clear_color[1],
-                        state.clear_color[2],
-                        1.0f32,
-                    ))));
-                }
-            });
+            egui::Grid::new("grid")
+                .striped(true)
+                .spacing([40.0, 4.0])
+                .show(ui, |ui| control_ui(ui, &mut context));
         });
-    if state.always_repaint {
-        ctx.request_repaint();
-    }
+
+    egui::Window::new("Functions")
+        .resizable(true)
+        .scroll(true)
+        .show(&ctx, |ui| {
+            egui::Grid::new("grid_fn")
+                .striped(true)
+                .spacing([40.0, 4.0])
+                .show(ui, |ui| functions_ui(ui, &mut context));
+        });
+
+    std::mem::drop(context);
+
     egui::Window::new("Setting")
         .resizable(true)
         .open(&mut state.show_setting)
@@ -175,49 +303,126 @@ fn draw_ui(
             ctx.inspection_ui(ui);
         });
 
-    egui::Window::new("Render window")
-        .fixed_size(egui::vec2(100f32, 100f32))
+    egui::Window::new("Memory")
         .resizable(true)
+        .open(&mut state.show_memory)
+        .scroll(true)
+        .show(&ctx, |ui| {
+            ctx.memory_ui(ui);
+        });
+
+    egui::Window::new("Render window")
+        .resizable(false)
+        .min_width(1f32)
+        .min_height(1f32)
         .collapsible(false)
         .show(&ctx, |ui| {
-            let (_, r) = ui.allocate_exact_size(
-                state.render_window_size,
-                egui::Sense::focusable_noninteractive(),
+            let size = egui::vec2(
+                state.render_window_size.width as f32,
+                state.render_window_size.height as f32,
             );
-            if r.rect != state.last_render_window_rect {
-                state.last_render_window_rect = r.rect;
-                let rect = r.rect;
-                let _ = proxy.send_event(UserEvent::MoveCanvas(Rect::new(
-                    rect.left() as u32,
-                    rect.top() as u32,
-                    rect.width() as u32,
-                    rect.height() as u32,
-                )));
-            }
+            ui.image(egui::TextureId::User(0), size);
         })
         .unwrap();
 
     state.first_render = false;
+    if state.always_repaint {
+        ctx.request_repaint();
+    }
 }
 
-fn set_ui(output: &egui::Output, proxy: EventLoopProxy<UserEvent>) {
-    if output.cursor_icon == egui::CursorIcon::None {
-        let _ = proxy.send_event(UserEvent::UpdateCursor(None));
-    } else {
-        let _ = proxy.send_event(UserEvent::UpdateCursor(Some(maps::match_winit_cursor(
-            output.cursor_icon,
-        ))));
+fn finish_ui(
+    output: &egui::Output,
+    state: &mut FinishUIState,
+    event_proxy: EventLoopProxy<UserEvent>,
+) {
+    if output.cursor_icon != state.cursor {
+        if output.cursor_icon == egui::CursorIcon::None {
+            let _ = event_proxy.send_event(UserEvent::UpdateCursor(None));
+        } else {
+            let _ = event_proxy.send_event(UserEvent::UpdateCursor(Some(
+                maps::match_winit_cursor(output.cursor_icon),
+            )));
+        }
+        state.cursor = output.cursor_icon;
     }
     if let Some(url) = &output.open_url {
         log::info!("open url {}", url.url);
+        tinyfiledialogs::message_box_ok(
+            "open url",
+            &url.url,
+            tinyfiledialogs::MessageBoxIcon::Info,
+        );
     }
     if let Some(pos) = &output.text_cursor_pos {
-        let _ = proxy.send_event(UserEvent::UpdateIme(
+        let _ = event_proxy.send_event(UserEvent::UpdateIme(
             LogicalPosition::new(pos.x, pos.y).into(),
         ));
     }
     if !output.copied_text.is_empty() {
         log::info!("copy {}", output.copied_text);
+        tinyfiledialogs::message_box_ok(
+            "copy string",
+            &output.copied_text,
+            tinyfiledialogs::MessageBoxIcon::Info,
+        );
+    }
+}
+
+pub struct UIContext {
+    canvas: Canvas,
+    state: UIState,
+    finish_state: FinishUIState,
+    event_proxy: EventLoopProxy<UserEvent>,
+    executor: Executor,
+}
+
+impl UIContext {
+    pub fn new(canvas: Canvas, event_proxy: EventLoopProxy<UserEvent>) -> Self {
+        Self {
+            canvas,
+            event_proxy,
+            state: UIState::default(),
+            finish_state: FinishUIState::default(),
+            executor: Executor::new(),
+        }
+    }
+}
+
+impl FunctorProvider for UIContext {
+    fn prepare_texture(&mut self, ctx: RenderContext) {
+        self.canvas.build_texture(ctx);
+    }
+
+    fn get_texture<'s>(&'s self, id: u64) -> &'s wgpu::BindGroup {
+        match id {
+            0 => self.canvas.get_texture().1,
+            _ => {
+                panic!("invalid texture id");
+            }
+        }
+    }
+
+    fn update(&mut self, ctx: egui::CtxRef, update_context: &UpdateContext) {
+        draw(
+            ctx,
+            update_context,
+            &mut self.state,
+            self.event_proxy.clone(),
+        );
+    }
+
+    fn finish(&mut self, output: &egui::Output) {
+        finish_ui(output, &mut self.finish_state, self.event_proxy.clone());
+    }
+
+    fn on_user_event(&mut self, event: &UserEvent) {
+        match event {
+            &UserEvent::CanvasResize(size) => {
+                self.canvas.resize_pixels(size);
+            }
+            _ => (),
+        }
     }
 }
 
@@ -232,16 +437,13 @@ fn main() {
         .build(&event_loop)
         .unwrap();
 
-    let temp_event_proxy = event_proxy.clone();
-    let mut ui_state = UIState::default();
-    let ui = Box::new(ui::UI::new(
-        Box::new(move |c, u| draw_ui(c, u, &mut ui_state, temp_event_proxy.clone())),
-        Box::new(move |v| set_ui(v, event_proxy.clone())),
-    ));
-    let canvas = Box::new(canvas::Canvas::new(Size::new(100, 100)));
+    let canvas = canvas::Canvas::new(Size::new(100, 100));
+    let provider = UIContext::new(canvas, event_proxy.clone());
+
+    let ui = Box::new(ui::UI::new(provider));
+
     let mut renderer = block_on(Renderer::new(&window));
     renderer.add(ui);
-    renderer.add(canvas);
 
     let mut target_tick = Instant::now();
     let mut update_tick = target_tick;

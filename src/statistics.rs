@@ -14,6 +14,7 @@ pub struct Statistics {
     frame_count: u32,
     fps: f32,
     target_frame_secends: Option<Duration>,
+    changed: bool,
 }
 
 impl Statistics {
@@ -33,6 +34,7 @@ impl Statistics {
             fps: 0f32,
 
             target_frame_secends: target_frame_secends.map(|v| Duration::from_secs_f32(v)),
+            changed: false,
         }
     }
 
@@ -42,6 +44,7 @@ impl Statistics {
 
     pub fn new_frame(&mut self) {
         self.times += 1;
+        self.changed = false;
         let now = Instant::now();
         let delta = now - self.last_timestamp;
         let pass = now - self.last_statistics_timestamp;
@@ -52,6 +55,7 @@ impl Statistics {
 
             self.times = 0;
             self.last_statistics_timestamp = now;
+            self.changed = true;
         }
         self.last_timestamp = now;
         self.frame_duration = delta;
@@ -79,11 +83,11 @@ impl Statistics {
         self.frame_secends
     }
 
-    pub fn frame_count(&self) -> u32 {
-        self.frame_count
-    }
-
     pub fn elapsed(&self) -> Duration {
         self.last_timestamp - self.begin_timestamp
+    }
+
+    pub fn changed(&self) -> bool {
+        self.changed
     }
 }

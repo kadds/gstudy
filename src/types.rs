@@ -60,14 +60,14 @@ impl Size {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Copy, Default)]
 pub struct Rect {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 impl Rect {
-    pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
+    pub fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
         Self {
             x,
             y,
@@ -75,10 +75,16 @@ impl Rect {
             height,
         }
     }
-    pub fn right(&self) -> u32 {
+    pub fn right(&self) -> i32 {
         self.x + self.width
     }
-    pub fn bottom(&self) -> u32 {
+    pub fn bottom(&self) -> i32 {
         self.y + self.height
+    }
+    pub fn left(&self) -> i32 {
+        self.x
+    }
+    pub fn top(&self) -> i32 {
+        self.y
     }
 }

@@ -170,14 +170,6 @@ impl Renderer {
                     depth_stencil_attachment: None,
                 };
                 let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
-                // render_pass.set_viewport(
-                //     0f32,
-                //     0f32,
-                //     self.sc_desc.width as f32,
-                //     self.sc_desc.height as f32,
-                //     0.0001f32,
-                //     10000.0f32,
-                // );
                 for r in self.objects.iter_mut() {
                     r.render(&mut render_pass);
                 }
