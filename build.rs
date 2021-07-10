@@ -35,6 +35,6 @@ fn main() {
             std::fs::create_dir_all(path).unwrap();
         }
         std::fs::write(&name, &bytes).unwrap();
-        println!("cargo:rerun-if-changed={}", path_str);
     }
+    println!("cargo:rerun-if-changed={}", "src/shaders/");
 }

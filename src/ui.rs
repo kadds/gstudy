@@ -2,12 +2,10 @@ use crate::{
     maps,
     renderer::{RenderContext, UpdateContext},
     types::*,
+    util::*,
+    UserEvent,
 };
-use std::{
-    collections::HashMap,
-    num::{NonZeroU32, NonZeroU8},
-    time::Duration,
-};
+use std::{num::NonZeroU32, time::Duration};
 
 use egui::{CtxRef, RawInput};
 use winit::event::WindowEvent;
@@ -33,7 +31,7 @@ struct RenderStage {
     pub texture_id: egui::TextureId,
 }
 
-struct Texture {
+pub struct Texture {
     pub texture: wgpu::Texture,
     pub bind_group: wgpu::BindGroup,
     pub size: Size,
@@ -41,7 +39,7 @@ struct Texture {
 }
 
 struct DynRenderState {
-    textures: HashMap<egui::TextureId, Texture>,
+    texture: Option<Texture>,
     stages: Vec<RenderStage>,
     vertex_buffers: Vec<(wgpu::Buffer, usize)>,
     vertex_offset: usize,
@@ -62,44 +60,46 @@ struct Inner {
     meshes: Option<Vec<egui::ClippedMesh>>,
 }
 
-pub struct UI {
-    ui_ctx: egui::CtxRef,
-    update_fn: Box<dyn FnMut(egui::CtxRef, &UpdateContext)>,
-    set_fn: Box<dyn FnMut(&egui::Output)>,
-    input: RawInput,
-    inner: Option<Inner>,
+pub trait FunctorProvider {
+    fn prepare_texture(&mut self, ctx: RenderContext);
+    fn get_texture<'a>(&'a self, id: u64) -> &'a wgpu::BindGroup;
+    fn update(&mut self, ctx: egui::CtxRef, update_context: &UpdateContext);
+    fn finish(&mut self, output: &egui::Output);
+    fn on_user_event(&mut self, event: &UserEvent);
 }
 
-impl UI {
-    pub fn new(
-        update_fn: Box<dyn FnMut(egui::CtxRef, &UpdateContext)>,
-        set_fn: Box<dyn FnMut(&egui::Output)>,
-    ) -> Self {
+pub struct UI<P>
+where
+    P: FunctorProvider,
+{
+    ui_ctx: egui::CtxRef,
+    input: RawInput,
+    inner: Option<Inner>,
+    provider: P,
+}
+
+impl<P> UI<P>
+where
+    P: FunctorProvider,
+{
+    pub fn new(provider: P) -> Self {
         Self {
             ui_ctx: egui::CtxRef::default(),
-            update_fn,
-            set_fn,
             input: RawInput::default(),
             inner: None,
+            provider,
         }
     }
 }
 
-fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
-    unsafe {
-        ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
+impl<P> RenderObject for UI<P>
+where
+    P: FunctorProvider,
+{
+    fn zlevel(&self) -> i64 {
+        0
     }
-}
-fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
-    unsafe {
-        ::std::slice::from_raw_parts(
-            (p.as_ptr() as *const T) as *const u8,
-            ::std::mem::size_of::<T>() * p.len(),
-        )
-    }
-}
 
-impl RenderObject for UI {
     fn update(&mut self, ctx: UpdateContext) -> bool {
         let inner = self.inner.as_mut().unwrap();
         let mut input = RawInput::default();
@@ -111,11 +111,11 @@ impl RenderObject for UI {
         let ui_ctx = &mut self.ui_ctx;
 
         ui_ctx.begin_frame(input);
-        (self.update_fn)(ui_ctx.clone(), &ctx);
+        self.provider.update(ui_ctx.clone(), &ctx);
         let (output, shapes) = ui_ctx.end_frame();
         let meshes = ui_ctx.tessellate(shapes);
         inner.meshes = Some(meshes);
-        (self.set_fn)(&output);
+        self.provider.finish(&output);
         output.needs_repaint
     }
 
@@ -148,7 +148,7 @@ impl RenderObject for UI {
             if width == 0 || height == 0 {
                 continue;
             }
-            let rect = Rect::new(x, y, width, height);
+            let rect = Rect::new(x as i32, y as i32, width as i32, height as i32);
 
             state.commit(
                 &mut ctx,
@@ -160,6 +160,7 @@ impl RenderObject for UI {
                 self.ui_ctx.clone(),
             );
         }
+        self.provider.prepare_texture(ctx);
     }
     fn render<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>) {
         let inner = self.inner.as_mut().unwrap();
@@ -168,11 +169,19 @@ impl RenderObject for UI {
         pass.set_bind_group(0, &inner.bind_group, &[]);
         for stage in &state.stages {
             let rect = stage.rect;
-            pass.set_scissor_rect(rect.x, rect.y, rect.width, rect.height);
+            pass.set_scissor_rect(
+                rect.x as u32,
+                rect.y as u32,
+                rect.width as u32,
+                rect.height as u32,
+            );
+            let texture_bind_group = match stage.texture_id {
+                egui::TextureId::Egui => &state.texture.as_ref().unwrap().bind_group,
+                egui::TextureId::User(id) => self.provider.get_texture(id),
+            };
 
-            let texture = state.textures.get(&stage.texture_id).unwrap();
             // bind texture
-            pass.set_bind_group(1, &texture.bind_group, &[]);
+            pass.set_bind_group(1, texture_bind_group, &[]);
             let vertex_buffer = state.get_vertex_buffer(stage.vertex_buffer);
             let index_buffer = state.get_index_buffer(stage.index_buffer);
             pass.set_vertex_buffer(0, vertex_buffer.slice((stage.base_vertex as u64)..));
@@ -354,6 +363,11 @@ impl RenderObject for UI {
             meshes: None,
         });
     }
+
+    fn on_user_event(&mut self, event: &UserEvent) {
+        self.provider.on_user_event(event);
+    }
+
     fn on_event(&mut self, event: &WindowEvent) {
         let inner = match self.inner.as_mut() {
             Some(inner) => inner,
@@ -493,7 +507,7 @@ impl RenderObject for UI {
 impl DynRenderState {
     pub fn new() -> Self {
         Self {
-            textures: HashMap::new(),
+            texture: None,
             vertex_buffers: Vec::new(),
             index_buffers: Vec::new(),
             stages: Vec::new(),
@@ -608,7 +622,7 @@ impl DynRenderState {
                 self.vertex_offset += 1;
             }
         }
-        self.update_texture(ctx, &texture_bind_group_layout, ui_ctx, texture_id);
+        self.update_texture(ctx, &texture_bind_group_layout, ui_ctx);
         // log::info!("render stages {:?}", self.stages);
     }
 
@@ -661,21 +675,17 @@ impl DynRenderState {
         ctx: &mut RenderContext<'_>,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         ui_ctx: egui::CtxRef,
-        texture_id: egui::TextureId,
     ) {
-        let (version, size, bytes) = match texture_id {
-            egui::TextureId::Egui => {
-                let t = ui_ctx.texture();
-                (
-                    t.version,
-                    Size::new(t.width as u32, t.height as u32),
-                    t.pixels.len(),
-                )
-            }
-            egui::TextureId::User(_) => return,
+        let (version, size, bytes) = {
+            let t = ui_ctx.texture();
+            (
+                t.version,
+                Size::new(t.width as u32, t.height as u32),
+                t.pixels.len(),
+            )
         };
         let mut need_create = false;
-        if let Some(t) = self.textures.get_mut(&texture_id) {
+        if let Some(t) = self.texture.as_mut() {
             if t.version == version {
                 return;
             }
@@ -689,20 +699,12 @@ impl DynRenderState {
         }
 
         if need_create {
-            let texture =
-                self.new_texture(ctx, &texture_bind_group_layout, size, texture_id, version);
-            self.textures.insert(texture_id, texture);
+            let texture = self.new_texture(ctx, &texture_bind_group_layout, size, version);
+            self.texture = Some(texture);
         }
-        let texture = self.textures.get(&texture_id).unwrap();
+        let texture = self.texture.as_ref().unwrap();
 
-        match texture_id {
-            egui::TextureId::Egui => {
-                self.copy_texture(ctx, texture, bytes, &ui_ctx.texture().pixels);
-            }
-            egui::TextureId::User(_) => {
-                todo!("user bitmap");
-            }
-        };
+        self.copy_texture(ctx, texture, bytes, &ui_ctx.texture().pixels);
     }
 
     fn copy_texture(
@@ -741,7 +743,6 @@ impl DynRenderState {
         ctx: &mut RenderContext<'_>,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         size: Size,
-        _id: egui::TextureId,
         version: u64,
     ) -> Texture {
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
