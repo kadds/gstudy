@@ -14,15 +14,11 @@ impl Module for SoftwareRenderer {
             desc: "a software renderer with shader pipeline",
         }
     }
-    fn run(&mut self) {
-    }
+    fn run(&mut self) {}
 
-    fn stop(&mut self) {
-    }
+    fn stop(&mut self) {}
 
-    fn pause(&mut self) {
-    }
+    fn pause(&mut self) {}
 
-    fn resume(&mut self) {
-    }
+    fn resume(&mut self) {}
 }

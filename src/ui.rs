@@ -204,7 +204,7 @@ where
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStage::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -214,7 +214,7 @@ where
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler {
                         comparison: false,
                         filtering: true,
@@ -228,7 +228,7 @@ where
                 label: None,
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -241,7 +241,7 @@ where
         let mat_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: 8,
-            usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::UNIFORM,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -283,7 +283,7 @@ where
         });
         let vertex_buffer_layout = [wgpu::VertexBufferLayout {
             array_stride: 4 * 5 as wgpu::BufferAddress,
-            step_mode: wgpu::InputStepMode::Vertex,
+            step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 wgpu::VertexAttribute {
                     format: wgpu::VertexFormat::Float32x2,
@@ -328,7 +328,7 @@ where
                             operation: wgpu::BlendOperation::Add,
                         },
                     }),
-                    write_mask: wgpu::ColorWrite::all(),
+                    write_mask: wgpu::ColorWrites::all(),
                 }],
             }),
             primitive: wgpu::PrimitiveState {
@@ -630,7 +630,7 @@ impl DynRenderState {
         if vertex_offset >= self.vertex_buffers.len() {
             let buf = self.new_buffer(
                 ctx,
-                wgpu::BufferUsage::VERTEX,
+                wgpu::BufferUsages::VERTEX,
                 (DEFAULT_VERTEX_BUFFER_SIZE * std::mem::size_of::<egui::epaint::Vertex>()) as u64,
             );
             self.vertex_buffers.push((buf, 0));
@@ -641,7 +641,7 @@ impl DynRenderState {
         if index_offset >= self.index_buffers.len() {
             let buf = self.new_buffer(
                 ctx,
-                wgpu::BufferUsage::INDEX,
+                wgpu::BufferUsages::INDEX,
                 (DEFAULT_INDEX_BUFFER_SIZE * std::mem::size_of::<u32>()) as u64,
             );
             self.index_buffers.push((buf, 0));
@@ -658,13 +658,13 @@ impl DynRenderState {
     fn new_buffer(
         &self,
         ctx: &mut RenderContext<'_>,
-        buffer_type: wgpu::BufferUsage,
+        buffer_type: wgpu::BufferUsages,
         size: u64,
     ) -> wgpu::Buffer {
         let mat_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size,
-            usage: wgpu::BufferUsage::COPY_DST | buffer_type,
+            usage: wgpu::BufferUsages::COPY_DST | buffer_type,
             mapped_at_creation: false,
         });
         mat_buffer
@@ -719,6 +719,7 @@ impl DynRenderState {
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             texture: &texture.texture,
+            aspect: wgpu::TextureAspect::All,
         };
         let data_layout = wgpu::ImageDataLayout {
             offset: 0,
@@ -756,7 +757,7 @@ impl DynRenderState {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {

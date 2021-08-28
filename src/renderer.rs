@@ -32,18 +32,18 @@ pub struct Renderer {
     adapter: Adapter,
     device: Device,
     queue: Queue,
-    swap_chain: SwapChain,
-    sc_desc: SwapChainDescriptor,
     objects: Vec<Box<dyn RenderObject>>,
     render_statistics: Statistics,
     update_statistics: Statistics,
     clear_color: Option<Color>,
+    width: u32,
+    height: u32,
 }
 
 impl Renderer {
-    fn build_swpachain_desc(width: u32, height: u32) -> SwapChainDescriptor {
-        SwapChainDescriptor {
-            usage: TextureUsage::RENDER_ATTACHMENT,
+    fn build_surface_desc(width: u32, height: u32) -> SurfaceConfiguration {
+        SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
             format: TextureFormat::Bgra8UnormSrgb,
             width,
             height,
@@ -51,7 +51,8 @@ impl Renderer {
         }
     }
     pub async fn new(window: &Window) -> Renderer {
-        let instance = Instance::new(BackendBit::PRIMARY);
+        let bits = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let instance = Instance::new(bits);
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
@@ -74,9 +75,7 @@ impl Renderer {
         let wsize = window.inner_size();
         let width = wsize.width;
         let height = wsize.height;
-
-        let sc_desc = Self::build_swpachain_desc(width, height);
-        let swap_chain = device.create_swap_chain(&surface, &sc_desc);
+        surface.configure(&device, &Self::build_surface_desc(width, height));
 
         // let format = adapter.get_swap_chain_preferred_format(&surface).unwrap();
         Self {
@@ -85,12 +84,12 @@ impl Renderer {
             adapter,
             device,
             queue,
-            swap_chain,
-            sc_desc,
             objects: Vec::new(),
             render_statistics: Statistics::new(Duration::from_millis(900), Some(1f32 / 1000f32)),
             update_statistics: Statistics::new(Duration::from_millis(900), Some(1f32 / 1000f32)),
             clear_color: Some(Color::BLACK),
+            height,
+            width,
         }
     }
 
@@ -102,15 +101,16 @@ impl Renderer {
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        if width == self.sc_desc.width && height == self.sc_desc.height {
-            return;
-        }
         if width == 0 || height == 0 {
             return;
         }
-        let sc_desc = Self::build_swpachain_desc(width, height);
-        self.sc_desc = sc_desc;
-        self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
+        if self.width == width && self.height == height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        self.surface
+            .configure(&self.device, &Self::build_surface_desc(width, height));
     }
 
     pub fn update(&mut self) -> (Instant, bool) {
@@ -134,7 +134,7 @@ impl Renderer {
     pub fn render(&mut self) -> Instant {
         self.render_statistics.new_frame();
         {
-            let frame = match self.swap_chain.get_current_frame() {
+            let frame = match self.surface.get_current_frame() {
                 Ok(v) => v.output,
                 Err(e) => {
                     log::error!("get swapchine fail. {}", e);
@@ -155,10 +155,13 @@ impl Renderer {
                 })
             }
             {
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
                 let render_pass_desc = RenderPassDescriptor {
                     label: None,
                     color_attachments: &[RenderPassColorAttachment {
-                        view: &frame.view,
+                        view: &view,
                         resolve_target: None,
                         ops: Operations {
                             load: self
@@ -182,8 +185,8 @@ impl Renderer {
     pub fn add(&mut self, mut obj: Box<dyn RenderObject>) {
         obj.init_renderer(&mut self.device);
         obj.on_event(&WindowEvent::Resized(PhysicalSize::new(
-            self.sc_desc.width,
-            self.sc_desc.height,
+            self.width,
+            self.height,
         )));
         let idx = self.objects.partition_point(|o| o.zlevel() < obj.zlevel());
         self.objects.insert(idx, obj);

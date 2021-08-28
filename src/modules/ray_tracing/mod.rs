@@ -2,13 +2,11 @@ use std::thread::{self, Thread};
 
 use super::{Module, ModuleInfo};
 
-pub struct RayTracing {
-}
+pub struct RayTracing {}
 
 impl RayTracing {
     pub fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 
@@ -20,15 +18,11 @@ impl Module for RayTracing {
         }
     }
 
-    fn run(&mut self) {
-    }
+    fn run(&mut self) {}
 
-    fn stop(&mut self) {
-    }
+    fn stop(&mut self) {}
 
-    fn pause(&mut self) {
-    }
+    fn pause(&mut self) {}
 
-    fn resume(&mut self) {
-    }
+    fn resume(&mut self) {}
 }

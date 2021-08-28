@@ -2,14 +2,14 @@
 name = "gstudy"
 version = "0.1.0"
 edition = "2018"
-
+resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 winit = { version = "0.25" }
-wgpu = "0.9"
+wgpu = { version = "0.10" , default-features = false, features = ["spirv"]}
 futures = "0.3"
-egui = "0.13"
+egui = "0.14"
 env_logger = "0.8"
 log = "0.4"
 lazy_static = "1.4"

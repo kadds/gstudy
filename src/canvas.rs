@@ -85,7 +85,7 @@ impl Canvas {
                         label: None,
                         entries: &[wgpu::BindGroupLayoutEntry {
                             binding: 0,
-                            visibility: wgpu::ShaderStage::FRAGMENT,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Texture {
                                 multisampled: false,
                                 view_dimension: wgpu::TextureViewDimension::D2,
@@ -136,7 +136,7 @@ impl Canvas {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -156,6 +156,7 @@ impl Canvas {
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             texture: &texture,
+            aspect: wgpu::TextureAspect::All,
         };
         let data_layout = wgpu::ImageDataLayout {
             offset: 0,

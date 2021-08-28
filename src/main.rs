@@ -252,10 +252,14 @@ fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
     }
 }
 
-
-fn module_item(ui: &mut egui::Ui, info: &ModuleInfo, select: &mut Option<&'static str>, mut rect: egui::Rect,
-               beg: bool, event_proxy: &mut EventLoopProxy<UserEvent>) -> f32 {
-
+fn module_item(
+    ui: &mut egui::Ui,
+    info: &ModuleInfo,
+    select: &mut Option<&'static str>,
+    mut rect: egui::Rect,
+    beg: bool,
+    event_proxy: &mut EventLoopProxy<UserEvent>,
+) -> f32 {
     // init position
     let fonts = ui.fonts();
     let row_height0 = fonts[egui::TextStyle::Button].row_height();
@@ -276,41 +280,55 @@ fn module_item(ui: &mut egui::Ui, info: &ModuleInfo, select: &mut Option<&'stati
     // allocate ui content rectangle
     let r = ui.allocate_rect(inner_rect, egui::Sense::click());
     let mut has_outer_box = false;
-    let widget =
-        loop {
-            if r.hovered() {
-                has_outer_box = true;
-                break ui.visuals().widgets.hovered;
-            } else {
-                if let Some(v) = select {
-                    if *v == info.name {
-                        has_outer_box = true;
-                        break ui.visuals().widgets.active;
-                    }
+    let widget = loop {
+        if r.hovered() {
+            has_outer_box = true;
+            break ui.visuals().widgets.hovered;
+        } else {
+            if let Some(v) = select {
+                if *v == info.name {
+                    has_outer_box = true;
+                    break ui.visuals().widgets.active;
                 }
-                break ui.visuals().widgets.inactive;
             }
-        };
-
+            break ui.visuals().widgets.inactive;
+        }
+    };
 
     // render
     let painter = ui.painter();
     if has_outer_box {
-        painter.rect(inner_rect, widget.corner_radius, widget.bg_fill, widget.bg_stroke);
+        painter.rect(
+            inner_rect,
+            widget.corner_radius,
+            widget.bg_fill,
+            widget.bg_stroke,
+        );
     }
 
     let color0 = widget.fg_stroke.color;
     let color1 = egui::color::tint_color_towards(color0, ui.visuals().window_fill());
 
-    painter.text(pos0, egui::Align2::LEFT_TOP, info.name, egui::TextStyle::Button, color0);
-    painter.text(pos1, egui::Align2::LEFT_TOP, info.desc, egui::TextStyle::Body, color1);
+    painter.text(
+        pos0,
+        egui::Align2::LEFT_TOP,
+        info.name,
+        egui::TextStyle::Button,
+        color0,
+    );
+    painter.text(
+        pos1,
+        egui::Align2::LEFT_TOP,
+        info.desc,
+        egui::TextStyle::Body,
+        color1,
+    );
 
     if !beg {
         // fill segment
         let vec = egui::vec2(0f32, line_stroke.width);
         painter.line_segment([rect.left_top() - vec, rect.right_top() - vec], line_stroke);
     }
-
 
     if r.double_clicked() {
         *select = Some(info.name);
@@ -326,7 +344,7 @@ fn modules_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
         state,
         ctx,
     } = context;
-    egui::ScrollArea::auto_sized().show_viewport(ui,|ui, viewport| {
+    egui::ScrollArea::auto_sized().show_viewport(ui, |ui, viewport| {
         let mut height = 0f32;
         let mut top = viewport.min.y + ui.max_rect().top();
         let left = ui.max_rect().left();
@@ -334,8 +352,8 @@ fn modules_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
 
         let mut beg = true;
         for item in &state.modules {
-            let rect = egui::Rect::from_min_size(egui::pos2(left, top as f32),
-            egui::vec2(width, height));
+            let rect =
+                egui::Rect::from_min_size(egui::pos2(left, top as f32), egui::vec2(width, height));
             height = module_item(ui, item, &mut state.select_module, rect, beg, event_proxy);
             top += height;
             beg = false;
