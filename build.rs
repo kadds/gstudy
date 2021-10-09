@@ -1,3 +1,43 @@
+use std::path::Path;
+
+fn compile_shaders(
+    path: &Path,
+    compiler: &mut shaderc::Compiler,
+    opt: &mut shaderc::CompileOptions,
+) {
+    let dirs = std::fs::read_dir(path).unwrap();
+    for f in dirs {
+        let f = f.unwrap().path();
+        let path = f.as_path();
+        if path.is_dir() {
+            compile_shaders(path, compiler, opt);
+        } else {
+            println!("{:?}", path);
+            let path_str = path.to_str().unwrap();
+            let ext = path.extension().unwrap().to_str().unwrap();
+            let shader_type = match ext {
+                "vert" => shaderc::ShaderKind::Vertex,
+                "frag" => shaderc::ShaderKind::Fragment,
+                _ => shaderc::ShaderKind::InferFromSource,
+            };
+            let file_content = std::fs::read_to_string(path).unwrap();
+            let result = compiler
+                .compile_into_spirv(&file_content, shader_type, path_str, "main", Some(&opt))
+                .unwrap();
+
+            let bytes_u8 = result.as_binary_u8();
+            let bytes = bytes_u8;
+
+            let compile_filename = path_str.replace("src/shaders/", "src/compile_shaders/");
+            let path = Path::new(&compile_filename).parent().unwrap();
+            if !path.exists() {
+                std::fs::create_dir_all(path).unwrap();
+            }
+            std::fs::write(&compile_filename, &bytes).unwrap();
+        }
+    }
+}
+
 fn main() {
     let mut compiler = shaderc::Compiler::new().unwrap();
     let mut options = shaderc::CompileOptions::new().unwrap();
@@ -7,34 +47,13 @@ fn main() {
         shaderc::EnvVersion::Vulkan1_2 as u32,
     );
 
-    let dirs = std::fs::read_dir("src/shaders/").unwrap();
-    for f in dirs {
-        let f = f.unwrap().path();
-        let path = f.as_path();
-        let path_str = path.to_str().unwrap();
-        let file_content = std::fs::read_to_string(path).unwrap();
-        let ext = path.extension().unwrap().to_str().unwrap();
-        let filename = path.file_stem().unwrap().to_str().unwrap();
-        let shader_type = match ext {
-            "vert" => shaderc::ShaderKind::Vertex,
-            "frag" => shaderc::ShaderKind::Fragment,
-            _ => {
-                panic!("unknown type");
-            }
-        };
-        let result = compiler
-            .compile_into_spirv(&file_content, shader_type, path_str, "main", Some(&options))
-            .unwrap();
+    compile_shaders(Path::new("src/shaders/"), &mut compiler, &mut options);
 
-        let bytes_u8 = result.as_binary_u8();
-        let bytes = bytes_u8;
-
-        let name = format!("src/compile_shaders/{}.{}", filename, ext);
-        let path = std::path::Path::new(&name).parent().unwrap();
-        if !path.exists() {
-            std::fs::create_dir_all(path).unwrap();
-        }
-        std::fs::write(&name, &bytes).unwrap();
-    }
     println!("cargo:rerun-if-changed={}", "src/shaders/");
+    #[cfg(windows)]
+    {
+        windows::build! {
+            Windows::Win32::System::Console::AttachConsole,
+        };
+    }
 }

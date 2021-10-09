@@ -38,8 +38,8 @@ impl Statistics {
         }
     }
 
-    pub fn set_frame_lock(&mut self, target_frame_secends: Option<f32>) {
-        self.target_frame_secends = target_frame_secends.map(|v| Duration::from_secs_f32(v));
+    pub fn set_frame_lock(&mut self, target_frame_seconds: Option<f32>) {
+        self.target_frame_secends = target_frame_seconds.map(|v| Duration::from_secs_f32(v));
     }
 
     pub fn new_frame(&mut self) {

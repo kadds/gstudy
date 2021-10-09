@@ -1,24 +1,24 @@
-use super::{Module, ModuleInfo};
+use std::sync::Arc;
 
-pub struct SoftwareRenderer {}
-impl SoftwareRenderer {
+use crate::render::{Camera, Canvas, Scene};
+
+use super::{ModuleFactory, ModuleInfo};
+
+pub struct SoftwareRendererFactory {}
+impl SoftwareRendererFactory {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Module for SoftwareRenderer {
+impl ModuleFactory for SoftwareRendererFactory {
     fn info(&self) -> ModuleInfo {
         ModuleInfo {
             name: "software renderer",
             desc: "a software renderer with shader pipeline",
         }
     }
-    fn run(&mut self) {}
-
-    fn stop(&mut self) {}
-
-    fn pause(&mut self) {}
-
-    fn resume(&mut self) {}
+    fn make_renderer(&self) -> Box<dyn super::ModuleRenderer> {
+        todo!();
+    }
 }

@@ -1,21 +1,30 @@
+#![feature(trait_alias)]
+#![feature(concat_idents)]
+#![feature(thread_spawn_unchecked)]
 #![windows_subsystem = "windows"]
-mod canvas;
-mod executor;
-mod maps;
+mod geometry;
 mod modules;
+mod render;
 mod renderer;
 mod statistics;
 mod types;
 mod ui;
 mod util;
 
-use canvas::Canvas;
-use executor::Executor;
+use render::Canvas;
+use render::Executor;
+use renderer::GpuContext;
+use renderer::GpuContextRc;
+use util::*;
+
+windows::include_bindings!();
+
 use futures::executor::block_on;
 use modules::ModuleInfo;
 use renderer::{RenderContext, Renderer, UpdateContext};
+use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
-use types::{Color, Size};
 use ui::FunctorProvider;
 use winit::{
     dpi::{LogicalPosition, LogicalSize, Position},
@@ -24,6 +33,9 @@ use winit::{
     platform::run_return::EventLoopExtRunReturn,
     window::{CursorIcon, WindowBuilder},
 };
+
+type Size = types::Size;
+type Color = types::Vec4f;
 
 #[derive(Debug, Clone)]
 pub enum UserEvent {
@@ -79,8 +91,8 @@ impl Default for UIState {
             fps: FpsState::default(),
             update_fps: FpsState::default(),
             clear_color: [0f32, 0f32, 0f32],
-            render_window_size: Size::new(100, 100),
-            canvas_size: Size::new(100, 100),
+            render_window_size: Size::new(400, 400),
+            canvas_size: Size::new(400, 400),
 
             modules: Vec::new(),
             select_module: None,
@@ -212,14 +224,14 @@ fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
 
     ui.label("render window width");
     ui.add(egui::Slider::new(
-        &mut state.render_window_size.width,
+        &mut state.render_window_size.x,
         100..=1024,
     ));
     ui.end_row();
 
     ui.label("render window height");
     ui.add(egui::Slider::new(
-        &mut state.render_window_size.height,
+        &mut state.render_window_size.y,
         100..=1024,
     ));
     ui.end_row();
@@ -227,7 +239,7 @@ fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
     let mut c = false;
     ui.label("canvas width");
     if ui
-        .add(egui::Slider::new(&mut state.canvas_size.width, 100..=1024))
+        .add(egui::Slider::new(&mut state.canvas_size.x, 100..=1024))
         .changed()
     {
         c = true;
@@ -236,7 +248,7 @@ fn control_ui(ui: &mut egui::Ui, context: &mut DrawContext) {
 
     ui.label("canvas height");
     if ui
-        .add(egui::Slider::new(&mut state.canvas_size.height, 100..=1024))
+        .add(egui::Slider::new(&mut state.canvas_size.y, 100..=1024))
         .changed()
     {
         c = true;
@@ -423,8 +435,8 @@ fn draw(
         .collapsible(false)
         .show(&ctx, |ui| {
             let size = egui::vec2(
-                state.render_window_size.width as f32,
-                state.render_window_size.height as f32,
+                state.render_window_size.x as f32,
+                state.render_window_size.y as f32,
             );
             ui.image(egui::TextureId::User(0), size);
         })
@@ -445,9 +457,9 @@ fn finish_ui(
         if output.cursor_icon == egui::CursorIcon::None {
             let _ = event_proxy.send_event(UserEvent::UpdateCursor(None));
         } else {
-            let _ = event_proxy.send_event(UserEvent::UpdateCursor(Some(
-                maps::match_winit_cursor(output.cursor_icon),
-            )));
+            let _ = event_proxy.send_event(UserEvent::UpdateCursor(Some(match_winit_cursor(
+                output.cursor_icon,
+            ))));
         }
         state.cursor = output.cursor_icon;
     }
@@ -475,7 +487,7 @@ fn finish_ui(
 }
 
 pub struct UIContext {
-    canvas: Canvas,
+    canvas: Arc<Canvas>,
     state: UIState,
     finish_state: FinishUIState,
     event_proxy: EventLoopProxy<UserEvent>,
@@ -483,8 +495,13 @@ pub struct UIContext {
 }
 
 impl UIContext {
-    pub fn new(canvas: Canvas, event_proxy: EventLoopProxy<UserEvent>) -> Self {
-        let executor = Executor::new();
+    pub fn new(
+        gpu_context: GpuContextRc,
+        size: Size,
+        event_proxy: EventLoopProxy<UserEvent>,
+    ) -> Self {
+        let executor = Executor::new(gpu_context);
+        let canvas = Arc::new(Canvas::new(size));
         let mut res = Self {
             canvas,
             event_proxy,
@@ -504,7 +521,7 @@ impl FunctorProvider for UIContext {
 
     fn get_texture<'s>(&'s self, id: u64) -> &'s wgpu::BindGroup {
         match id {
-            0 => self.canvas.get_texture().1,
+            0 => self.canvas.get_texture().2,
             _ => {
                 panic!("invalid texture id");
             }
@@ -527,10 +544,11 @@ impl FunctorProvider for UIContext {
     fn on_user_event(&mut self, event: &UserEvent) {
         match event {
             &UserEvent::CanvasResize(size) => {
-                self.canvas.resize_pixels(size);
+                self.canvas = Arc::new(Canvas::new(size));
+                self.executor.rerun(self.canvas.clone());
             }
             &UserEvent::ModuleChanged(name) => {
-                self.executor.run(name);
+                self.executor.run(name, self.canvas.clone());
             }
             _ => (),
         }
@@ -538,6 +556,10 @@ impl FunctorProvider for UIContext {
 }
 
 fn main() {
+    #[cfg(windows)]
+    unsafe {
+        Windows::Win32::System::Console::AttachConsole(u32::MAX);
+    }
     env_logger::init();
     let mut event_loop = EventLoop::with_user_event();
     let event_proxy = event_loop.create_proxy();
@@ -548,12 +570,19 @@ fn main() {
         .build(&event_loop)
         .unwrap();
 
-    let canvas = canvas::Canvas::new(Size::new(100, 100));
-    let provider = UIContext::new(canvas, event_proxy.clone());
+    let gpu_context = Arc::new(block_on(GpuContext::new(&window)));
 
+    let size = window.inner_size();
+    let size = Size::new(size.width, size.height);
+
+    let mut renderer = Renderer::new(size, gpu_context.clone());
+    let provider = UIContext::new(
+        gpu_context.clone(),
+        Size::new(400, 400),
+        event_proxy.clone(),
+    );
     let ui = Box::new(ui::UI::new(provider));
 
-    let mut renderer = block_on(Renderer::new(&window));
     renderer.add(ui);
 
     let mut target_tick = Instant::now();
@@ -629,14 +658,14 @@ fn main() {
                     UserEvent::UpdateIme(pos) => {
                         window.set_ime_position(pos);
                     }
-                    UserEvent::ClearColor(c) => {
+                    UserEvent::ClearColor(c) => unsafe {
                         renderer.set_clear_color(c.map(|c| wgpu::Color {
-                            r: c.r as f64,
-                            b: c.b as f64,
-                            g: c.g as f64,
-                            a: c.a as f64,
+                            r: c.get_unchecked(0).clone() as f64,
+                            g: c.get_unchecked(1).clone() as f64,
+                            b: c.get_unchecked(2).clone() as f64,
+                            a: c.get_unchecked(3).clone() as f64,
                         }));
-                    }
+                    },
                     UserEvent::FullScreen(set) => {
                         if set {
                             window

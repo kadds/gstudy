@@ -14,6 +14,15 @@ env_logger = "0.8"
 log = "0.4"
 lazy_static = "1.4"
 tinyfiledialogs = "3.0"
+nalgebra = "0.29"
+spirq = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = "0.21.1"
+
 
 [build-dependencies]
 shaderc = "0.7"
+
+[target.'cfg(windows)'.build-dependencies]
+windows = "0.21.1"

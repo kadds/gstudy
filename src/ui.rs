@@ -1,16 +1,20 @@
 use crate::{
-    maps,
+    modules::hardware_renderer::common::{FsTarget, PipelinePass, PipelineReflector, Position},
     renderer::{RenderContext, UpdateContext},
-    types::*,
+    types,
     util::*,
     UserEvent,
 };
 use std::{num::NonZeroU32, time::Duration};
 
 use egui::{CtxRef, RawInput};
+use wgpu::PrimitiveState;
 use winit::event::WindowEvent;
 
 use crate::renderer::RenderObject;
+
+type Size = types::Size;
+type Rect = types::Point4<u32>;
 
 #[derive(Debug, Clone)]
 struct MatBuffer {
@@ -48,10 +52,9 @@ struct DynRenderState {
 }
 
 struct Inner {
-    pipeline: wgpu::RenderPipeline,
+    pipeline_pass: PipelinePass,
     bind_group: wgpu::BindGroup,
     mat_buffer: wgpu::Buffer,
-    texture_bind_group_layout: wgpu::BindGroupLayout,
     inner_size: Size,
     size_changed: bool,
     last_mouse_pos: (f32, f32),
@@ -126,10 +129,7 @@ where
 
         if inner.size_changed {
             let mat_buffer = MatBuffer {
-                size: [
-                    inner.inner_size.width as f32,
-                    inner.inner_size.height as f32,
-                ],
+                size: [inner.inner_size.x as f32, inner.inner_size.y as f32],
             };
             ctx.queue
                 .write_buffer(&inner.mat_buffer, 0, any_as_u8_slice(&mat_buffer));
@@ -140,15 +140,15 @@ where
         for mesh in meshes {
             let rect = mesh.0;
             let mesh = &mut mesh.1;
-            let x = (rect.left() as u32).clamp(0, inner.inner_size.width);
-            let y = (rect.top() as u32).clamp(0, inner.inner_size.height);
-            let width = (rect.width() as u32).clamp(0, inner.inner_size.width - x);
-            let height = (rect.height() as u32).clamp(0, inner.inner_size.height - y);
+            let x = (rect.left() as u32).clamp(0, inner.inner_size.x);
+            let y = (rect.top() as u32).clamp(0, inner.inner_size.y);
+            let width = (rect.width() as u32).clamp(0, inner.inner_size.x - x);
+            let height = (rect.height() as u32).clamp(0, inner.inner_size.y - y);
 
             if width == 0 || height == 0 {
                 continue;
             }
-            let rect = Rect::new(x as i32, y as i32, width as i32, height as i32);
+            let rect = Rect::new(x, y, width, height);
 
             state.commit(
                 &mut ctx,
@@ -156,7 +156,7 @@ where
                 &mut mesh.vertices,
                 rect,
                 mesh.texture_id,
-                &inner.texture_bind_group_layout,
+                &inner.pipeline_pass.bind_group_layouts[1],
                 self.ui_ctx.clone(),
             );
         }
@@ -165,16 +165,11 @@ where
     fn render<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>) {
         let inner = self.inner.as_mut().unwrap();
         let state = &mut inner.dyn_state;
-        pass.set_pipeline(&inner.pipeline);
+        pass.set_pipeline(&inner.pipeline_pass.pipeline);
         pass.set_bind_group(0, &inner.bind_group, &[]);
         for stage in &state.stages {
             let rect = stage.rect;
-            pass.set_scissor_rect(
-                rect.x as u32,
-                rect.y as u32,
-                rect.width as u32,
-                rect.height as u32,
-            );
+            pass.set_scissor_rect(rect.x as u32, rect.y as u32, rect.z as u32, rect.w as u32);
             let texture_bind_group = match stage.texture_id {
                 egui::TextureId::Egui => &state.texture.as_ref().unwrap().bind_group,
                 egui::TextureId::User(id) => self.provider.get_texture(id),
@@ -194,58 +189,23 @@ where
         }
     }
 
-    fn init_renderer(&mut self, device: &mut wgpu::Device) {
-        let vs_source =
-            device.create_shader_module(&wgpu::include_spirv!("compile_shaders/ui.vert"));
-        let fs_source =
-            device.create_shader_module(&wgpu::include_spirv!("compile_shaders/ui.frag"));
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler {
-                        comparison: false,
-                        filtering: true,
-                    },
-                    count: None,
-                },
-            ],
-        });
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                    },
-                    count: None,
-                }],
-            });
+    fn init_renderer(&mut self, device: &wgpu::Device) {
+        let pipeline_pass = PipelineReflector::new(Some("ui"), device)
+            .add_vs(&wgpu::include_spirv!("compile_shaders/ui.vert"))
+            .add_fs(
+                &wgpu::include_spirv!("compile_shaders/ui.frag"),
+                FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8UnormSrgb),
+            )
+            .build_default();
 
         let mat_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
+            label: Some("ui"),
             size: 8,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
+            label: Some("ui"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -259,8 +219,8 @@ where
             border_color: None,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &bind_group_layout,
+            label: Some("ui"),
+            layout: &pipeline_pass.bind_group_layouts[0],
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -276,79 +236,11 @@ where
                 },
             ],
         });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-        let vertex_buffer_layout = [wgpu::VertexBufferLayout {
-            array_stride: 4 * 5 as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 4 * 2,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Uint32,
-                    offset: 4 * 4,
-                    shader_location: 2,
-                },
-            ],
-        }];
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &vs_source,
-                entry_point: "main",
-                buffers: &vertex_buffer_layout,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fs_source,
-                entry_point: "main",
-                targets: &[wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::OneMinusDstAlpha,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::all(),
-                }],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                clamp_depth: false,
-                conservative: false,
-                cull_mode: None,
-                front_face: wgpu::FrontFace::default(),
-                polygon_mode: wgpu::PolygonMode::default(),
-                strip_index_format: None,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-        });
 
         self.inner = Some(Inner {
-            pipeline,
+            pipeline_pass,
             bind_group,
             mat_buffer,
-            texture_bind_group_layout,
             dyn_state: DynRenderState::new(),
             inner_size: Size::new(0, 0),
             last_mouse_pos: (0f32, 0f32),
@@ -414,7 +306,7 @@ where
                 input,
                 is_synthetic: _,
             } => {
-                let key = match maps::match_egui_key(
+                let key = match match_egui_key(
                     input
                         .virtual_keycode
                         .unwrap_or(winit::event::VirtualKeyCode::Apostrophe),
@@ -712,7 +604,7 @@ impl DynRenderState {
         ctx: &mut RenderContext<'_>,
         texture: &Texture,
         bytes: usize,
-        pixels: &[u8],
+        fixed_pixels: &[u8],
     ) {
         let size = texture.size;
         let dst = wgpu::ImageCopyTexture {
@@ -723,17 +615,24 @@ impl DynRenderState {
         };
         let data_layout = wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: NonZeroU32::new((bytes / size.height as usize) as u32),
-            rows_per_image: NonZeroU32::new(size.height as u32),
+            bytes_per_row: NonZeroU32::new(((bytes / size.y as usize) * 4) as u32),
+            rows_per_image: NonZeroU32::new(size.y as u32),
         };
         // copy texture data
+        let mut pixels: Vec<u8> = Vec::with_capacity(fixed_pixels.len() * 4);
+        for srgba in fixed_pixels {
+            pixels.push(*srgba);
+            pixels.push(*srgba);
+            pixels.push(*srgba);
+            pixels.push(*srgba);
+        }
         ctx.queue.write_texture(
             dst,
-            pixels,
+            &pixels,
             data_layout,
             wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+                width: size.x,
+                height: size.y,
                 depth_or_array_layers: 1,
             },
         );
@@ -749,14 +648,14 @@ impl DynRenderState {
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
+                width: size.x,
+                height: size.y,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());

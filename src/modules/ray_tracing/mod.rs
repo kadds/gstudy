@@ -1,16 +1,18 @@
-use std::thread::{self, Thread};
+use std::sync::Arc;
 
-use super::{Module, ModuleInfo};
+use crate::render::{Camera, Canvas, Scene};
 
-pub struct RayTracing {}
+use super::{ModuleFactory, ModuleInfo};
 
-impl RayTracing {
+pub struct RayTracingFactory {}
+
+impl RayTracingFactory {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Module for RayTracing {
+impl ModuleFactory for RayTracingFactory {
     fn info(&self) -> ModuleInfo {
         ModuleInfo {
             name: "ray tracing",
@@ -18,11 +20,7 @@ impl Module for RayTracing {
         }
     }
 
-    fn run(&mut self) {}
-
-    fn stop(&mut self) {}
-
-    fn pause(&mut self) {}
-
-    fn resume(&mut self) {}
+    fn make_renderer(&self) -> Box<dyn super::ModuleRenderer> {
+        todo!();
+    }
 }
