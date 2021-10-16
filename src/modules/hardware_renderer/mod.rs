@@ -54,7 +54,7 @@ impl ModuleRenderer for HardwareRenderer {
         }
         let label = Some("hardware renderer");
         let mut encoder = p
-            .gpu_context
+            .gpu
             .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         let default_render_pass_desc = wgpu::RenderPassDescriptor {
@@ -82,7 +82,7 @@ impl ModuleRenderer for HardwareRenderer {
             depth_stencil_attachment: None,
         };
         let mut ctx = MaterialRenderContext {
-            gpu_context: &p.gpu_context,
+            gpu: &p.gpu,
             camera: p.camera,
             scene: p.scene,
             encoder: &mut encoder,
@@ -96,9 +96,7 @@ impl ModuleRenderer for HardwareRenderer {
             }
             ctx.final_pass_desc = &last_render_pass_desc;
         }
-        p.gpu_context
-            .queue()
-            .submit(std::iter::once(encoder.finish()))
+        p.gpu.queue().submit(std::iter::once(encoder.finish()))
     }
 
     fn stop(&mut self) {}

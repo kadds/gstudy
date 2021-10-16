@@ -216,7 +216,7 @@ impl<'a> PipelineReflector<'a> {
                     match ty {
                         spirq::Type::Image(img) => {
                             let view_dimension = image_to_wgpu_image(img.arng).unwrap();
-                            let mut multisampled = false;
+                            let multisampled = false;
                             let sample_type = match img.unit_fmt {
                                 ImageUnitFormat::Color(t) => {
                                     TextureSampleType::Float { filterable: false }

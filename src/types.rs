@@ -13,6 +13,7 @@ pub type Point2<T> = nalgebra::Point2<T>;
 pub type Point3<T> = nalgebra::Point3<T>;
 pub type Point4<T> = nalgebra::Point4<T>;
 pub type Size = Point2<u32>;
+pub type Color = Vec4f;
 pub type Quaternion = nalgebra::UnitQuaternion<f32>;
 pub type Rotation3 = nalgebra::geometry::Rotation3<f32>;
 pub type Translation3 = nalgebra::geometry::Translation3<f32>;

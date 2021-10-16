@@ -1,24 +1,52 @@
 use crate::{
+    gpu_context::{GpuContext, GpuContextRef, GpuInstance, GpuInstanceRef},
     modules::hardware_renderer::common::{FsTarget, PipelinePass, PipelineReflector, Position},
-    renderer::{RenderContext, UpdateContext},
-    types,
+    render_window::{RenderWindowEvent, RenderWindowInputEvent, UserEvent, WindowUserEvent},
+    statistics::Statistics,
+    types::{self, Vec4f},
     util::*,
-    UserEvent,
 };
-use std::{num::NonZeroU32, time::Duration};
+use std::{
+    num::NonZeroU32,
+    time::{Duration, Instant},
+};
 
 use egui::{CtxRef, RawInput};
-use wgpu::PrimitiveState;
-use winit::event::WindowEvent;
+use winit::{event::WindowEvent, event_loop::EventLoopProxy};
 
-use crate::renderer::RenderObject;
+use self::logic::UILogicRef;
+
+pub mod logic;
+
+mod subwindow;
 
 type Size = types::Size;
 type Rect = types::Point4<u32>;
 
+use wgpu::*;
+
+#[derive(Debug)]
+pub struct RenderContext<'a> {
+    pub queue: &'a Queue,
+    pub device: &'a Device,
+    pub encoder: &'a mut CommandEncoder,
+}
+
 #[derive(Debug, Clone)]
 struct MatBuffer {
     size: [f32; 2],
+}
+
+struct Inner {
+    pipeline_pass: PipelinePass,
+    bind_group: wgpu::BindGroup,
+    mat_buffer: wgpu::Buffer,
+    inner_size: Size,
+    size_changed: bool,
+    last_mouse_pos: (f32, f32),
+    last_modifiers: egui::Modifiers,
+    dyn_state: DynRenderState,
+    meshes: Option<Vec<egui::ClippedMesh>>,
 }
 
 const DEFAULT_VERTEX_BUFFER_SIZE: usize = 1 << 18;
@@ -51,79 +79,138 @@ struct DynRenderState {
     index_offset: usize,
 }
 
-struct Inner {
-    pipeline_pass: PipelinePass,
-    bind_group: wgpu::BindGroup,
-    mat_buffer: wgpu::Buffer,
-    inner_size: Size,
-    size_changed: bool,
-    last_mouse_pos: (f32, f32),
-    last_modifiers: egui::Modifiers,
-    dyn_state: DynRenderState,
-    meshes: Option<Vec<egui::ClippedMesh>>,
-}
-
-pub trait FunctorProvider {
-    fn prepare_texture(&mut self, ctx: RenderContext);
-    fn get_texture<'a>(&'a self, id: u64) -> &'a wgpu::BindGroup;
-    fn update(&mut self, ctx: egui::CtxRef, update_context: &UpdateContext);
-    fn finish(&mut self, output: &egui::Output);
-    fn on_user_event(&mut self, event: &UserEvent);
-}
-
-pub struct UI<P>
-where
-    P: FunctorProvider,
-{
+pub struct UIRenderer {
     ui_ctx: egui::CtxRef,
     input: RawInput,
-    inner: Option<Inner>,
-    provider: P,
+    inner: Inner,
+    clear_color: Option<wgpu::Color>,
+    gpu_context: GpuContextRef,
+    gpu_instance: GpuInstanceRef,
+    ui_logic: UILogicRef,
+    event_proxy: EventLoopProxy<UserEvent>,
+    cursor: egui::CursorIcon,
 }
 
-impl<P> UI<P>
-where
-    P: FunctorProvider,
-{
-    pub fn new(provider: P) -> Self {
+impl UIRenderer {
+    pub fn new(
+        gpu_context: GpuContextRef,
+        size: Size,
+        event_proxy: EventLoopProxy<UserEvent>,
+        ui_logic: UILogicRef,
+    ) -> Self {
+        let instance = gpu_context.instance();
+        log::info!("new ui renderer {:?}", instance.id());
+        let inner = Self::init_renderer(&instance, size);
         Self {
             ui_ctx: egui::CtxRef::default(),
             input: RawInput::default(),
-            inner: None,
-            provider,
+            inner,
+            clear_color: Some(wgpu::Color::BLACK),
+            gpu_context: gpu_context.clone(),
+            ui_logic,
+            gpu_instance: instance,
+            event_proxy,
+            cursor: egui::CursorIcon::Default,
         }
     }
-}
 
-impl<P> RenderObject for UI<P>
-where
-    P: FunctorProvider,
-{
-    fn zlevel(&self) -> i64 {
-        0
+    pub fn logic(&self) -> UILogicRef {
+        self.ui_logic.clone()
     }
 
-    fn update(&mut self, ctx: UpdateContext) -> bool {
-        let inner = self.inner.as_mut().unwrap();
+    pub fn event_proxy(&self) -> EventLoopProxy<UserEvent> {
+        self.event_proxy.clone()
+    }
+
+    pub fn set_clear_color(&mut self, c: Option<Vec4f>) {
+        unsafe {
+            let color = c.map(|c| wgpu::Color {
+                r: c.get_unchecked(0).clone() as f64,
+                g: c.get_unchecked(1).clone() as f64,
+                b: c.get_unchecked(2).clone() as f64,
+                a: c.get_unchecked(3).clone() as f64,
+            });
+            log::info!("clear color {:?}", color);
+            self.clear_color = color;
+        }
+    }
+
+    pub fn render(&mut self) {
+        let frame = match self.gpu_instance.surface().get_current_frame() {
+            Ok(v) => v.output,
+            Err(e) => {
+                log::error!("get swapchain fail. {}", e);
+                return;
+            }
+        };
+
+        let mut encoder =
+            self.gpu_instance
+                .device()
+                .create_command_encoder(&CommandEncoderDescriptor {
+                    label: Some("ui encoder"),
+                });
+        self.prepare_render(&mut encoder);
+        {
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let render_pass_desc = RenderPassDescriptor {
+                label: None,
+                color_attachments: &[RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: Operations {
+                        load: self
+                            .clear_color
+                            .map_or_else(|| wgpu::LoadOp::Load, |v| wgpu::LoadOp::Clear(v)),
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: None,
+            };
+            let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
+            self.render_inner(&mut render_pass);
+        }
+        self.gpu_instance
+            .queue()
+            .submit(std::iter::once(encoder.finish()));
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        self.gpu_context.rebuild(Size::new(width, height));
+    }
+
+    pub fn rebind_window(&mut self, logic_window_id: u64) {
+        self.ui_logic.rebind_logic_window(logic_window_id);
+    }
+
+    pub fn update(&mut self, statistics: &Statistics) -> bool {
+        let inner = &mut self.inner;
         let mut input = RawInput::default();
         std::mem::swap(&mut input, &mut self.input);
-        let time: Duration = ctx.update_statistics.elapsed();
+        let time: Duration = statistics.elapsed();
         input.time = Some(time.as_micros() as f64 / 1000_000f64);
         input.modifiers = inner.last_modifiers.clone();
 
         let ui_ctx = &mut self.ui_ctx;
 
         ui_ctx.begin_frame(input);
-        self.provider.update(ui_ctx.clone(), &ctx);
+        self.ui_logic
+            .update(ui_ctx.clone(), statistics, &self.event_proxy);
         let (output, shapes) = ui_ctx.end_frame();
         let meshes = ui_ctx.tessellate(shapes);
         inner.meshes = Some(meshes);
-        self.provider.finish(&output);
+        self.ui_logic
+            .finish(&output, self.cursor, &self.event_proxy);
         output.needs_repaint
     }
 
-    fn prepare_render(&mut self, mut ctx: RenderContext) {
-        let inner = self.inner.as_mut().unwrap();
+    fn prepare_render(&mut self, encoder: &mut CommandEncoder) {
+        let inner = &mut self.inner;
         let state = &mut inner.dyn_state;
         state.new_frame();
 
@@ -131,8 +218,11 @@ where
             let mat_buffer = MatBuffer {
                 size: [inner.inner_size.x as f32, inner.inner_size.y as f32],
             };
-            ctx.queue
-                .write_buffer(&inner.mat_buffer, 0, any_as_u8_slice(&mat_buffer));
+            self.gpu_instance.queue().write_buffer(
+                &inner.mat_buffer,
+                0,
+                any_as_u8_slice(&mat_buffer),
+            );
             inner.size_changed = false;
         }
         let meshes = inner.meshes.as_mut().unwrap();
@@ -151,7 +241,7 @@ where
             let rect = Rect::new(x, y, width, height);
 
             state.commit(
-                &mut ctx,
+                &self.gpu_instance,
                 &mut mesh.indices,
                 &mut mesh.vertices,
                 rect,
@@ -160,10 +250,10 @@ where
                 self.ui_ctx.clone(),
             );
         }
-        self.provider.prepare_texture(ctx);
+        self.ui_logic.prepare_texture();
     }
-    fn render<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>) {
-        let inner = self.inner.as_mut().unwrap();
+    fn render_inner<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>) {
+        let inner = &mut self.inner;
         let state = &mut inner.dyn_state;
         pass.set_pipeline(&inner.pipeline_pass.pipeline);
         pass.set_bind_group(0, &inner.bind_group, &[]);
@@ -172,7 +262,7 @@ where
             pass.set_scissor_rect(rect.x as u32, rect.y as u32, rect.z as u32, rect.w as u32);
             let texture_bind_group = match stage.texture_id {
                 egui::TextureId::Egui => &state.texture.as_ref().unwrap().bind_group,
-                egui::TextureId::User(id) => self.provider.get_texture(id),
+                egui::TextureId::User(id) => self.ui_logic.get_texture(id),
             };
 
             // bind texture
@@ -189,11 +279,12 @@ where
         }
     }
 
-    fn init_renderer(&mut self, device: &wgpu::Device) {
+    fn init_renderer(gpu: &GpuInstance, size: Size) -> Inner {
+        let device = gpu.device();
         let pipeline_pass = PipelineReflector::new(Some("ui"), device)
-            .add_vs(&wgpu::include_spirv!("compile_shaders/ui.vert"))
+            .add_vs(&wgpu::include_spirv!("../compile_shaders/ui.vert"))
             .add_fs(
-                &wgpu::include_spirv!("compile_shaders/ui.frag"),
+                &wgpu::include_spirv!("../compile_shaders/ui.frag"),
                 FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8UnormSrgb),
             )
             .build_default();
@@ -236,13 +327,14 @@ where
                 },
             ],
         });
+        log::info!("init renderer done");
 
-        self.inner = Some(Inner {
+        Inner {
             pipeline_pass,
             bind_group,
             mat_buffer,
             dyn_state: DynRenderState::new(),
-            inner_size: Size::new(0, 0),
+            inner_size: size,
             last_mouse_pos: (0f32, 0f32),
             last_modifiers: egui::Modifiers {
                 alt: false,
@@ -253,144 +345,130 @@ where
             },
             size_changed: true,
             meshes: None,
-        });
+        }
     }
 
-    fn on_user_event(&mut self, event: &UserEvent) {
-        self.provider.on_user_event(event);
-    }
-
-    fn on_event(&mut self, event: &WindowEvent) {
-        let inner = match self.inner.as_mut() {
-            Some(inner) => inner,
-            None => {
-                return;
-            }
-        };
+    pub fn on_event(&mut self, event: &RenderWindowEvent) {
+        let inner = &mut self.inner;
         match event {
-            WindowEvent::Resized(size) => {
-                inner.inner_size = Size::new(size.width, size.height);
+            RenderWindowEvent::Resized(size) => {
+                inner.inner_size = *size;
                 inner.size_changed = true;
                 self.input.screen_rect = Some(egui::Rect {
                     min: egui::Pos2::new(0f32, 0f32),
-                    max: egui::Pos2::new(size.width as f32, size.height as f32),
-                })
-            }
-            WindowEvent::ScaleFactorChanged {
-                scale_factor: _,
-                new_inner_size,
-            } => {
-                let size = new_inner_size;
-                inner.inner_size = Size::new(size.width, size.height);
-                inner.size_changed = true;
-                self.input.screen_rect = Some(egui::Rect {
-                    min: egui::Pos2::new(0f32, 0f32),
-                    max: egui::Pos2::new(size.width as f32, size.height as f32),
-                })
-            }
-            WindowEvent::ModifiersChanged(state) => {
-                inner.last_modifiers.alt = state.alt();
-                inner.last_modifiers.ctrl = state.ctrl();
-                inner.last_modifiers.command = state.logo();
-                inner.last_modifiers.shift = state.shift();
-                inner.last_modifiers.mac_cmd = false;
-                if cfg!(targetos = "macos") {
-                    inner.last_modifiers.mac_cmd = inner.last_modifiers.command;
-                } else {
-                    inner.last_modifiers.command = inner.last_modifiers.ctrl;
-                }
-                // log::info!("{:?}", inner.last_modifiers);
-            }
-            WindowEvent::KeyboardInput {
-                device_id: _,
-                input,
-                is_synthetic: _,
-            } => {
-                let key = match match_egui_key(
-                    input
-                        .virtual_keycode
-                        .unwrap_or(winit::event::VirtualKeyCode::Apostrophe),
-                ) {
-                    Some(k) => k,
-                    None => {
-                        return;
-                    }
-                };
-                // log::info!("k {:?}", key);
-                if key == egui::Key::C && inner.last_modifiers.command {
-                    self.input.events.push(egui::Event::Copy);
-                }
-                if key == egui::Key::X && inner.last_modifiers.command {
-                    self.input.events.push(egui::Event::Cut);
-                }
-                self.input.events.push(egui::Event::Key {
-                    pressed: input.state == winit::event::ElementState::Pressed,
-                    modifiers: inner.last_modifiers,
-                    key,
+                    max: egui::Pos2::new(size.x as f32, size.y as f32),
                 });
+                self.resize(size.x as u32, size.y as u32);
             }
-            WindowEvent::MouseWheel {
-                device_id: _,
-                delta,
-                phase: _,
-                modifiers: _,
-            } => {
-                self.input.scroll_delta = match *delta {
-                    winit::event::MouseScrollDelta::LineDelta(x, y) => {
-                        egui::Vec2::new(x * 50f32, y * 50f32)
+            RenderWindowEvent::UserEvent(event) => match event {
+                WindowUserEvent::UpdateCursor(cursor) => {
+                    self.cursor = *cursor;
+                }
+                _ => (),
+            },
+            RenderWindowEvent::Input(event) => match event {
+                RenderWindowInputEvent::ModifiersChanged(state) => {
+                    inner.last_modifiers.alt = state.alt();
+                    inner.last_modifiers.ctrl = state.ctrl();
+                    inner.last_modifiers.command = state.logo();
+                    inner.last_modifiers.shift = state.shift();
+                    inner.last_modifiers.mac_cmd = false;
+                    if cfg!(targetos = "macos") {
+                        inner.last_modifiers.mac_cmd = inner.last_modifiers.command;
+                    } else {
+                        inner.last_modifiers.command = inner.last_modifiers.ctrl;
                     }
-                    winit::event::MouseScrollDelta::PixelDelta(a) => {
-                        egui::Vec2::new(a.x as f32, a.y as f32)
+                    // log::info!("{:?}", inner.last_modifiers);
+                }
+                RenderWindowInputEvent::KeyboardInput {
+                    device_id: _,
+                    input,
+                    is_synthetic: _,
+                } => {
+                    let key = match match_egui_key(
+                        input
+                            .virtual_keycode
+                            .unwrap_or(winit::event::VirtualKeyCode::Apostrophe),
+                    ) {
+                        Some(k) => k,
+                        None => {
+                            return;
+                        }
+                    };
+                    // log::info!("k {:?}", key);
+                    if key == egui::Key::C && inner.last_modifiers.command {
+                        self.input.events.push(egui::Event::Copy);
                     }
-                };
-            }
-            WindowEvent::CursorLeft { device_id: _ } => {
-                self.input.events.push(egui::Event::PointerGone {});
-            }
-            WindowEvent::CursorMoved {
-                device_id: _,
-                position,
-                modifiers: _,
-            } => {
-                self.input
-                    .events
-                    .push(egui::Event::PointerMoved(egui::Pos2::new(
-                        position.x as f32,
-                        position.y as f32,
-                    )));
-                inner.last_mouse_pos = (position.x as f32, position.y as f32);
-            }
-            WindowEvent::MouseInput {
-                device_id: _,
-                state,
-                button,
-                modifiers: _,
-            } => {
-                let button = match button {
-                    winit::event::MouseButton::Left => egui::PointerButton::Primary,
-                    winit::event::MouseButton::Right => egui::PointerButton::Secondary,
-                    winit::event::MouseButton::Middle => egui::PointerButton::Middle,
-                    winit::event::MouseButton::Other(_) => {
-                        return;
+                    if key == egui::Key::X && inner.last_modifiers.command {
+                        self.input.events.push(egui::Event::Cut);
                     }
-                };
-                let pressed = match state {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-                self.input.events.push(egui::Event::PointerButton {
-                    pos: egui::pos2(inner.last_mouse_pos.0, inner.last_mouse_pos.1),
-                    modifiers: inner.last_modifiers,
-                    pressed,
+                    self.input.events.push(egui::Event::Key {
+                        pressed: input.state == winit::event::ElementState::Pressed,
+                        modifiers: inner.last_modifiers,
+                        key,
+                    });
+                }
+                RenderWindowInputEvent::MouseWheel {
+                    device_id: _,
+                    delta,
+                    phase: _,
+                } => {
+                    self.input.scroll_delta = match *delta {
+                        winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                            egui::Vec2::new(x * 50f32, y * 50f32)
+                        }
+                        winit::event::MouseScrollDelta::PixelDelta(a) => {
+                            egui::Vec2::new(a.x as f32, a.y as f32)
+                        }
+                    };
+                }
+                RenderWindowInputEvent::CursorLeft { device_id: _ } => {
+                    self.input.events.push(egui::Event::PointerGone);
+                }
+                &RenderWindowInputEvent::CursorMoved {
+                    device_id: _,
+                    position,
+                } => {
+                    self.input
+                        .events
+                        .push(egui::Event::PointerMoved(egui::Pos2::new(
+                            position.x as f32,
+                            position.y as f32,
+                        )));
+                    inner.last_mouse_pos = (position.x as f32, position.y as f32);
+                }
+                RenderWindowInputEvent::MouseInput {
+                    device_id: _,
+                    state,
                     button,
-                });
-            }
-            WindowEvent::ReceivedCharacter(c) => {
-                let c = *c;
-                if !c.is_ascii_control() {
-                    self.input.events.push(egui::Event::Text(c.to_string()));
+                } => {
+                    let button = match button {
+                        winit::event::MouseButton::Left => egui::PointerButton::Primary,
+                        winit::event::MouseButton::Right => egui::PointerButton::Secondary,
+                        winit::event::MouseButton::Middle => egui::PointerButton::Middle,
+                        winit::event::MouseButton::Other(_) => {
+                            return;
+                        }
+                    };
+                    let pressed = match state {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                    self.input.events.push(egui::Event::PointerButton {
+                        pos: egui::pos2(inner.last_mouse_pos.0, inner.last_mouse_pos.1),
+                        modifiers: inner.last_modifiers,
+                        pressed,
+                        button,
+                    });
                 }
-            }
+                RenderWindowInputEvent::ReceivedCharacter(c) => {
+                    let c = *c;
+                    if !c.is_ascii_control() {
+                        self.input.events.push(egui::Event::Text(c.to_string()));
+                    }
+                }
+                _ => (),
+            },
             _ => (),
         };
     }
@@ -422,7 +500,7 @@ impl DynRenderState {
 
     pub fn commit(
         &mut self,
-        ctx: &mut RenderContext<'_>,
+        gpu: &GpuInstance,
         indices: &mut [u32],
         vertices: &mut [egui::epaint::Vertex],
         rect: Rect,
@@ -433,8 +511,8 @@ impl DynRenderState {
         let mut index_cursor = 0;
 
         while index_cursor < indices.len() {
-            self.prepare_index_buffer(ctx, self.index_offset);
-            self.prepare_vertex_buffer(ctx, self.vertex_offset);
+            self.prepare_index_buffer(gpu, self.index_offset);
+            self.prepare_vertex_buffer(gpu, self.vertex_offset);
 
             let (index_buffer, iused) = self.index_buffers.get_mut(self.index_offset).unwrap();
             let (vertex_buffer, vused) = self.vertex_buffers.get_mut(self.vertex_offset).unwrap();
@@ -486,12 +564,14 @@ impl DynRenderState {
             }
             let vertices_new = &vertices[(min_vindex as usize)..=(max_vindex as usize)];
 
-            ctx.queue.write_buffer(
+            let queue = gpu.queue();
+
+            queue.write_buffer(
                 &index_buffer,
                 (*iused as u64) * std::mem::size_of::<u32>() as u64,
                 any_as_u8_slice_array(indices_new),
             );
-            ctx.queue.write_buffer(
+            queue.write_buffer(
                 &vertex_buffer,
                 (*vused as u64) * std::mem::size_of::<egui::paint::Vertex>() as u64,
                 any_as_u8_slice_array(vertices_new),
@@ -514,14 +594,14 @@ impl DynRenderState {
                 self.vertex_offset += 1;
             }
         }
-        self.update_texture(ctx, &texture_bind_group_layout, ui_ctx);
+        self.update_texture(gpu, &texture_bind_group_layout, ui_ctx);
         // log::info!("render stages {:?}", self.stages);
     }
 
-    fn prepare_vertex_buffer(&mut self, ctx: &mut RenderContext<'_>, vertex_offset: usize) {
+    fn prepare_vertex_buffer(&mut self, gpu: &GpuInstance, vertex_offset: usize) {
         if vertex_offset >= self.vertex_buffers.len() {
             let buf = self.new_buffer(
-                ctx,
+                gpu,
                 wgpu::BufferUsages::VERTEX,
                 (DEFAULT_VERTEX_BUFFER_SIZE * std::mem::size_of::<egui::epaint::Vertex>()) as u64,
             );
@@ -529,10 +609,10 @@ impl DynRenderState {
         }
     }
 
-    fn prepare_index_buffer(&mut self, ctx: &mut RenderContext<'_>, index_offset: usize) {
+    fn prepare_index_buffer(&mut self, gpu: &GpuInstance, index_offset: usize) {
         if index_offset >= self.index_buffers.len() {
             let buf = self.new_buffer(
-                ctx,
+                gpu,
                 wgpu::BufferUsages::INDEX,
                 (DEFAULT_INDEX_BUFFER_SIZE * std::mem::size_of::<u32>()) as u64,
             );
@@ -549,11 +629,11 @@ impl DynRenderState {
 
     fn new_buffer(
         &self,
-        ctx: &mut RenderContext<'_>,
+        gpu: &GpuInstance,
         buffer_type: wgpu::BufferUsages,
         size: u64,
     ) -> wgpu::Buffer {
-        let mat_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let mat_buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size,
             usage: wgpu::BufferUsages::COPY_DST | buffer_type,
@@ -564,7 +644,7 @@ impl DynRenderState {
 
     fn update_texture(
         &mut self,
-        ctx: &mut RenderContext<'_>,
+        gpu: &GpuInstance,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         ui_ctx: egui::CtxRef,
     ) {
@@ -591,17 +671,17 @@ impl DynRenderState {
         }
 
         if need_create {
-            let texture = self.new_texture(ctx, &texture_bind_group_layout, size, version);
+            let texture = self.new_texture(gpu, &texture_bind_group_layout, size, version);
             self.texture = Some(texture);
         }
         let texture = self.texture.as_ref().unwrap();
 
-        self.copy_texture(ctx, texture, bytes, &ui_ctx.texture().pixels);
+        self.copy_texture(gpu, texture, bytes, &ui_ctx.texture().pixels);
     }
 
     fn copy_texture(
         &self,
-        ctx: &mut RenderContext<'_>,
+        gpu: &GpuInstance,
         texture: &Texture,
         bytes: usize,
         fixed_pixels: &[u8],
@@ -626,7 +706,7 @@ impl DynRenderState {
             pixels.push(*srgba);
             pixels.push(*srgba);
         }
-        ctx.queue.write_texture(
+        gpu.queue().write_texture(
             dst,
             &pixels,
             data_layout,
@@ -640,12 +720,13 @@ impl DynRenderState {
 
     fn new_texture(
         &mut self,
-        ctx: &mut RenderContext<'_>,
+        gpu: &GpuInstance,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         size: Size,
         version: u64,
     ) -> Texture {
-        let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+        let device = gpu.device();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
                 width: size.x,
@@ -659,7 +740,7 @@ impl DynRenderState {
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &texture_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {

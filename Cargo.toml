@@ -16,6 +16,8 @@ lazy_static = "1.4"
 tinyfiledialogs = "3.0"
 nalgebra = "0.29"
 spirq = "0.4"
+atomic = "0.5"
+parking_lot = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows = "0.21.1"

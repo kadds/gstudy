@@ -18,10 +18,10 @@ type EI = egui::CursorIcon;
 type WK = winit::event::VirtualKeyCode;
 type EK = egui::Key;
 
-pub fn match_winit_cursor(c: EI) -> WI {
-    match c {
+pub fn match_winit_cursor(c: EI) -> Option<WI> {
+    Some(match c {
         EI::Default => WI::Default,
-        EI::None => WI::Default,
+        EI::None => return None,
         EI::ContextMenu => WI::ContextMenu,
         EI::Help => WI::Help,
         EI::PointingHand => WI::Hand,
@@ -45,7 +45,7 @@ pub fn match_winit_cursor(c: EI) -> WI {
         EI::ResizeVertical => WI::NsResize,
         EI::ZoomIn => WI::ZoomIn,
         EI::ZoomOut => WI::ZoomOut,
-    }
+    })
 }
 
 pub fn match_egui_key(k: WK) -> Option<EK> {

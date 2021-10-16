@@ -16,8 +16,8 @@ use super::{
 };
 use crate::{
     geometry::plane::Plane,
+    gpu_context::GpuContextRef,
     modules::*,
-    renderer::GpuContextRc,
     types::{Vec2f, Vec3f, Vec4f},
 };
 
@@ -26,7 +26,7 @@ pub struct Executor {
     current_module: usize,
     new_canvas: Option<Arc<Canvas>>,
     world: Option<mpsc::Sender<WorldOperation>>,
-    gpu_context: GpuContextRc,
+    gpu_context: GpuContextRef,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -50,14 +50,14 @@ struct World {
     pause: bool,
     stop: bool,
     rx: mpsc::Receiver<WorldOperation>,
-    gpu_context: GpuContextRc,
+    gpu_context: GpuContextRef,
 }
 
 impl World {
     pub fn new(
         canvas: Arc<Canvas>,
         rx: mpsc::Receiver<WorldOperation>,
-        gpu_context: GpuContextRc,
+        gpu_context: GpuContextRef,
     ) -> Self {
         Self {
             canvas,
@@ -120,7 +120,7 @@ impl World {
             // do something
             if !self.pause {
                 let parameter = RenderParameter {
-                    gpu_context: self.gpu_context.clone(),
+                    gpu: self.gpu_context.instance(),
                     camera: &camera,
                     scene: &scene,
                     canvas: &self.canvas,
@@ -147,7 +147,7 @@ impl Drop for Executor {
 }
 
 impl Executor {
-    pub fn new(gpu_context: GpuContextRc) -> Self {
+    pub fn new(gpu_context: GpuContextRef) -> Self {
         let mut modules: Vec<Box<dyn ModuleFactory>> = Vec::new();
         modules.push(Box::new(HardwareRendererFactory::new()));
         modules.push(Box::new(SoftwareRendererFactory::new()));

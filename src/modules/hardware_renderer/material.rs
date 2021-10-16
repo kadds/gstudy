@@ -7,9 +7,9 @@ use std::{
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::{
+    gpu_context::{GpuContext, GpuInstance},
     modules::hardware_renderer::common::FsTarget,
     render::{material::BasicMaterial, scene::Object, Camera, Material, Scene},
-    renderer::GpuContext,
     util,
 };
 
@@ -17,7 +17,7 @@ use super::common::PipelinePass;
 
 #[derive(Debug)]
 pub struct MaterialRenderContext<'a, 'b> {
-    pub gpu_context: &'a GpuContext,
+    pub gpu: &'a GpuInstance,
     pub camera: &'a Camera,
     pub scene: &'a Scene,
     pub encoder: &'a mut wgpu::CommandEncoder,
@@ -76,14 +76,15 @@ impl BasicMaterialHardwareRenderer {
 
 impl MaterialRenderer<BasicMaterial> for BasicMaterialHardwareRenderer {
     fn render<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &HashSet<u64>) {
-        self.prepare_pipeline(ctx.gpu_context.device());
+        let device = ctx.gpu.device();
+        self.prepare_pipeline(&device);
         let label = self.label();
         let inner = &mut self.inner;
         let pipeline = inner.pipeline_pass.as_ref().unwrap();
         let mut pass = ctx.encoder.begin_render_pass(&ctx.final_pass_desc);
         pass.set_pipeline(&pipeline.pipeline);
         // render it
-        let device = ctx.gpu_context.device();
+        let device = ctx.gpu.device();
         for id in objects {
             let object = ctx.scene.get_object(*id).unwrap();
             let geo = object.geometry();
@@ -141,11 +142,9 @@ impl MaterialRenderer<BasicMaterial> for BasicMaterialHardwareRenderer {
 
             pass.set_vertex_buffer(0, c.vertex.slice(..));
             pass.set_index_buffer(c.index.slice(..), wgpu::IndexFormat::Uint32);
-            ctx.gpu_context.queue().write_buffer(
-                &c.mvp,
-                0,
-                util::any_as_u8_slice_array(mvp.as_slice()),
-            );
+            ctx.gpu
+                .queue()
+                .write_buffer(&c.mvp, 0, util::any_as_u8_slice_array(mvp.as_slice()));
             pass.set_bind_group(0, &c.bind_group, &[]);
             pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
         }

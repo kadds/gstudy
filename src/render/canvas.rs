@@ -1,4 +1,8 @@
-use crate::{renderer::RenderContext, types};
+use crate::{
+    gpu_context::{GpuContext, GpuInstance, GpuInstanceRef},
+    types,
+    ui::RenderContext,
+};
 use std::{
     mem::size_of_val,
     num::NonZeroU32,
@@ -98,28 +102,28 @@ impl Canvas {
         !t.is_null()
     }
 
-    pub fn build_texture(&self, mut ctx: RenderContext) {
+    pub fn build_texture(&self, gpu: &GpuInstance) {
         let mut need_create = false;
         if self.texture.load(Ordering::Relaxed).is_null() {
             need_create = true;
         }
+        let device = gpu.device();
         if need_create {
             let texture_bind_group_layout =
-                ctx.device
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: None,
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                multisampled: false,
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            },
-                            count: None,
-                        }],
-                    });
-            let texture = self.new_texture(ctx.device, self.size, &texture_bind_group_layout);
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: None,
+                    }],
+                });
+            let texture = self.new_texture(&device, self.size, &texture_bind_group_layout);
             let box_texture = Box::new(texture);
 
             self.texture
@@ -132,7 +136,8 @@ impl Canvas {
         }
         if dirty_flag {
             let texture = unsafe { &(*self.texture.load(Ordering::Relaxed)).0 };
-            self.update_texture(&mut ctx, texture);
+            let queue = gpu.queue();
+            self.update_texture(&queue, texture);
             self.dirty_flag.store(false, Ordering::SeqCst);
         }
     }
@@ -181,7 +186,7 @@ impl Canvas {
         (texture, texture_view, bind_group)
     }
 
-    fn update_texture(&self, ctx: &mut RenderContext<'_>, texture: &wgpu::Texture) {
+    fn update_texture(&self, queue: &wgpu::Queue, texture: &wgpu::Texture) {
         let size = self.size;
         let dst = wgpu::ImageCopyTexture {
             mip_level: 0,
@@ -195,7 +200,7 @@ impl Canvas {
             rows_per_image: NonZeroU32::new(size.y as u32),
         };
         // copy texture data
-        ctx.queue.write_texture(
+        queue.write_texture(
             dst,
             &self.data,
             data_layout,
