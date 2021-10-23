@@ -98,13 +98,13 @@ impl Canvas {
     }
 
     pub fn prepared(&self) -> bool {
-        let t = self.texture.load(Ordering::Relaxed);
+        let t = self.texture.load(Ordering::Acquire);
         !t.is_null()
     }
 
     pub fn build_texture(&self, gpu: &GpuInstance) {
         let mut need_create = false;
-        if self.texture.load(Ordering::Relaxed).is_null() {
+        if self.texture.load(Ordering::Acquire).is_null() {
             need_create = true;
         }
         let device = gpu.device();
@@ -127,18 +127,18 @@ impl Canvas {
             let box_texture = Box::new(texture);
 
             self.texture
-                .store(Box::into_raw(box_texture), Ordering::SeqCst);
+                .store(Box::into_raw(box_texture), Ordering::Release);
         }
-        let mut dirty_flag = self.dirty_flag.load(Ordering::Relaxed);
+        let mut dirty_flag = self.dirty_flag.load(Ordering::Acquire);
 
         if need_create {
             dirty_flag = true;
         }
         if dirty_flag {
-            let texture = unsafe { &(*self.texture.load(Ordering::Relaxed)).0 };
+            let texture = unsafe { &(*self.texture.load(Ordering::Acquire)).0 };
             let queue = gpu.queue();
             self.update_texture(&queue, texture);
-            self.dirty_flag.store(false, Ordering::SeqCst);
+            self.dirty_flag.store(false, Ordering::Release);
         }
     }
 

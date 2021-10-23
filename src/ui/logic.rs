@@ -340,7 +340,7 @@ fn control_ui(
     ));
     ui.end_row();
 
-    ui.label("alaways repaint");
+    ui.label("always repaint");
     ui.checkbox(&mut state.always_repaint, "");
     ui.end_row();
 
