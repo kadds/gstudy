@@ -96,6 +96,7 @@ impl GpuContext {
             .request_adapter(&RequestAdapterOptions {
                 power_preference: PowerPreference::default(),
                 compatible_surface: Some(&resource.surface),
+                force_fallback_adapter: false,
             })
             .await
             .unwrap();

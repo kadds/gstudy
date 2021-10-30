@@ -136,8 +136,8 @@ impl UIRenderer {
     }
 
     pub fn render(&mut self) {
-        let frame = match self.gpu_instance.surface().get_current_frame() {
-            Ok(v) => v.output,
+        let frame = match self.gpu_instance.surface().get_current_texture() {
+            Ok(v) => v,
             Err(e) => {
                 log::error!("get swapchain fail. {}", e);
                 return;
@@ -175,6 +175,7 @@ impl UIRenderer {
         self.gpu_instance
             .queue()
             .submit(std::iter::once(encoder.finish()));
+        frame.present();
     }
 
     fn resize(&mut self, width: u32, height: u32) {

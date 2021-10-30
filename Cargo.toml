@@ -7,9 +7,9 @@ resolver = "2"
 
 [dependencies]
 winit = { version = "0.25" }
-wgpu = { version = "0.10" , default-features = false, features = ["spirv"]}
+wgpu = { version = "0.11" , default-features = false, features = ["spirv"]}
 futures = "0.3"
-egui = "0.14"
+egui = "0.15"
 env_logger = "0.8"
 log = "0.4"
 lazy_static = "1.4"
@@ -20,11 +20,9 @@ atomic = "0.5"
 parking_lot = "0.11"
 
 [target.'cfg(windows)'.dependencies]
-windows = "0.21.1"
+windows = {version = "0.23", features = ["Win32_Foundation", "Win32_System", "Win32_System_Console"]}
 
 
 [build-dependencies]
 shaderc = "0.7"
 
-[target.'cfg(windows)'.build-dependencies]
-windows = "0.21.1"

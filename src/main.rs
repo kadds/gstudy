@@ -16,9 +16,6 @@ use std::sync::Arc;
 
 use gpu_context::{GpuContext, GpuContextRef};
 
-#[cfg(windows)]
-windows::include_bindings!();
-
 use render_window::{Queue, RenderWindow, RenderWindowEventLoop};
 use types::{Color, Size};
 use ui::logic::UILogic;
@@ -26,7 +23,7 @@ use ui::logic::UILogic;
 fn main() {
     #[cfg(windows)]
     unsafe {
-        Windows::Win32::System::Console::AttachConsole(u32::MAX);
+        windows::Win32::System::Console::AttachConsole(u32::MAX);
     }
     env_logger::init();
     let gpu_context: GpuContextRef = GpuContext::new().into();

@@ -415,6 +415,16 @@ impl RenderWindow {
             .build(window_target)
             .unwrap();
 
+        if pos.x as i32 == 0 && pos.y as i32 == 0 {
+            if let Some(m) = window.current_monitor() {
+                let mut mpos = m.position();
+                let msize = m.size();
+                mpos.x += (msize.width / 2) as i32 - size.x as i32 / 2;
+                mpos.y += (msize.height / 2) as i32 - size.y as i32 / 2;
+                window.set_outer_position(mpos);
+            }
+        }
+
         let resource = gpu_context.attach_window(&window);
         (window, resource)
     }

@@ -50,10 +50,4 @@ fn main() {
     compile_shaders(Path::new("src/shaders/"), &mut compiler, &mut options);
 
     println!("cargo:rerun-if-changed={}", "src/shaders/");
-    #[cfg(windows)]
-    {
-        windows::build! {
-            Windows::Win32::System::Console::AttachConsole,
-        };
-    }
 }
