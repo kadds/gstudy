@@ -6,23 +6,23 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-winit = { version = "0.25" }
-wgpu = { version = "0.11" , default-features = false, features = ["spirv"]}
+winit = { version = "0.26" }
+wgpu = { version = "0.12" , default-features = false, features = ["spirv"]}
 futures = "0.3"
-egui = "0.15"
-env_logger = "0.8"
+egui = "0.18"
+env_logger = "0.9"
 log = "0.4"
 lazy_static = "1.4"
 tinyfiledialogs = "3.0"
-nalgebra = "0.29"
-spirq = "0.4"
+nalgebra = "0.31"
+spirq = "0.5"
 atomic = "0.5"
-parking_lot = "0.11"
+parking_lot = "0.12"
 
 [target.'cfg(windows)'.dependencies]
 windows = {version = "0.23", features = ["Win32_Foundation", "Win32_System", "Win32_System_Console"]}
 
 
 [build-dependencies]
-shaderc = "0.7"
+shaderc = "0.8"
 

@@ -1,24 +1,19 @@
 use crate::{
-    gpu_context::{GpuContext, GpuContextRef, GpuInstance, GpuInstanceRef},
+    gpu_context::{GpuContextRef, GpuInstance, GpuInstanceRef},
     modules::hardware_renderer::common::{FsTarget, PipelinePass, PipelineReflector, Position},
     render_window::{RenderWindowEvent, RenderWindowInputEvent, UserEvent, WindowUserEvent},
     statistics::Statistics,
     types::{self, Vec4f},
     util::*,
 };
-use std::{
-    num::NonZeroU32,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, num::NonZeroU32, time::Duration};
 
-use egui::{CtxRef, RawInput};
-use winit::{event::WindowEvent, event_loop::EventLoopProxy};
+use egui::{ImageData, RawInput};
+use winit::event_loop::EventLoopProxy;
 
-use self::logic::UILogicRef;
+use self::logic::UILogic;
 
 pub mod logic;
-
-mod subwindow;
 
 type Size = types::Size;
 type Rect = types::Point4<u32>;
@@ -32,7 +27,6 @@ pub struct RenderContext<'a> {
     pub encoder: &'a mut CommandEncoder,
 }
 
-#[derive(Debug, Clone)]
 struct MatBuffer {
     size: [f32; 2],
 }
@@ -46,7 +40,8 @@ struct Inner {
     last_mouse_pos: (f32, f32),
     last_modifiers: egui::Modifiers,
     dyn_state: DynRenderState,
-    meshes: Option<Vec<egui::ClippedMesh>>,
+    meshes: Option<Vec<egui::ClippedPrimitive>>,
+    default_texture: Option<egui::TexturesDelta>,
 }
 
 const DEFAULT_VERTEX_BUFFER_SIZE: usize = 1 << 18;
@@ -67,11 +62,10 @@ pub struct Texture {
     pub texture: wgpu::Texture,
     pub bind_group: wgpu::BindGroup,
     pub size: Size,
-    pub version: u64,
 }
 
 struct DynRenderState {
-    texture: Option<Texture>,
+    textures: HashMap<egui::TextureId, Texture>,
     stages: Vec<RenderStage>,
     vertex_buffers: Vec<(wgpu::Buffer, usize)>,
     vertex_offset: usize,
@@ -80,13 +74,13 @@ struct DynRenderState {
 }
 
 pub struct UIRenderer {
-    ui_ctx: egui::CtxRef,
+    ui_ctx: egui::Context,
     input: RawInput,
     inner: Inner,
     clear_color: Option<wgpu::Color>,
     gpu_context: GpuContextRef,
     gpu_instance: GpuInstanceRef,
-    ui_logic: UILogicRef,
+    ui_logic: UILogic,
     event_proxy: EventLoopProxy<UserEvent>,
     cursor: egui::CursorIcon,
 }
@@ -96,13 +90,13 @@ impl UIRenderer {
         gpu_context: GpuContextRef,
         size: Size,
         event_proxy: EventLoopProxy<UserEvent>,
-        ui_logic: UILogicRef,
+        ui_logic: UILogic,
     ) -> Self {
         let instance = gpu_context.instance();
         log::info!("new ui renderer {:?}", instance.id());
         let inner = Self::init_renderer(&instance, size);
         Self {
-            ui_ctx: egui::CtxRef::default(),
+            ui_ctx: egui::Context::default(),
             input: RawInput::default(),
             inner,
             clear_color: Some(wgpu::Color::BLACK),
@@ -114,8 +108,8 @@ impl UIRenderer {
         }
     }
 
-    pub fn logic(&self) -> UILogicRef {
-        self.ui_logic.clone()
+    pub fn logic(&self) -> &UILogic {
+        &self.ui_logic
     }
 
     pub fn event_proxy(&self) -> EventLoopProxy<UserEvent> {
@@ -176,6 +170,7 @@ impl UIRenderer {
             .queue()
             .submit(std::iter::once(encoder.finish()));
         frame.present();
+        self.end_render();
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -183,10 +178,6 @@ impl UIRenderer {
             return;
         }
         self.gpu_context.rebuild(Size::new(width, height));
-    }
-
-    pub fn rebind_window(&mut self, logic_window_id: u64) {
-        self.ui_logic.rebind_logic_window(logic_window_id);
     }
 
     pub fn update(&mut self, statistics: &Statistics) -> bool {
@@ -202,11 +193,13 @@ impl UIRenderer {
         ui_ctx.begin_frame(input);
         self.ui_logic
             .update(ui_ctx.clone(), statistics, &self.event_proxy);
-        let (output, shapes) = ui_ctx.end_frame();
-        let meshes = ui_ctx.tessellate(shapes);
+        let output = ui_ctx.end_frame();
+        let meshes = ui_ctx.tessellate(output.shapes);
         inner.meshes = Some(meshes);
+        inner.default_texture = Some(output.textures_delta);
+
         self.ui_logic
-            .finish(&output, self.cursor, &self.event_proxy);
+            .finish(&output.platform_output, self.cursor, &self.event_proxy);
         output.needs_repaint
     }
 
@@ -226,11 +219,21 @@ impl UIRenderer {
             );
             inner.size_changed = false;
         }
+        let texture_bind_group_layout = &inner.pipeline_pass.bind_group_layouts[1];
+        let textures = inner.default_texture.as_mut().unwrap();
+        for (id, data) in &mut textures.set {
+            state.update_texture(
+                &self.gpu_instance,
+                texture_bind_group_layout,
+                id.clone(),
+                data,
+            );
+        }
+
         let meshes = inner.meshes.as_mut().unwrap();
 
         for mesh in meshes {
-            let rect = mesh.0;
-            let mesh = &mut mesh.1;
+            let rect = mesh.clip_rect;
             let x = (rect.left() as u32).clamp(0, inner.inner_size.x);
             let y = (rect.top() as u32).clamp(0, inner.inner_size.y);
             let width = (rect.width() as u32).clamp(0, inner.inner_size.x - x);
@@ -241,18 +244,36 @@ impl UIRenderer {
             }
             let rect = Rect::new(x, y, width, height);
 
+            let mesh = match &mut mesh.primitive {
+                egui::epaint::Primitive::Mesh(mesh) => mesh,
+                // egui::epaint::Primitive::Callback(c) => {c.call(info, render_ctx) },
+                _ => {
+                    panic!("fail")
+                }
+            };
+
             state.commit(
                 &self.gpu_instance,
                 &mut mesh.indices,
                 &mut mesh.vertices,
                 rect,
                 mesh.texture_id,
-                &inner.pipeline_pass.bind_group_layouts[1],
-                self.ui_ctx.clone(),
             );
         }
+
         self.ui_logic.prepare_texture();
     }
+
+    fn end_render(&mut self) {
+        let inner = &mut self.inner;
+        let textures = inner.default_texture.as_mut().unwrap();
+        let state = &mut inner.dyn_state;
+        for id in &mut textures.free {
+            state.free_texture(id);
+        }
+        inner.default_texture = None;
+    }
+
     fn render_inner<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>) {
         let inner = &mut self.inner;
         let state = &mut inner.dyn_state;
@@ -261,9 +282,10 @@ impl UIRenderer {
         for stage in &state.stages {
             let rect = stage.rect;
             pass.set_scissor_rect(rect.x as u32, rect.y as u32, rect.z as u32, rect.w as u32);
-            let texture_bind_group = match stage.texture_id {
-                egui::TextureId::Egui => &state.texture.as_ref().unwrap().bind_group,
-                egui::TextureId::User(id) => self.ui_logic.get_texture(id),
+            let texture_bind_group = if let egui::TextureId::User(_) = stage.texture_id {
+                self.ui_logic.get_texture(&stage.texture_id)
+            } else {
+                state.get_texture(&stage.texture_id)
             };
 
             // bind texture
@@ -346,6 +368,7 @@ impl UIRenderer {
             },
             size_changed: true,
             meshes: None,
+            default_texture: None,
         }
     }
 
@@ -364,6 +387,14 @@ impl UIRenderer {
             RenderWindowEvent::UserEvent(event) => match event {
                 WindowUserEvent::UpdateCursor(cursor) => {
                     self.cursor = *cursor;
+                }
+                WindowUserEvent::ClearColor(c) => {
+                    self.clear_color = c.map(|v| wgpu::Color {
+                        r: v.x as f64,
+                        g: v.y as f64,
+                        b: v.z as f64,
+                        a: v.w as f64,
+                    });
                 }
                 _ => (),
             },
@@ -414,14 +445,14 @@ impl UIRenderer {
                     delta,
                     phase: _,
                 } => {
-                    self.input.scroll_delta = match *delta {
+                    self.input.events.push(egui::Event::Scroll(match *delta {
                         winit::event::MouseScrollDelta::LineDelta(x, y) => {
                             egui::Vec2::new(x * 50f32, y * 50f32)
                         }
                         winit::event::MouseScrollDelta::PixelDelta(a) => {
                             egui::Vec2::new(a.x as f32, a.y as f32)
                         }
-                    };
+                    }));
                 }
                 RenderWindowInputEvent::CursorLeft { device_id: _ } => {
                     self.input.events.push(egui::Event::PointerGone);
@@ -478,7 +509,7 @@ impl UIRenderer {
 impl DynRenderState {
     pub fn new() -> Self {
         Self {
-            texture: None,
+            textures: HashMap::new(),
             vertex_buffers: Vec::new(),
             index_buffers: Vec::new(),
             stages: Vec::new(),
@@ -506,8 +537,6 @@ impl DynRenderState {
         vertices: &mut [egui::epaint::Vertex],
         rect: Rect,
         texture_id: egui::TextureId,
-        texture_bind_group_layout: &wgpu::BindGroupLayout,
-        ui_ctx: CtxRef,
     ) {
         let mut index_cursor = 0;
 
@@ -574,7 +603,7 @@ impl DynRenderState {
             );
             queue.write_buffer(
                 &vertex_buffer,
-                (*vused as u64) * std::mem::size_of::<egui::paint::Vertex>() as u64,
+                (*vused as u64) * std::mem::size_of::<egui::epaint::Vertex>() as u64,
                 any_as_u8_slice_array(vertices_new),
             );
             self.stages.push(RenderStage {
@@ -582,7 +611,7 @@ impl DynRenderState {
                 index_buffer: self.index_offset,
                 rect,
                 base_index: *iused as u32,
-                base_vertex: (*vused as u32) * std::mem::size_of::<egui::paint::Vertex>() as u32,
+                base_vertex: (*vused as u32) * std::mem::size_of::<egui::epaint::Vertex>() as u32,
                 count_idx: index_count as u32,
                 texture_id,
             });
@@ -595,7 +624,6 @@ impl DynRenderState {
                 self.vertex_offset += 1;
             }
         }
-        self.update_texture(gpu, &texture_bind_group_layout, ui_ctx);
         // log::info!("render stages {:?}", self.stages);
     }
 
@@ -643,80 +671,101 @@ impl DynRenderState {
         mat_buffer
     }
 
+    // fn update_any_textures(
+    //     &mut self,
+    //     gpu: &GpuInstance,
+    //     texture_bind_group_layout: &wgpu::BindGroupLayout,
+    //     ui_ctx: egui::Context) {
+    //     let tex = ui_ctx.tex_manager();
+    //     let mut read = tex.write();
+    //     let delta = read.take_delta();
+
+    //     for (id, data) in delta.set {
+    //         self.update_texture(gpu, texture_bind_group_layout, id, &data);
+    //     }
+    // }
+
     fn update_texture(
         &mut self,
         gpu: &GpuInstance,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
-        ui_ctx: egui::CtxRef,
+        id: egui::TextureId,
+        data: &egui::epaint::ImageDelta,
     ) {
-        let (version, size, bytes) = {
-            let t = ui_ctx.texture();
-            (
-                t.version,
-                Size::new(t.width as u32, t.height as u32),
-                t.pixels.len(),
-            )
-        };
-        let mut need_create = false;
-        if let Some(t) = self.texture.as_mut() {
-            if t.version == version {
-                return;
-            }
-            t.version = version;
-            if t.size != size {
-                need_create = true;
-                // destroy it
-            }
+        log::info!("update texture {:?}", id);
+        let size = data.image.size();
+        if self.textures.get(&id).is_none() {
+            let texture = self.new_texture(
+                gpu,
+                &texture_bind_group_layout,
+                Size::new(size[0] as u32, size[1] as u32),
+            );
+            self.textures.insert(id, texture);
+        }
+        let texture = self.textures.get(&id).unwrap();
+        let mut rect = Rect::new(0, 0, size[0] as u32, size[1] as u32);
+        if let Some(pos) = data.pos {
+            rect.x = pos[0] as u32;
+            rect.y = pos[1] as u32;
+            log::info!("{:?} {:?}", pos, rect);
         } else {
-            need_create = true;
+            log::info!("{:?}", rect);
+            // update all
         }
-
-        if need_create {
-            let texture = self.new_texture(gpu, &texture_bind_group_layout, size, version);
-            self.texture = Some(texture);
+        match &data.image {
+            ImageData::Color(c) => {
+                self.copy_texture(gpu, texture, 4, rect, any_as_u8_slice_array(&c.pixels));
+            }
+            ImageData::Font(f) => {
+                let data: Vec<egui::Color32> = f.srgba_pixels(1.0f32).collect();
+                self.copy_texture(gpu, texture, 4, rect, any_as_u8_slice_array(&data));
+            }
         }
-        let texture = self.texture.as_ref().unwrap();
-
-        self.copy_texture(gpu, texture, bytes, &ui_ctx.texture().pixels);
     }
 
     fn copy_texture(
         &self,
         gpu: &GpuInstance,
         texture: &Texture,
-        bytes: usize,
-        fixed_pixels: &[u8],
+        bytes_per_pixel: u32,
+        rectangle: Rect,
+        data: &[u8],
     ) {
-        let size = texture.size;
         let dst = wgpu::ImageCopyTexture {
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
+            origin: wgpu::Origin3d {
+                x: rectangle.x,
+                y: rectangle.y,
+                z: 0,
+            },
             texture: &texture.texture,
             aspect: wgpu::TextureAspect::All,
         };
+        let row_bytes = rectangle.z * bytes_per_pixel;
         let data_layout = wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: NonZeroU32::new(((bytes / size.y as usize) * 4) as u32),
-            rows_per_image: NonZeroU32::new(size.y as u32),
+            bytes_per_row: NonZeroU32::new(row_bytes),
+            rows_per_image: None,
         };
-        // copy texture data
-        let mut pixels: Vec<u8> = Vec::with_capacity(fixed_pixels.len() * 4);
-        for srgba in fixed_pixels {
-            pixels.push(*srgba);
-            pixels.push(*srgba);
-            pixels.push(*srgba);
-            pixels.push(*srgba);
-        }
+
         gpu.queue().write_texture(
             dst,
-            &pixels,
+            data,
             data_layout,
             wgpu::Extent3d {
-                width: size.x,
-                height: size.y,
+                width: rectangle.z,
+                height: rectangle.w,
                 depth_or_array_layers: 1,
             },
         );
+    }
+
+    fn get_texture<'a>(&'a self, texture_id: &egui::TextureId) -> &'a wgpu::BindGroup {
+        &self.textures.get(texture_id).as_ref().unwrap().bind_group
+    }
+
+    fn free_texture(&mut self, texture_id: &egui::TextureId) {
+        self.textures.remove(texture_id);
     }
 
     fn new_texture(
@@ -724,7 +773,6 @@ impl DynRenderState {
         gpu: &GpuInstance,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         size: Size,
-        version: u64,
     ) -> Texture {
         let device = gpu.device();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -753,7 +801,6 @@ impl DynRenderState {
             texture,
             bind_group,
             size,
-            version,
         }
     }
 }

@@ -3,10 +3,7 @@ use std::{
     ops::Range,
 };
 
-use spirq::{
-    ty::ImageArrangement, DescriptorResolution, EntryPoint, InterfaceVariableResolution,
-    SpirvBinary,
-};
+use spirq::{ty::ImageArrangement, EntryPoint, Locator, ReflectConfig, SpirvBinary, Variable};
 use wgpu::*;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -175,15 +172,20 @@ impl<'a> PipelineReflector<'a> {
     }
 
     fn build_vertex_input(&mut self, entry: &EntryPoint) {
-        for input in entry.inputs() {
-            let format = match input.ty {
-                spirq::Type::Scalar(s) => scalar_to_wgpu_format(s, 1),
-                spirq::Type::Vector(t) => scalar_to_wgpu_format(&t.scalar_ty, t.nscalar),
-                _ => None,
+        for input in &entry.vars {
+            let format = match input.ty() {
+                spirq::ty::Type::Scalar(s) => scalar_to_wgpu_format(s, 1),
+                spirq::ty::Type::Vector(t) => scalar_to_wgpu_format(&t.scalar_ty, t.nscalar),
+                _ => {
+                    continue;
+                }
             }
             .unwrap();
-            let position = Position::new(input.location.comp(), input.location.loc());
-            self.vertex_attrs.insert(position, format);
+            let locator = input.locator();
+            if let Locator::Input(t) = locator {
+                let position = Position::new(t.comp(), t.loc());
+                self.vertex_attrs.insert(position, format);
+            }
         }
     }
 
@@ -194,76 +196,81 @@ impl<'a> PipelineReflector<'a> {
             ShaderType::Compute => ShaderStages::COMPUTE,
         };
 
-        for desc in entry.descs() {
-            let binding = desc.desc_bind.bind();
-            let set = desc.desc_bind.set();
-            let entry = match desc.desc_ty {
-                spirq::DescriptorType::UniformBuffer(nbind, ty) => match ty {
-                    spirq::Type::Struct(struct_type) => Some(BindGroupLayoutEntry {
+        for desc in &entry.vars {
+            if let Variable::Descriptor {
+                name,
+                desc_bind,
+                desc_ty,
+                ty,
+                nbind,
+            } = desc
+            {
+                let binding = desc_bind.bind();
+                let set = desc_bind.set();
+                let entry = match desc_ty {
+                    spirq::DescriptorType::UniformBuffer() => match ty {
+                        spirq::ty::Type::Struct(struct_type) => Some(BindGroupLayoutEntry {
+                            binding,
+                            visibility: visibility,
+                            count: None,
+                            ty: BindingType::Buffer {
+                                ty: BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                        }),
+                        _ => None,
+                    },
+                    spirq::DescriptorType::SampledImage() => {
+                        use spirq::ty::*;
+                        match ty {
+                            spirq::ty::Type::Image(img) => {
+                                let view_dimension = image_to_wgpu_image(img.arng).unwrap();
+                                let multisampled = false;
+                                let sample_type = match img.unit_fmt {
+                                    ImageUnitFormat::Color(t) => {
+                                        TextureSampleType::Float { filterable: false }
+                                    }
+                                    ImageUnitFormat::Sampled => {
+                                        TextureSampleType::Float { filterable: false }
+                                    }
+                                    ImageUnitFormat::Depth => TextureSampleType::Depth,
+                                };
+                                Some(BindGroupLayoutEntry {
+                                    binding,
+                                    visibility: visibility,
+                                    count: None,
+                                    ty: BindingType::Texture {
+                                        multisampled,
+                                        view_dimension,
+                                        sample_type,
+                                    },
+                                })
+                            }
+                            _ => None,
+                        }
+                    }
+                    spirq::DescriptorType::Sampler() => Some(BindGroupLayoutEntry {
                         binding,
                         visibility: visibility,
                         count: None,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
+                        ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     }),
+                    spirq::DescriptorType::InputAttachment(_) => todo!(),
+                    spirq::DescriptorType::AccelStruct() => todo!(),
                     _ => None,
-                },
-                spirq::DescriptorType::Image(nbind, ty) => {
-                    use spirq::ty::*;
-                    match ty {
-                        spirq::Type::Image(img) => {
-                            let view_dimension = image_to_wgpu_image(img.arng).unwrap();
-                            let multisampled = false;
-                            let sample_type = match img.unit_fmt {
-                                ImageUnitFormat::Color(t) => {
-                                    TextureSampleType::Float { filterable: false }
-                                }
-                                ImageUnitFormat::Sampled => {
-                                    TextureSampleType::Float { filterable: false }
-                                }
-                                ImageUnitFormat::Depth => TextureSampleType::Depth,
-                            };
-                            Some(BindGroupLayoutEntry {
-                                binding,
-                                visibility: visibility,
-                                count: None,
-                                ty: BindingType::Texture {
-                                    multisampled,
-                                    view_dimension,
-                                    sample_type,
-                                },
-                            })
-                        }
-                        _ => None,
+                }
+                .unwrap();
+                let position = Position::new(set, binding);
+                if let Some(item) = self.bind_group_layout_entries.get_mut(&position) {
+                    if item.ty != entry.ty {
+                        panic!("not eq");
+                    } else {
+                        item.visibility |= visibility;
                     }
-                }
-                spirq::DescriptorType::Sampler(nbind) => Some(BindGroupLayoutEntry {
-                    binding,
-                    visibility: visibility,
-                    count: None,
-                    ty: BindingType::Sampler {
-                        comparison: false,
-                        filtering: true,
-                    },
-                }),
-                spirq::DescriptorType::SampledImage(_, _) => todo!(),
-                spirq::DescriptorType::InputAttachment(_, _, _) => todo!(),
-                spirq::DescriptorType::AccelStruct(_) => todo!(),
-                _ => None,
-            }
-            .unwrap();
-            let position = Position::new(set, binding);
-            if let Some(item) = self.bind_group_layout_entries.get_mut(&position) {
-                if item.ty != entry.ty {
-                    panic!("not eq");
                 } else {
-                    item.visibility |= visibility;
+                    self.bind_group_layout_entries.insert(position, entry);
                 }
-            } else {
-                self.bind_group_layout_entries.insert(position, entry);
             }
         }
     }
@@ -271,17 +278,25 @@ impl<'a> PipelineReflector<'a> {
     pub fn add_vs(mut self, vs: &ShaderModuleDescriptor) -> Self {
         self.vs = Some(self.device.create_shader_module(vs));
         let vs = make_reflection(vs);
-        let mut entry = vs.reflect_fast().unwrap();
-        self.build_vertex_input(&mut entry);
-        self.build_bind_group_layout(&mut entry, ShaderType::Vertex);
+        let mut entry = ReflectConfig::new()
+            .spv(vs)
+            .ref_all_rscs(false)
+            .reflect()
+            .unwrap();
+        self.build_vertex_input(&mut entry[0]);
+        self.build_bind_group_layout(&mut entry[0], ShaderType::Vertex);
         self
     }
 
     pub fn add_fs(mut self, fs: &ShaderModuleDescriptor, fs_target: FsTarget) -> Self {
         self.fs = Some((self.device.create_shader_module(&fs), fs_target));
         let fs = make_reflection(fs);
-        let mut entry = fs.reflect_fast().unwrap();
-        self.build_bind_group_layout(&mut entry, ShaderType::Fragment);
+        let mut entry = ReflectConfig::new()
+            .spv(fs)
+            .ref_all_rscs(false)
+            .reflect()
+            .unwrap();
+        self.build_bind_group_layout(&mut entry[0], ShaderType::Fragment);
         self
     }
 
@@ -377,6 +392,7 @@ impl<'a> PipelineReflector<'a> {
             primitive: primitive,
             depth_stencil: None,
             multisample: MultisampleState::default(),
+            multiview: None,
         };
 
         if let Some(fs) = &self.fs {

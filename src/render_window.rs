@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque},
-    mem::swap,
     sync::Arc,
     thread::spawn,
     time::{Duration, Instant},
@@ -11,7 +10,7 @@ use winit::{
     dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
     event::{
         DeviceEvent, DeviceId, ElementState, Event, KeyboardInput, ModifiersState, MouseButton,
-        MouseScrollDelta, Touch, TouchPhase, WindowEvent,
+        MouseScrollDelta, TouchPhase, WindowEvent,
     },
     event_loop::{ControlFlow, EventLoop, EventLoopProxy, EventLoopWindowTarget},
     platform::run_return::EventLoopExtRunReturn,
@@ -21,8 +20,8 @@ use winit::{
 use crate::{
     gpu_context::{GpuAttachResource, GpuContext, GpuContextRef},
     statistics::Statistics,
-    types::{Color, Quaternion, Size},
-    ui::{logic::UILogicRef, UIRenderer},
+    types::{Color, Size},
+    ui::{logic::UILogic, UIRenderer},
 };
 use futures::executor::block_on;
 
@@ -77,7 +76,7 @@ pub enum WindowUserEvent {
     FrameRate(Option<u32>),
     ShowWindow(bool),
     PostNewWindow(MakeWindowResult),
-    // ClearColor(Option<Color>),
+    ClearColor(Option<Color>),
 }
 
 #[derive(Debug)]
@@ -437,7 +436,7 @@ impl RenderWindow {
     ) -> Self {
         Self {
             render_tick: Instant::now(),
-            statistics: Statistics::new(Duration::from_millis(900), None),
+            statistics: Statistics::new(Duration::from_millis(900), Some(1.0 / 60.0)),
             gpu_context,
             closed: false,
             queue,
@@ -446,15 +445,9 @@ impl RenderWindow {
         }
     }
 
-    pub fn dispatch_window(
-        mut self,
-        logic_window_id: u64,
-        resource: GpuAttachResource,
-        ui_logic: UILogicRef,
-        size: Size,
-    ) {
+    pub fn dispatch_window(self, resource: GpuAttachResource, ui_logic: UILogic, size: Size) {
         spawn(move || {
-            self.thread_main(logic_window_id, resource, ui_logic, size);
+            self.thread_main(resource, ui_logic, size);
         });
     }
 
@@ -470,13 +463,7 @@ impl RenderWindow {
         self.statistics.set_frame_lock(target_frame_seconds);
     }
 
-    fn thread_main(
-        mut self,
-        logic_window_id: u64,
-        resource: GpuAttachResource,
-        ui_logic: UILogicRef,
-        size: Size,
-    ) {
+    fn thread_main(mut self, resource: GpuAttachResource, ui_logic: UILogic, size: Size) {
         block_on(self.gpu_context.attach_resource(resource));
         let mut ui_renderer = UIRenderer::new(
             self.gpu_context.clone(),
@@ -490,7 +477,6 @@ impl RenderWindow {
                 WindowUserEvent::ShowWindow(true),
             ))
             .ok();
-        ui_renderer.rebind_window(logic_window_id);
         loop {
             let event = self.queue.fetch(self.render_tick);
             match event {
@@ -539,7 +525,6 @@ impl RenderWindow {
     fn do_event(&mut self, event: RenderWindowEvent, ui_renderer: &mut UIRenderer) {
         ui_renderer.on_event(&event);
         match event {
-            RenderWindowEvent::Input(event) => {}
             RenderWindowEvent::CloseRequested => {
                 log::info!("close window");
                 self.closed = true;
@@ -554,7 +539,6 @@ impl RenderWindow {
                 }
                 let now = Instant::now();
                 if now < self.render_tick {
-                    // self.window.request_redraw();
                     return;
                 }
                 self.statistics.new_frame();
@@ -569,18 +553,6 @@ impl RenderWindow {
                     log::info!("frame rate set {:?}", rate);
                     self.set_frame_lock(rate.map(|v| 1f32 / v as f32));
                 }
-                WindowUserEvent::PostNewWindow(t) => Self::new(
-                    self.gpu_context.clone(),
-                    t.queue,
-                    t.window_id,
-                    self.event_proxy.clone(),
-                )
-                .dispatch_window(
-                    t.logic_window_id,
-                    t.resource,
-                    ui_renderer.logic(),
-                    t.size,
-                ),
                 _ => (),
             },
             _ => (),

@@ -43,6 +43,17 @@ pub fn match_winit_cursor(c: EI) -> Option<WI> {
         EI::ResizeNeSw => WI::NeswResize,
         EI::ResizeNwSe => WI::NwseResize,
         EI::ResizeVertical => WI::NsResize,
+        EI::ResizeEast => WI::EResize,
+        EI::ResizeSouthEast => WI::SeResize,
+        EI::ResizeSouth => WI::SResize,
+        EI::ResizeSouthWest => WI::SwResize,
+        EI::ResizeWest => WI::WResize,
+        EI::ResizeNorthWest => WI::NwResize,
+        EI::ResizeNorth => WI::NResize,
+        EI::ResizeNorthEast => WI::NeResize,
+        EI::ResizeColumn => WI::ColResize,
+        EI::ResizeRow => WI::RowResize,
+
         EI::ZoomIn => WI::ZoomIn,
         EI::ZoomOut => WI::ZoomOut,
     })

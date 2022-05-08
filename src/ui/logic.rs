@@ -1,95 +1,54 @@
-use std::sync::{
-    atomic::{AtomicPtr, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 
 use winit::{dpi::LogicalPosition, event_loop::EventLoopProxy, window::WindowId};
 
 use crate::{
-    gpu_context::{GpuContext, GpuContextRef},
+    gpu_context::GpuContextRef,
     modules::ModuleInfo,
     render::{Canvas, Executor},
     render_window::{GlobalUserEvent, UserEvent, WindowUserEvent},
     statistics::Statistics,
-    types::{Vec2f, Vec4f},
-    util::match_winit_cursor,
+    types::Vec4f,
 };
-
-use super::subwindow::*;
-
 type Size = crate::types::Size;
 
 pub struct UIState {
-    control: SubWindowUIState<ControlUIState, ControlUISharedState>,
-    setting: EmptySubWindowUIState,
-    inspection: EmptySubWindowUIState,
-    memory: EmptySubWindowUIState,
-    render_window: EmptySubWindowUIState,
-    module: SubWindowUIState<ModuleUIState, ()>,
+    control_ui: ControlUIState,
+    module_ui: ModuleUIState,
 }
 
 pub struct UILogic {
+    main_window: Mutex<WindowId>,
     canvas: Arc<Canvas>,
     ui_state: UIState,
     // executor: Executor,
     gpu_context: GpuContextRef,
+    texture_id: egui::TextureId,
 }
-
-pub type UILogicRef = Arc<UILogic>;
 
 impl UILogic {
     pub fn new(gpu_context: GpuContextRef) -> Self {
         let canvas = Arc::new(Canvas::new(Size::new(400, 400)));
         let executor = Executor::new(gpu_context.clone());
         let res = Self {
+            main_window: unsafe { WindowId::dummy() }.into(),
             canvas: canvas,
             ui_state: UIState {
-                control: SubWindowUIState::new(
-                    1,
-                    ControlUIState::default(),
-                    ControlUISharedState::default(),
-                ),
-                setting: EmptySubWindowUIState::new_empty(2),
-                inspection: EmptySubWindowUIState::new_empty(3),
-                memory: EmptySubWindowUIState::new_empty(4),
-                render_window: EmptySubWindowUIState::new_empty(5),
-                module: SubWindowUIState::new(
-                    6,
-                    ModuleUIState {
-                        modules: executor.list(),
-                        select_module: None,
-                    },
-                    (),
-                ),
+                control_ui: ControlUIState::default(),
+                module_ui: ModuleUIState {
+                    modules: executor.list(),
+                    select_module: None,
+                },
             },
             // executor,
             gpu_context,
+            texture_id: egui::TextureId::User(0),
         };
         res
     }
 
-    pub fn rebind_logic_window(&self, logic_window_id: u64) {
-        let id = Some(self.gpu_context.instance().id());
-        if logic_window_id == 0 {
-            self.ui_state.control.bind(id);
-            self.ui_state.setting.bind(id);
-            self.ui_state.inspection.bind(id);
-            self.ui_state.memory.bind(id);
-            self.ui_state.render_window.bind(id);
-            self.ui_state.module.bind(id);
-        } else {
-            match logic_window_id {
-                1 => self.ui_state.control.bind(id),
-                2 => self.ui_state.setting.bind(id),
-                3 => self.ui_state.inspection.bind(id),
-                4 => self.ui_state.memory.bind(id),
-                5 => self.ui_state.render_window.bind(id),
-                6 => self.ui_state.module.bind(id),
-                _ => {
-                    panic!("invalid logic_window_id")
-                }
-            }
-        }
+    pub fn set_main_window_id(&mut self, id: WindowId) {
+        *self.main_window.get_mut().unwrap() = id;
     }
 
     pub fn prepare_texture(&self) {
@@ -97,71 +56,53 @@ impl UILogic {
     }
 
     pub fn update(
-        &self,
-        ctx: egui::CtxRef,
+        &mut self,
+        ctx: egui::Context,
         statistics: &Statistics,
         event_proxy: &EventLoopProxy<UserEvent>,
     ) {
+        let mid = *self.main_window.get_mut().unwrap();
         let gpu = self.gpu_context.instance();
-        SubWindow::new(&gpu, &event_proxy, "Control", &self.ui_state.control).show(
-            &ctx,
-            |ui, state, shared_state, _| {
-                egui::Grid::new("grid")
-                    .striped(true)
-                    .spacing([40.0, 4.0])
-                    .show(ui, |ui| {
-                        control_ui(gpu.id(), ui, state, shared_state, statistics, event_proxy)
-                    });
-            },
-        );
-
-        SubWindow::new(&gpu, event_proxy, "Modules", &self.ui_state.module).show(
-            &ctx,
-            |ui, state, _, _| {
-                modules_ui(ui, state, event_proxy);
-            },
-        );
-
-        let mut state = self.ui_state.control.load_shared();
-        SubWindow::new(&gpu, event_proxy, "Setting", &self.ui_state.setting)
-            .open(&mut state.show_setting)
-            .show(&ctx, |ui, _, _, _| {
-                ctx.settings_ui(ui);
-            });
-        SubWindow::new(&gpu, event_proxy, "Inspection", &self.ui_state.inspection)
-            .open(&mut state.show_inspection)
-            .show(&ctx, |ui, _, _, _| {
-                ctx.inspection_ui(ui);
-            });
-        SubWindow::new(&gpu, event_proxy, "Memory", &self.ui_state.memory)
-            .open(&mut state.show_memory)
-            .show(&ctx, |ui, _, _, _| {
-                ctx.memory_ui(ui);
-            });
-        self.ui_state.control.save_shared(state);
-
-        SubWindow::new(
-            &gpu,
-            event_proxy,
-            "Render window",
-            &self.ui_state.render_window,
-        )
-        .show(&ctx, |ui, state, _, g| {
-            ui.image(
-                egui::TextureId::User(0),
-                egui::vec2(g.size.x as f32, g.size.y as f32),
-            );
+        let state = &mut self.ui_state;
+        egui::panel::SidePanel::left("control").show(&ctx, |ui| {
+            egui::Grid::new("grid")
+                .striped(true)
+                .spacing([40.0, 4.0])
+                .show(ui, |ui| {
+                    control_ui(mid, ui, &mut state.control_ui, statistics, event_proxy)
+                })
         });
 
-        // state.first_render = false;
-        if self.ui_state.control.inner().lock().unwrap().always_repaint {
-            ctx.request_repaint();
-        }
+        egui::Window::new("Memory")
+            .open(&mut state.control_ui.memory_opened)
+            .show(&ctx, |ui| ctx.memory_ui(ui));
+        egui::Window::new("Setting")
+            .open(&mut state.control_ui.setting_opened)
+            .show(&ctx, |ui| ctx.settings_ui(ui));
+        egui::Window::new("Inspection")
+            .open(&mut state.control_ui.inspection_opened)
+            .show(&ctx, |ui| ctx.inspection_ui(ui));
+        egui::Window::new("Texture")
+            .open(&mut state.control_ui.texture_opened)
+            .show(&ctx, |ui| ctx.texture_ui(ui));
+
+        egui::Window::new("Modules")
+            .show(&ctx, |ui| modules_ui(ui, &mut state.module_ui, event_proxy));
+
+        let size = self
+            .ui_state
+            .control_ui
+            .canvas_size
+            .unwrap_or(Size::new(100, 100));
+
+        egui::Window::new("Render window").show(&ctx, |ui| {
+            ui.image(self.texture_id, egui::vec2(size.x as f32, size.y as f32));
+        });
     }
 
     pub fn finish(
         &self,
-        output: &egui::Output,
+        output: &egui::PlatformOutput,
         cursor: egui::CursorIcon,
         event_proxy: &EventLoopProxy<UserEvent>,
     ) {
@@ -209,13 +150,11 @@ impl UILogic {
         }
     }
 
-    pub fn get_texture<'s>(&'s self, id: u64) -> &'s wgpu::BindGroup {
-        match id {
-            0 => self.canvas.get_texture().2,
-            _ => {
-                panic!("invalid texture id");
-            }
+    pub fn get_texture<'s>(&'s self, texture_id: &egui::TextureId) -> &'s wgpu::BindGroup {
+        if *texture_id == self.texture_id {
+            return self.canvas.get_texture().2;
         }
+        panic!("invalid texture id");
     }
 }
 
@@ -232,42 +171,31 @@ impl Default for FpsState {
         }
     }
 }
-#[derive(Debug, Copy, Clone)]
-
-pub struct ControlUISharedState {
-    show_setting: bool,
-    show_inspection: bool,
-    show_memory: bool,
-    canvas_size: Option<Size>,
-}
 
 #[derive(Debug, Copy, Clone)]
 pub struct ControlUIState {
     always_repaint: bool,
-    first_render: bool,
     fullscreen: bool,
     clear_color: [f32; 3],
     fps: FpsState,
+    setting_opened: bool,
+    inspection_opened: bool,
+    memory_opened: bool,
+    texture_opened: bool,
+    canvas_size: Option<Size>,
 }
 
 impl Default for ControlUIState {
     fn default() -> Self {
         Self {
             always_repaint: false,
-            first_render: true,
             fullscreen: false,
             clear_color: [0f32, 0f32, 0f32],
             fps: FpsState::default(),
-        }
-    }
-}
-
-impl Default for ControlUISharedState {
-    fn default() -> Self {
-        Self {
-            show_setting: false,
-            show_inspection: false,
-            show_memory: false,
+            setting_opened: false,
+            inspection_opened: false,
+            memory_opened: false,
+            texture_opened: false,
             canvas_size: None,
         }
     }
@@ -294,8 +222,7 @@ fn draw_fps(
     state: &mut ControlUIState,
     event_proxy: &EventLoopProxy<UserEvent>,
 ) {
-    let first_render = state.first_render;
-    let name = "render_fps_limit";
+    let name = "fps limit";
     let state = &mut state.fps;
     ui.label(name);
     ui.horizontal(|ui| {
@@ -328,7 +255,6 @@ fn control_ui(
     id: WindowId,
     ui: &mut egui::Ui,
     state: &mut ControlUIState,
-    shared_state: &mut ControlUISharedState,
     statistics: &Statistics,
     event_proxy: &EventLoopProxy<UserEvent>,
 ) {
@@ -339,6 +265,8 @@ fn control_ui(
         statistics.frame_secends() * 1000f32
     ));
     ui.end_row();
+    draw_fps(id, ui, state, &event_proxy);
+    ui.end_row();
 
     ui.label("always repaint");
     ui.checkbox(&mut state.always_repaint, "");
@@ -346,37 +274,44 @@ fn control_ui(
 
     ui.label("full screen");
     if ui.checkbox(&mut state.fullscreen, "").changed() {
-        // let _ = event_proxy.send_event(UserEvent::FullScreen(state.fullscreen));
+        let _ = event_proxy.send_event(UserEvent::Window(
+            id,
+            WindowUserEvent::FullScreen(state.fullscreen),
+        ));
     }
     ui.end_row();
 
     ui.label("settings");
     ui.collapsing("built-in functions", |ui| {
         if ui.button("setting").clicked() {
-            shared_state.show_setting = !shared_state.show_setting;
+            state.setting_opened = !state.setting_opened;
         }
         if ui.button("inspection").clicked() {
-            shared_state.show_inspection = !shared_state.show_inspection;
+            state.inspection_opened = !state.inspection_opened;
         }
         if ui.button("memory").clicked() {
-            shared_state.show_memory = !shared_state.show_memory;
+            state.memory_opened = !state.memory_opened;
         }
+        if ui.button("texture").clicked() {
+            state.texture_opened = !state.texture_opened;
+        }
+        ui.horizontal(|ui| {
+            ui.label("clear color");
+            if ui.color_edit_button_rgb(&mut state.clear_color).changed() {
+                let _ = event_proxy.send_event(UserEvent::Window(
+                    id,
+                    WindowUserEvent::ClearColor(Some(Vec4f::new(
+                        state.clear_color[0],
+                        state.clear_color[1],
+                        state.clear_color[2],
+                        1.0f32,
+                    ))),
+                ));
+            }
+        });
     });
     ui.end_row();
 
-    draw_fps(id, ui, state, &event_proxy);
-    ui.end_row();
-
-    ui.label("clear color");
-    if ui.color_edit_button_rgb(&mut state.clear_color).changed() {
-        // let _ = event_proxy.send_event(UserEvent::ClearColor(Some(Vec4f::new(
-        //     state.clear_color[0],
-        //     state.clear_color[1],
-        //     state.clear_color[2],
-        //     1.0f32,
-        // ))));
-    }
-    ui.end_row();
 
     // ui.label("render window width");
     // ui.add(egui::Slider::new(
@@ -413,9 +348,7 @@ fn control_ui(
     //     let _ = event_proxy.send_event(UserEvent::CanvasResize(state.canvas_size));
     // }
 
-    ui.end_row();
-
-    if statistics.changed() {
+    if statistics.changed() || state.always_repaint {
         ui.ctx().request_repaint();
     }
 }
@@ -429,21 +362,40 @@ fn module_item(
     event_proxy: &EventLoopProxy<UserEvent>,
 ) -> f32 {
     // init position
-    let fonts = ui.fonts();
-    let row_height0 = fonts[egui::TextStyle::Button].row_height();
-    let row_height1 = fonts[egui::TextStyle::Body].row_height();
-    let space = ui.spacing().item_spacing.y;
-    let line_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
 
-    let pos0 = rect.left_top() + ui.spacing().item_spacing;
-    let pos1 = egui::pos2(pos0.x, pos0.y + row_height0 + space);
-    let inner_height = row_height0 + row_height1 + space * 3f32;
-    let height = inner_height + line_stroke.width;
-    rect.set_height(height);
+    let (inner_rect, pos0, pos1, button_font_id, body_font_id, line_stroke, height) = {
+        let fonts = ui.fonts();
+        let button_font_id = ui
+            .style()
+            .text_styles
+            .get(&egui::TextStyle::Button)
+            .unwrap();
+        let body_font_id = ui.style().text_styles.get(&egui::TextStyle::Body).unwrap();
+        let row_height0 = fonts.row_height(button_font_id);
+        let row_height1 = fonts.row_height(body_font_id);
 
-    let mut inner_rect = rect;
-    inner_rect.set_top(rect.top() + line_stroke.width);
-    inner_rect.set_height(inner_height - line_stroke.width * 2f32);
+        let space = ui.spacing().item_spacing.y;
+        let line_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+
+        let pos0 = rect.left_top() + ui.spacing().item_spacing;
+        let pos1 = egui::pos2(pos0.x, pos0.y + row_height0 + space);
+        let inner_height = row_height0 + row_height1 + space * 3f32;
+        let height = inner_height + line_stroke.width;
+        rect.set_height(height);
+
+        let mut inner_rect = rect;
+        inner_rect.set_top(rect.top() + line_stroke.width);
+        inner_rect.set_height(inner_height - line_stroke.width * 2f32);
+        (
+            inner_rect,
+            pos0,
+            pos1,
+            button_font_id.clone(),
+            body_font_id.clone(),
+            line_stroke,
+            height,
+        )
+    };
 
     // allocate ui content rectangle
     let r = ui.allocate_rect(inner_rect, egui::Sense::click());
@@ -468,7 +420,7 @@ fn module_item(
     if has_outer_box {
         painter.rect(
             inner_rect,
-            widget.corner_radius,
+            widget.rounding,
             widget.bg_fill,
             widget.bg_stroke,
         );
@@ -481,14 +433,14 @@ fn module_item(
         pos0,
         egui::Align2::LEFT_TOP,
         info.name,
-        egui::TextStyle::Button,
+        button_font_id.clone(),
         color0,
     );
     painter.text(
         pos1,
         egui::Align2::LEFT_TOP,
         info.desc,
-        egui::TextStyle::Body,
+        body_font_id.clone(),
         color1,
     );
 
@@ -510,7 +462,7 @@ fn modules_ui(
     state: &mut ModuleUIState,
     event_proxy: &EventLoopProxy<UserEvent>,
 ) {
-    egui::ScrollArea::auto_sized().show_viewport(ui, |ui, viewport| {
+    egui::ScrollArea::vertical().show_viewport(ui, |ui, viewport| {
         let mut height = 0f32;
         let mut top = viewport.min.y + ui.max_rect().top();
         let left = ui.max_rect().left();

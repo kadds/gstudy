@@ -17,7 +17,7 @@ use std::sync::Arc;
 use gpu_context::{GpuContext, GpuContextRef};
 
 use render_window::{Queue, RenderWindow, RenderWindowEventLoop};
-use types::{Color, Size};
+use types::Size;
 use ui::logic::UILogic;
 
 fn main() {
@@ -29,9 +29,9 @@ fn main() {
     let gpu_context: GpuContextRef = GpuContext::new().into();
     let mut event_loop = RenderWindowEventLoop::new(gpu_context.clone());
 
-    let size = Size::new(800, 600);
+    let size = Size::new(1024, 768);
     let pos = Size::new(0, 0);
-    let ui_logic = UILogic::new(gpu_context.clone()).into();
+    let mut ui_logic = UILogic::new(gpu_context.clone());
     let title = "GStudy main".to_owned();
 
     event_loop.run(|event_loop, event_proxy, target| {
@@ -39,8 +39,9 @@ fn main() {
         let id = window.id();
         let queue = Arc::new(Queue::new());
         event_loop.add_render_window(window, queue.clone());
+        ui_logic.set_main_window_id(id);
 
         RenderWindow::new(gpu_context.clone(), queue, id, event_proxy.clone())
-            .dispatch_window(0, resource, ui_logic, size);
+            .dispatch_window(resource, ui_logic, size);
     });
 }
