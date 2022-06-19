@@ -1,6 +1,7 @@
 use std::{
     f32::consts::PI,
     mem::swap,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
@@ -15,8 +16,8 @@ use super::{
     Canvas, Scene,
 };
 use crate::{
+    backends::wgpu_backend::WGPUResource,
     geometry::plane::Plane,
-    gpu_context::GpuContextRef,
     modules::*,
     types::{Vec2f, Vec3f, Vec4f},
 };
@@ -26,7 +27,7 @@ pub struct Executor {
     current_module: usize,
     new_canvas: Option<Arc<Canvas>>,
     world: Option<mpsc::Sender<WorldOperation>>,
-    gpu_context: GpuContextRef,
+    gpu: Rc<WGPUResource>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -50,33 +51,33 @@ struct World {
     pause: bool,
     stop: bool,
     rx: mpsc::Receiver<WorldOperation>,
-    gpu_context: GpuContextRef,
+    gpu: Rc<WGPUResource>,
 }
 
 impl World {
     pub fn new(
         canvas: Arc<Canvas>,
         rx: mpsc::Receiver<WorldOperation>,
-        gpu_context: GpuContextRef,
+        gpu: Rc<WGPUResource>,
     ) -> Self {
         Self {
             canvas,
             pause: false,
             stop: false,
             rx,
-            gpu_context,
+            gpu,
         }
     }
     pub fn start(self, info: ModuleInfo, renderer: Box<dyn ModuleRenderer>) {
-        unsafe {
-            log::info!("{} task running ", info.name);
-            thread::Builder::new()
-                .name(info.name.to_string())
-                .spawn_unchecked(|| {
-                    self.main(renderer);
-                })
-                .unwrap();
-        }
+        // unsafe {
+        //     log::info!("{} task running ", info.name);
+        //     thread::Builder::new()
+        //         .name(info.name.to_string())
+        //         .spawn_unchecked(|| {
+        //             self.main(renderer);
+        //         })
+        //         .unwrap();
+        // }
     }
 
     fn do_op(&mut self, op: WorldOperation, ctr: &mut dyn CameraController) {
@@ -120,7 +121,7 @@ impl World {
             // do something
             if !self.pause {
                 let parameter = RenderParameter {
-                    gpu: self.gpu_context.instance(),
+                    gpu: &self.gpu,
                     camera: &camera,
                     scene: &scene,
                     canvas: &self.canvas,
@@ -147,7 +148,7 @@ impl Drop for Executor {
 }
 
 impl Executor {
-    pub fn new(gpu_context: GpuContextRef) -> Self {
+    pub fn new(gpu: Rc<WGPUResource>) -> Self {
         let mut modules: Vec<Box<dyn ModuleFactory>> = Vec::new();
         modules.push(Box::new(HardwareRendererFactory::new()));
         modules.push(Box::new(SoftwareRendererFactory::new()));
@@ -157,7 +158,7 @@ impl Executor {
             current_module: usize::MAX,
             new_canvas: None,
             world: None,
-            gpu_context,
+            gpu,
         }
     }
 
@@ -183,7 +184,7 @@ impl Executor {
 
         let factory = self.modules[idx].as_ref();
         let (tx, rx) = mpsc::channel();
-        let task = World::new(canvas, rx, self.gpu_context.clone());
+        let task = World::new(canvas, rx, self.gpu.clone());
         self.world = Some(tx);
         task.start(factory.info(), factory.make_renderer());
     }

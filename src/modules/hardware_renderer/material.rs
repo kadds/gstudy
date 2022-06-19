@@ -7,7 +7,7 @@ use std::{
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::{
-    gpu_context::{GpuContext, GpuInstance},
+    backends::wgpu_backend::WGPUResource,
     modules::hardware_renderer::common::FsTarget,
     render::{material::BasicMaterial, scene::Object, Camera, Material, Scene},
     util,
@@ -17,7 +17,7 @@ use super::common::PipelinePass;
 
 #[derive(Debug)]
 pub struct MaterialRenderContext<'a, 'b> {
-    pub gpu: &'a GpuInstance,
+    pub gpu: &'a WGPUResource,
     pub camera: &'a Camera,
     pub scene: &'a Scene,
     pub encoder: &'a mut wgpu::CommandEncoder,

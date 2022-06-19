@@ -12,6 +12,7 @@ pub type Vec4f = Vec4<f32>;
 pub type Point2<T> = nalgebra::Point2<T>;
 pub type Point3<T> = nalgebra::Point3<T>;
 pub type Point4<T> = nalgebra::Point4<T>;
+pub type Rectu = Point4<u32>;
 pub type Size = Point2<u32>;
 pub type Color = Vec4f;
 pub type Quaternion = nalgebra::UnitQuaternion<f32>;

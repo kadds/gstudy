@@ -1,5 +1,5 @@
-use std::time::{Duration, Instant};
-
+use std::time::Duration;
+use wasm_timer::Instant;
 #[derive(Debug)]
 pub struct Statistics {
     statistics_tick: Duration,
@@ -42,11 +42,18 @@ impl Statistics {
         self.target_frame_secends = target_frame_seconds.map(|v| Duration::from_secs_f32(v));
     }
 
-    pub fn new_frame(&mut self) {
-        self.times += 1;
-        self.changed = false;
+    pub fn new_frame(&mut self) -> bool {
         let now = Instant::now();
         let delta = now - self.last_timestamp;
+
+        if let Some(target) = self.target_frame_secends {
+            if target > delta {
+                return false;
+            }
+        }
+        self.times += 1;
+        self.changed = false;
+
         let pass = now - self.last_statistics_timestamp;
         if pass >= self.statistics_tick || self.fps == 0f32 {
             self.frame_secends = (pass.as_micros() as f32 / 1000_000f32) / self.times as f32;
@@ -59,19 +66,20 @@ impl Statistics {
         }
         self.last_timestamp = now;
         self.frame_duration = delta;
+        return true;
     }
 
-    pub fn get_waiting(&mut self) -> Instant {
+    pub fn next_frame(&self) -> (Instant, bool) {
         let now = Instant::now();
         match self.target_frame_secends {
             Some(target) => {
                 let d = now - self.last_timestamp;
                 if target > d {
-                    return now + (target - d);
+                    return (now + (target - d), false);
                 }
-                now
+                (now, true)
             }
-            None => now,
+            None => (now, true),
         }
     }
 

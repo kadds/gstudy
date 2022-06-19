@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
-use crate::gpu_context::GpuInstanceRef;
-use crate::render::{Camera, Canvas, Scene};
+use crate::{
+    backends,
+    render::{Camera, Canvas, Scene},
+};
 
 pub struct RenderParameter<'a> {
-    pub gpu: GpuInstanceRef,
+    pub gpu: &'a backends::wgpu_backend::WGPUResource,
     pub camera: &'a Camera,
     pub scene: &'a Scene,
     pub canvas: &'a Canvas,

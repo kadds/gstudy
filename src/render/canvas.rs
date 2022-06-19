@@ -1,8 +1,4 @@
-use crate::{
-    gpu_context::{GpuContext, GpuInstance, GpuInstanceRef},
-    types,
-    ui::RenderContext,
-};
+use crate::{backends::wgpu_backend::WGPUResource, types};
 use std::{
     mem::size_of_val,
     num::NonZeroU32,
@@ -102,7 +98,7 @@ impl Canvas {
         !t.is_null()
     }
 
-    pub fn build_texture(&self, gpu: &GpuInstance) {
+    pub fn build_texture(&self, gpu: &WGPUResource) {
         let mut need_create = false;
         if self.texture.load(Ordering::Acquire).is_null() {
             need_create = true;
