@@ -24,11 +24,13 @@ pub struct MaterialRenderContext<'a, 'b> {
     pub final_pass_desc: &'a wgpu::RenderPassDescriptor<'a, 'b>,
 }
 
+
 pub trait MaterialRenderer<T: Material> {
     fn render<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &HashSet<u64>);
 }
 
-pub struct MaterialHardwareRenderer {}
+pub struct MaterialHardwareRenderer {
+}
 
 struct BufferCache {
     vertex: wgpu::Buffer,

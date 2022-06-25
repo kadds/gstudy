@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::{path::Path, borrow::BorrowMut};
+use vergen::*;
 
 fn compile_shaders(
     path: &Path,
@@ -39,6 +40,12 @@ fn compile_shaders(
 }
 
 fn main() {
+    let mut config = Config::default();
+    *config.git_mut().sha_kind_mut() = ShaKind::Short;
+    *config.build_mut().kind_mut() = TimestampKind::DateOnly;
+
+    vergen(config).unwrap();
+
     let mut compiler = shaderc::Compiler::new().unwrap();
     let mut options = shaderc::CompileOptions::new().unwrap();
 

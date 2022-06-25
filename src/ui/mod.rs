@@ -14,6 +14,7 @@ struct UIInner {
     cursor_position: (f32, f32),
     frame: Option<egui_renderer::EguiRenderFrame>,
     cursor: egui::CursorIcon,
+    must_render: bool,
 }
 
 pub struct UI {
@@ -48,6 +49,7 @@ impl UIInner {
             cursor_position: (-1f32, -1f32),
             frame: None,
             cursor: egui::CursorIcon::Default,
+            must_render: true,
         }
     }
 }
@@ -74,6 +76,9 @@ impl UIEventProcessor {
                 log::error!("{} text {}", err, output.platform_output.copied_text);
             }
         }
+        if let Some(url) = output.platform_output.open_url {
+            let _ = proxy.send_event(Event::CustomEvent(CustomEvent::OpenUrl(url.url)));
+        }
         if let Some(pos) = output.platform_output.text_cursor_pos {
             let _ = proxy.send_event(Event::UpdateImePosition((pos.x as u32, pos.y as u32)));
         }
@@ -82,8 +87,9 @@ impl UIEventProcessor {
             textures: output.textures_delta,
             shapes: output.shapes,
         });
-        if output.needs_repaint {
+        if output.needs_repaint || inner.must_render {
             let _ = proxy.send_event(Event::Render);
+            inner.must_render = false;
         }
 
         return ProcessEventResult::Received;
@@ -230,6 +236,10 @@ impl EventProcessor for UIEventProcessor {
                     });
                 }
                 _ => (),
+            },
+            Event::JustRenderOnce => {
+                let mut inner = self.inner.borrow_mut();
+                inner.must_render = true;
             },
             _ => (),
         };

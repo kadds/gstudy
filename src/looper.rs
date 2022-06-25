@@ -117,9 +117,6 @@ impl Looper {
                 ProcessEventResult::Consumed => {
                     return ControlFlow::Wait;
                 }
-                ProcessEventResult::ConsumedUpdateTick(instant) => {
-                    return ControlFlow::WaitUntil(instant);
-                }
                 ProcessEventResult::ExitLoop => {
                     return ControlFlow::Exit;
                 }
@@ -188,6 +185,10 @@ impl Looper {
                     state,
                     button,
                 },
+                WindowEvent::ThemeChanged(theme) => return match theme {
+                    winit::window::Theme::Light => Some(Event::Theme(Theme::Light)),
+                    winit::window::Theme::Dark => Some(Event::Theme(Theme::Dark )),
+                },
                 _ => {
                     return None;
                 }
@@ -223,11 +224,10 @@ impl Looper {
                     CustomEvent::Exit => {
                         ret = ControlFlow::Exit;
                     }
-                    CustomEvent::OpenUrl(str) => {
-                        let _ = rfd::AsyncMessageDialog::new()
-                            .set_title("url")
-                            .set_description(&str)
-                            .show();
+                    CustomEvent::OpenUrl(url) => {
+                        if let Err(err) = webbrowser::open(&url) {
+                            log::error!("{}", err);
+                        }
                     }
                     _ => (),
                 },
@@ -241,8 +241,8 @@ impl Looper {
                         ret = self.run_event_processor(&ev);
                         match ev {
                             Event::Render => {
-                                // log::error!("{:?}", Instant::now() - t);
-                            }
+                                log::error!("{:?}", Instant::now() - t);
+                            },
                             _ => (),
                         };
                     }
@@ -266,7 +266,7 @@ impl Looper {
         }
         if self.frame.changed() {
             self.window
-                .set_title(&format!("GStudy {}fps", self.frame.fps()));
+                .set_title(&format!("GStudy {:.1}fps", self.frame.fps()));
         }
         ret
     }

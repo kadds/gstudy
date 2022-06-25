@@ -60,7 +60,15 @@ pub enum InputEvent {
 }
 
 #[derive(Debug)]
+pub enum Theme {
+    Light,
+    Dark,
+}
+
+#[derive(Debug)]
 pub enum Event {
+    JustRenderOnce,
+
     // need update window
     Update,
     // render window
@@ -72,6 +80,8 @@ pub enum Event {
     RawInput(DeviceEvent),
 
     Input(InputEvent),
+
+    Theme(Theme),
 
     Resized(Size),
 
@@ -91,7 +101,6 @@ pub enum Event {
 pub enum ProcessEventResult {
     Received,
     Consumed,
-    ConsumedUpdateTick(Instant),
     ExitLoop,
 }
 

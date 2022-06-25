@@ -21,6 +21,7 @@ arboard = "2.1.1"
 rfd = "0.9"
 wasm-timer = "0.2"
 pollster="0.2"
+webbrowser = "0.7.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = {version = "0.23", features = ["Win32_Foundation", "Win32_System", "Win32_System_Console"]}
@@ -38,6 +39,7 @@ env_logger = "0.9"
 
 [build-dependencies]
 shaderc = "0.8"
+vergen = {version = "7.2", default-features = false, features = ["build", "cargo", "git", "rustc"]}
 
 [lib]
 crate-type = ["cdylib", "rlib"]

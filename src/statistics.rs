@@ -66,7 +66,8 @@ impl Statistics {
         }
         self.last_timestamp = now;
         self.frame_duration = delta;
-        return true;
+
+        true
     }
 
     pub fn next_frame(&self) -> (Instant, bool) {

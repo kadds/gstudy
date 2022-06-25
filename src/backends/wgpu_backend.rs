@@ -221,8 +221,9 @@ impl EventProcessor for WGPUEventProcessor {
         match event {
             Event::Resized(_) => {
                 let size = source.window().inner_size();
-                let width = size.width;
-                let height = size.height;
+                let width = u32::max(size.width, 16);
+                let height = u32::max(size.height, 16);
+
                 self.inner.surface.configure(
                     &self.inner.device,
                     &WGPUResource::build_surface_desc(width, height),
@@ -230,6 +231,7 @@ impl EventProcessor for WGPUEventProcessor {
                 let mut inner = self.inner.inner.borrow_mut();
                 inner.width = width;
                 inner.height = height;
+                let _ = source.event_proxy().send_event(Event::JustRenderOnce);
             }
             Event::Render => {}
             _ => (),

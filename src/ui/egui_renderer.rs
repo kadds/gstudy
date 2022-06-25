@@ -41,8 +41,8 @@ struct BufferCache {
     index_offset: usize,
 }
 
-const DEFAULT_VERTEX_BUFFER_SIZE: usize = 1 << 18;
-const DEFAULT_INDEX_BUFFER_SIZE: usize = 1 << 16;
+const DEFAULT_VERTEX_BUFFER_SIZE: usize = 1 << 20;
+const DEFAULT_INDEX_BUFFER_SIZE: usize = 1 << 19;
 
 pub struct BufferItem {
     pub index_buffer: usize,
