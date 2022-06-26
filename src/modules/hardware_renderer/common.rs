@@ -1,11 +1,9 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::Range,
-};
+use std::collections::{BTreeMap, HashMap};
 
 use spirq::{ty::ImageArrangement, EntryPoint, Locator, ReflectConfig, SpirvBinary, Variable};
 use wgpu::*;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum ShaderType {
     Vertex,
@@ -31,6 +29,7 @@ pub struct PipelinePass {
     pub bind_group_layouts: Vec<BindGroupLayout>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct PipelineReflector<'a> {
     device: &'a Device,
@@ -139,9 +138,9 @@ lazy_static! {
 
 fn scalar_to_wgpu_format(stype: &ScalarType, num: u32) -> Option<VertexFormat> {
     match stype {
-        ScalarType::Signed(bits) => SIGNED_MAP.get(&(*bits, num)).map(|v| *v),
-        ScalarType::Unsigned(bits) => UNSIGNED_MAP.get(&(*bits, num)).map(|v| *v),
-        ScalarType::Float(bits) => FLOAT_MAP.get(&(*bits, num)).map(|v| *v),
+        ScalarType::Signed(bits) => SIGNED_MAP.get(&(*bits, num)).copied(),
+        ScalarType::Unsigned(bits) => UNSIGNED_MAP.get(&(*bits, num)).copied(),
+        ScalarType::Float(bits) => FLOAT_MAP.get(&(*bits, num)).copied(),
         _ => None,
     }
 }
@@ -278,25 +277,25 @@ impl<'a> PipelineReflector<'a> {
     pub fn add_vs(mut self, vs: &ShaderModuleDescriptor) -> Self {
         self.vs = Some(self.device.create_shader_module(vs));
         let vs = make_reflection(vs);
-        let mut entry = ReflectConfig::new()
+        let entry = ReflectConfig::new()
             .spv(vs)
             .ref_all_rscs(false)
             .reflect()
             .unwrap();
-        self.build_vertex_input(&mut entry[0]);
-        self.build_bind_group_layout(&mut entry[0], ShaderType::Vertex);
+        self.build_vertex_input(&entry[0]);
+        self.build_bind_group_layout(&entry[0], ShaderType::Vertex);
         self
     }
 
     pub fn add_fs(mut self, fs: &ShaderModuleDescriptor, fs_target: FsTarget) -> Self {
-        self.fs = Some((self.device.create_shader_module(&fs), fs_target));
+        self.fs = Some((self.device.create_shader_module(fs), fs_target));
         let fs = make_reflection(fs);
-        let mut entry = ReflectConfig::new()
+        let entry = ReflectConfig::new()
             .spv(fs)
             .ref_all_rscs(false)
             .reflect()
             .unwrap();
-        self.build_bind_group_layout(&mut entry[0], ShaderType::Fragment);
+        self.build_bind_group_layout(&entry[0], ShaderType::Fragment);
         self
     }
 

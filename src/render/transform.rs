@@ -14,7 +14,7 @@ pub struct Transform {
 impl Transform {
     pub fn mat(&mut self) -> &Mat4x4f {
         if self.flag {
-            self.mat = self.rotate.clone().to_homogeneous();
+            self.mat = self.rotate.to_homogeneous();
             self.mat.append_nonuniform_scaling_mut(&self.scale);
             self.mat.append_translation_mut(&self.translate);
             self.flag = false;

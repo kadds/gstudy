@@ -1,6 +1,3 @@
-use std::sync::Arc;
-
-use wasm_timer::Instant;
 use winit::{
     dpi::PhysicalPosition,
     event::{
@@ -10,8 +7,9 @@ use winit::{
     window::CursorIcon,
 };
 
-use crate::{looper, types::*};
+use crate::types::*;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum CustomEvent {
     OpenUrl(String),
@@ -59,12 +57,14 @@ pub enum InputEvent {
     },
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Theme {
     Light,
     Dark,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Event {
     JustRenderOnce,

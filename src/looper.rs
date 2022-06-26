@@ -185,10 +185,12 @@ impl Looper {
                     state,
                     button,
                 },
-                WindowEvent::ThemeChanged(theme) => return match theme {
-                    winit::window::Theme::Light => Some(Event::Theme(Theme::Light)),
-                    winit::window::Theme::Dark => Some(Event::Theme(Theme::Dark )),
-                },
+                WindowEvent::ThemeChanged(theme) => {
+                    return match theme {
+                        winit::window::Theme::Light => Some(Event::Theme(Theme::Light)),
+                        winit::window::Theme::Dark => Some(Event::Theme(Theme::Dark)),
+                    }
+                }
                 _ => {
                     return None;
                 }
@@ -237,14 +239,7 @@ impl Looper {
                         _ => true,
                     };
                     if ok {
-                        let t = Instant::now();
                         ret = self.run_event_processor(&ev);
-                        match ev {
-                            Event::Render => {
-                                log::error!("{:?}", Instant::now() - t);
-                            },
-                            _ => (),
-                        };
                     }
                 }
             },
@@ -255,6 +250,9 @@ impl Looper {
                 } => {
                     self.window.request_redraw();
                     ret = ControlFlow::Poll;
+                }
+                winit::event::StartCause::Init => {
+                    log::info!("init event");
                 }
                 _ => {}
             },

@@ -33,13 +33,13 @@ impl Statistics {
             frame_secends: 0f32,
             fps: 0f32,
 
-            target_frame_secends: target_frame_secends.map(|v| Duration::from_secs_f32(v)),
+            target_frame_secends: target_frame_secends.map(Duration::from_secs_f32),
             changed: false,
         }
     }
 
     pub fn set_frame_lock(&mut self, target_frame_seconds: Option<f32>) {
-        self.target_frame_secends = target_frame_seconds.map(|v| Duration::from_secs_f32(v));
+        self.target_frame_secends = target_frame_seconds.map(Duration::from_secs_f32);
     }
 
     pub fn new_frame(&mut self) -> bool {

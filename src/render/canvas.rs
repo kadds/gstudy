@@ -70,7 +70,7 @@ impl CanvasWriter<'_> {
 }
 
 impl Canvas {
-    pub fn new(size: Size) -> Self {
+    pub fn new(size: Size) -> Arc<Self> {
         let mut vec = Vec::new();
         vec.resize(size.x as usize * size.y as usize * 4, 0);
         for iter in vec.chunks_exact_mut(4) {
@@ -83,6 +83,7 @@ impl Canvas {
             data: vec.into_boxed_slice(),
             dirty_flag: AtomicBool::new(true),
         }
+        .into()
     }
 
     pub fn writer<'a>(&'a self) -> CanvasWriter<'a> {
@@ -119,7 +120,7 @@ impl Canvas {
                         count: None,
                     }],
                 });
-            let texture = self.new_texture(&device, self.size, &texture_bind_group_layout);
+            let texture = self.new_texture(device, self.size, &texture_bind_group_layout);
             let box_texture = Box::new(texture);
 
             self.texture
@@ -133,20 +134,28 @@ impl Canvas {
         if dirty_flag {
             let texture = unsafe { &(*self.texture.load(Ordering::Acquire)).0 };
             let queue = gpu.queue();
-            self.update_texture(&queue, texture);
+            self.update_texture(queue, texture);
             self.dirty_flag.store(false, Ordering::Release);
         }
     }
 
-    pub fn get_texture<'s>(
-        &'s self,
+    pub fn get_texture(
+        & self,
     ) -> (
-        &'s wgpu::Texture,
-        &'s wgpu::TextureView,
-        &'s wgpu::BindGroup,
+        & wgpu::Texture,
+        & wgpu::TextureView,
+        & wgpu::BindGroup,
     ) {
         let t = self.texture.load(Ordering::Relaxed);
-        return unsafe { (&(*t).0, &(*t).1, &(*t).2) };
+        unsafe { (&(*t).0, &(*t).1, &(*t).2) }
+    }
+
+    pub fn get_texture_bind_group(& self) -> Option<& wgpu::BindGroup> {
+        let t = self.texture.load(Ordering::Relaxed);
+        if t.is_null() {
+            return None;
+        }
+        unsafe { Some(&(*t).2) }
     }
 
     pub fn new_texture(
@@ -187,7 +196,7 @@ impl Canvas {
         let dst = wgpu::ImageCopyTexture {
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
-            texture: &texture,
+            texture: texture,
             aspect: wgpu::TextureAspect::All,
         };
         let data_layout = wgpu::ImageDataLayout {

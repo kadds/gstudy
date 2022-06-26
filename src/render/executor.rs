@@ -1,12 +1,11 @@
 use std::{
+    collections::{HashMap, HashSet},
     f32::consts::PI,
-    mem::swap,
-    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
     },
-    thread::{self, JoinHandle},
+    thread::{self, JoinHandle, Thread},
 };
 
 use super::{
@@ -17,17 +16,24 @@ use super::{
 };
 use crate::{
     backends::wgpu_backend::WGPUResource,
+    event::Event,
     geometry::plane::Plane,
     modules::*,
     types::{Vec2f, Vec3f, Vec4f},
 };
 
+pub type TaskId = u64;
+
+struct TaskProxy {
+    tx: mpsc::Sender<TaskOperation>,
+    task: Arc<Task>,
+}
+
 pub struct Executor {
     modules: Vec<Box<dyn ModuleFactory>>,
-    current_module: usize,
-    new_canvas: Option<Arc<Canvas>>,
-    world: Option<mpsc::Sender<WorldOperation>>,
-    gpu: Rc<WGPUResource>,
+    tasks: HashMap<TaskId, TaskProxy>,
+    last_task_id: TaskId,
+    tasks_to_wakeup: Vec<TaskId>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -38,75 +44,51 @@ pub enum InputEvent {
     KeyboardInput(),
 }
 
-enum WorldOperation {
+enum TaskOperation {
     Pause,
     Resume,
-    UpdateCanvas(Arc<Canvas>),
+    Start(Arc<WGPUResource>),
     Stop,
     Input(InputEvent),
 }
 
-struct World {
+struct Task {
     canvas: Arc<Canvas>,
-    pause: bool,
-    stop: bool,
-    rx: mpsc::Receiver<WorldOperation>,
-    gpu: Rc<WGPUResource>,
 }
 
-impl World {
-    pub fn new(
-        canvas: Arc<Canvas>,
-        rx: mpsc::Receiver<WorldOperation>,
-        gpu: Rc<WGPUResource>,
-    ) -> Self {
-        Self {
-            canvas,
-            pause: false,
-            stop: false,
-            rx,
-            gpu,
-        }
+impl Task {
+    pub fn new(canvas: Arc<Canvas>) -> Arc<Self> {
+        Self { canvas }.into()
     }
-    pub fn start(self, info: ModuleInfo, renderer: Box<dyn ModuleRenderer>) {
-        // unsafe {
-        //     log::info!("{} task running ", info.name);
-        //     thread::Builder::new()
-        //         .name(info.name.to_string())
-        //         .spawn_unchecked(|| {
-        //             self.main(renderer);
-        //         })
-        //         .unwrap();
-        // }
+    pub fn start(
+        self: Arc<Self>,
+        info: ModuleInfo,
+        renderer: Box<dyn ModuleRenderer>,
+        rx: mpsc::Receiver<TaskOperation>,
+    ) {
+            log::info!("{} task running ", info.name);
+            thread::Builder::new()
+                .name(info.name.to_string())
+                .spawn(move || {
+                    self.main(renderer, rx);
+                })
+                .unwrap();
     }
 
-    fn do_op(&mut self, op: WorldOperation, ctr: &mut dyn CameraController) {
-        match op {
-            WorldOperation::Resume => {
-                self.pause = false;
-            }
-            WorldOperation::Pause => {
-                self.pause = true;
-            }
-            WorldOperation::UpdateCanvas(canvas) => {
-                self.canvas = canvas;
-            }
-            WorldOperation::Stop => {
-                self.stop = true;
-            }
-            WorldOperation::Input(ev) => {}
-        }
-    }
-
-    pub fn main(mut self, mut renderer: Box<dyn ModuleRenderer>) {
+    pub fn main(
+        self: Arc<Self>,
+        mut renderer: Box<dyn ModuleRenderer>,
+        rx: mpsc::Receiver<TaskOperation>,
+    ) {
         let camera = Camera::new();
         let mut scene = Scene::new();
-        let basic_material = Arc::new(BasicMaterial::new(Vec4f::new(1f32, 1f32, 0f32, 1f32)));
+        let basic_material = Arc::new(BasicMaterial::new(Vec4f::new(1f32, 1f32, 1f32, 1f32)));
         let ground = Object::new(
             Box::new(Plane::new(Vec2f::new(10f32, 10f32))),
             basic_material,
         );
         scene.add_object(ground);
+
         let mut ctr = Box::new(EventController::new(&camera));
 
         // camera.make_orthographic(Vec4f::new(0f32, 0f32, 40f32, 40f32), 0.001f32, 100f32);
@@ -116,25 +98,40 @@ impl World {
             Vec3f::new(0f32, 0f32, 0f32).into(),
             Vec3f::new(0f32, 0f32, 1f32),
         );
+        let mut pause = true;
+        let mut stop = false;
+        let mut gpu: Option<Arc<WGPUResource>> = None;
 
-        while !self.stop {
+        while !stop {
             // do something
-            if !self.pause {
+            if !pause && gpu.is_some() {
                 let parameter = RenderParameter {
-                    gpu: &self.gpu,
+                    gpu: gpu.as_ref().unwrap().clone(),
                     camera: &camera,
                     scene: &scene,
                     canvas: &self.canvas,
                 };
                 renderer.render(parameter);
-                if let Ok(op) = self.rx.try_recv() {
-                    self.do_op(op, ctr.as_mut());
-                }
             }
 
-            if self.pause {
-                if let Ok(op) = self.rx.recv() {
-                    self.do_op(op, ctr.as_mut());
+            if pause {
+                if let Ok(op) = rx.recv() {
+                    match op {
+                        TaskOperation::Resume => {
+                            pause = false;
+                        }
+                        TaskOperation::Pause => {
+                            pause = true;
+                        }
+                        TaskOperation::Start(gpu_tmp) => {
+                            gpu = Some(gpu_tmp);
+                            pause = false
+                        }
+                        TaskOperation::Stop => {
+                            stop = true;
+                        }
+                        TaskOperation::Input(ev) => ctr.on_input(ev),
+                    }
                 }
             }
         }
@@ -143,77 +140,60 @@ impl World {
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        self.stop();
+        self.stop_all();
     }
 }
 
 impl Executor {
-    pub fn new(gpu: Rc<WGPUResource>) -> Self {
-        let mut modules: Vec<Box<dyn ModuleFactory>> = Vec::new();
+    pub fn new() -> Self {
+        let mut modules: Vec<Box<dyn ModuleFactory>> = vec![];
         modules.push(Box::new(HardwareRendererFactory::new()));
         modules.push(Box::new(SoftwareRendererFactory::new()));
         modules.push(Box::new(RayTracingFactory::new()));
         Self {
             modules,
-            current_module: usize::MAX,
-            new_canvas: None,
-            world: None,
-            gpu,
+            tasks: HashMap::new(),
+            last_task_id: 0,
+            tasks_to_wakeup: Vec::new(),
         }
     }
 
-    pub fn rerun(&mut self, canvas: Arc<Canvas>) {
-        match self.world.as_mut() {
-            Some(rx) => {
-                let _ = rx.send(WorldOperation::UpdateCanvas(canvas));
-            }
-            None => (),
-        }
-    }
-
-    pub fn run(&mut self, name: &str, canvas: Arc<Canvas>) {
+    pub fn run(&mut self, index: usize, canvas: Arc<Canvas>) -> TaskId {
         log::info!("click to run");
-        let module_index = self.match_module(name);
-        let mut idx = self.current_module;
-        if idx != usize::MAX {
-            self.stop();
-        }
 
-        idx = module_index;
-        self.current_module = idx;
-
-        let factory = self.modules[idx].as_ref();
+        let factory = self.modules[index].as_ref();
         let (tx, rx) = mpsc::channel();
-        let task = World::new(canvas, rx, self.gpu.clone());
-        self.world = Some(tx);
-        task.start(factory.info(), factory.make_renderer());
+        let task = Task::new(canvas);
+        task.clone()
+            .start(factory.info(), factory.make_renderer(), rx);
+        let id = self.last_task_id;
+        self.tasks.insert(id, TaskProxy { tx, task });
+        self.tasks_to_wakeup.push(id);
+        self.last_task_id += 1;
+        id
     }
 
-    pub fn stop(&mut self) {
-        log::info!("click to stop");
-        match self.world.as_mut() {
-            Some(rx) => {
-                let _ = rx.send(WorldOperation::Stop);
-            }
-            None => (),
+    pub fn stop(&mut self, task_id: TaskId) {
+        if let Some(v) = self.tasks.get(&task_id) {
+            let _ = v.tx.send(TaskOperation::Stop);
         }
     }
 
-    pub fn pause(&self) {
-        match self.world.as_ref() {
-            Some(rx) => {
-                let _ = rx.send(WorldOperation::Pause);
-            }
-            _ => (),
+    pub fn stop_all(&mut self) {
+        for task in self.tasks.values() {
+            let _ = task.tx.send(TaskOperation::Stop);
         }
     }
 
-    pub fn resume(&self) {
-        match self.world.as_ref() {
-            Some(rx) => {
-                let _ = rx.send(WorldOperation::Resume);
-            }
-            _ => (),
+    pub fn pause(&self, task_id: TaskId) {
+        if let Some(v) = self.tasks.get(&task_id) {
+            let _ = v.tx.send(TaskOperation::Pause);
+        }
+    }
+
+    pub fn resume(&self, task_id: TaskId) {
+        if let Some(v) = self.tasks.get(&task_id) {
+            let _ = v.tx.send(TaskOperation::Resume);
         }
     }
 
@@ -226,7 +206,25 @@ impl Executor {
             .0
     }
 
-    pub fn list(&self) -> Vec<ModuleInfo> {
+    pub fn module_list(&self) -> Vec<ModuleInfo> {
         self.modules.iter().map(|it| it.info()).collect()
     }
+
+    pub fn tasks(&self) -> HashSet<TaskId> {
+        self.tasks.keys().into_iter().copied().collect()
+    }
+
+    pub fn update(&mut self) {}
+
+    pub fn render(&mut self, gpu: Arc<WGPUResource>) {
+        for id in &self.tasks_to_wakeup {
+            let task = self.tasks.get(id).unwrap();
+            if let Err(e) = task.tx.send(TaskOperation::Start(gpu.clone())) {
+                log::error!("{}", e)
+            }
+        }
+        self.tasks_to_wakeup.clear();
+    }
+
+    pub fn on_input(&self, event: InputEvent) {}
 }

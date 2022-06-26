@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub struct RenderParameter<'a> {
-    pub gpu: &'a backends::wgpu_backend::WGPUResource,
+    pub gpu: Arc<backends::wgpu_backend::WGPUResource>,
     pub camera: &'a Camera,
     pub scene: &'a Scene,
     pub canvas: &'a Canvas,

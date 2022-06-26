@@ -1,15 +1,19 @@
 use std::collections::HashMap;
 
 use egui::TextureId;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::{
-    backends::{wgpu_backend::WGPUResource, WGPUBackend},
+    backends::{
+        wgpu_backend::{Renderer, WGPURenderTarget, WGPUResource},
+        WGPUBackend,
+    },
     modules::hardware_renderer::common::{FsTarget, PipelinePass, PipelineReflector},
     types::{Color, Rectu, Size},
     util::{any_as_u8_slice, any_as_u8_slice_array},
 };
 use std::num::NonZeroU32;
+
+use super::UIContext;
 
 struct ShaderConstantSize {
     size: [f32; 2],
@@ -21,6 +25,7 @@ struct EguiInner {
     pipeline_pass: PipelinePass,
     textures: HashMap<TextureId, (wgpu::Texture, wgpu::BindGroup)>,
     buffer_cache: BufferCache,
+    render_target: WGPURenderTarget,
 }
 
 pub struct EguiRenderer {
@@ -137,12 +142,12 @@ impl BufferCache {
             let queue = gpu.queue();
 
             queue.write_buffer(
-                &index_buffer,
+                index_buffer,
                 (*iused as u64) * std::mem::size_of::<u32>() as u64,
                 any_as_u8_slice_array(indices_new),
             );
             queue.write_buffer(
-                &vertex_buffer,
+                vertex_buffer,
                 (*vused as u64) * std::mem::size_of::<egui::epaint::Vertex>() as u64,
                 any_as_u8_slice_array(vertices_new),
             );
@@ -241,7 +246,7 @@ impl EguiRenderer {
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("egui_texture"),
-            layout: &texture_bind_group_layout,
+            layout: texture_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(&texture_view),
@@ -270,7 +275,7 @@ impl EguiRenderer {
 
         if !inner.textures.contains_key(&id) {
             inner.textures.insert(
-                id.clone(),
+                id,
                 Self::new_texture(
                     gpu,
                     &inner.pipeline_pass.bind_group_layouts[1],
@@ -305,7 +310,7 @@ impl EguiRenderer {
                 y: rectangle.y,
                 z: 0,
             },
-            texture: &texture,
+            texture,
             aspect: wgpu::TextureAspect::All,
         };
         let row_bytes = rectangle.z * bytes_per_pixel;
@@ -387,10 +392,17 @@ impl EguiRenderer {
             bind_group,
             textures: HashMap::new(),
             buffer_cache: BufferCache::new(),
+            render_target: WGPURenderTarget::new("egui renderer"),
         })
     }
 
-    pub fn render(&mut self, backend: &WGPUBackend, frame: EguiRenderFrame) {
+    pub fn render(
+        &mut self,
+        backend: &WGPUBackend,
+        frame: EguiRenderFrame,
+        color: Color,
+        ui_context: &mut UIContext,
+    ) {
         struct RenderPrimitive<'a> {
             item: BufferItem,
             clip: egui::epaint::Rect,
@@ -400,6 +412,8 @@ impl EguiRenderer {
         let mut render_primitive = Vec::new();
         let mut renderer = backend.renderer();
         let gpu_resource = renderer.resource();
+
+        ui_context.executor.render(gpu_resource.clone());
 
         if self.inner.is_none() {
             self.init(&gpu_resource);
@@ -419,42 +433,64 @@ impl EguiRenderer {
         for texture in textures.set {
             Self::update_texture(&gpu_resource, texture.0, inner, texture.1);
         }
+        inner.buffer_cache.reset();
 
         {
             let mut pass_encoder =
-                match renderer.begin_surface(Some(Color::new(0.0f32, 0.0f32, 0.0f32, 1.0f32))) {
+                match renderer.begin_surface(&mut inner.render_target, Some(color)) {
                     Some(v) => v,
                     None => return,
                 };
 
             let mut pass = pass_encoder.new_pass();
-            inner.buffer_cache.reset();
 
             for mut mesh in meshes {
+                let mut skip = false;
                 let clip = mesh.clip_rect;
-                let mesh = match &mut mesh.primitive {
-                    egui::epaint::Primitive::Mesh(mesh) => mesh,
-                    egui::epaint::Primitive::Callback(_) => {
-                        panic!("unsupport");
+                let (mut indices, mut vertices, texture) = match &mut mesh.primitive {
+                    egui::epaint::Primitive::Mesh(mesh) => (
+                        &mut mesh.indices,
+                        &mut mesh.vertices,
+                        match inner.textures.get(&mesh.texture_id) {
+                            Some(v) => &v.1,
+                            None => match mesh.texture_id {
+                                TextureId::User(u) => {
+                                    if let Some(c) = ui_context.canvas_map.get(&u) {
+                                        match c.get_texture_bind_group() {
+                                            Some(v) => v,
+                                            None => {
+                                                c.build_texture(&gpu_resource);
+                                                skip = true;
+                                                continue;
+                                            }
+                                        }
+                                    } else {
+                                        panic!("canvas texture id not found");
+                                    }
+                                }
+                                _ => {
+                                    panic!("invalid texture id");
+                                }
+                            },
+                        },
+                    ),
+                    egui::epaint::Primitive::Callback(callback) => {
+                        todo!("3d callback");
                     }
                 };
-                let texture = match inner.textures.get(&mesh.texture_id) {
-                    Some(v) => v,
-                    None => continue,
-                };
+                if skip {
+                    continue;
+                }
 
-                inner.buffer_cache.add(
-                    &gpu_resource,
-                    &mut mesh.indices,
-                    &mut mesh.vertices,
-                    |item| {
+                inner
+                    .buffer_cache
+                    .add(&gpu_resource, indices, vertices, |item| {
                         render_primitive.push(RenderPrimitive {
                             item,
                             clip,
-                            texture_bind_group: &texture.1,
+                            texture_bind_group: texture,
                         });
-                    },
-                );
+                    });
             }
 
             pass.set_pipeline(&inner.pipeline_pass.pipeline);
@@ -480,7 +516,7 @@ impl EguiRenderer {
                 let index_buffer = inner.buffer_cache.get_index_buffer(item.index_buffer);
                 let vertex_buffer = inner.buffer_cache.get_vertex_buffer(item.vertex_buffer);
 
-                pass.set_bind_group(1, &primitive.texture_bind_group, &[]);
+                pass.set_bind_group(1, primitive.texture_bind_group, &[]);
                 pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(0, vertex_buffer.slice((item.base_vertex as u64)..));
                 pass.draw_indexed(

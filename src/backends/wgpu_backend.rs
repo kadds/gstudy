@@ -1,8 +1,4 @@
-use std::{
-    borrow::BorrowMut,
-    cell::{Ref, RefCell},
-    rc::Rc,
-};
+use std::sync::{Arc, Mutex};
 
 use crate::event::{Event, EventProcessor, EventSource, ProcessEventResult};
 use anyhow::{anyhow, Result};
@@ -22,7 +18,7 @@ pub struct WGPUResource {
     adapter: Adapter,
     device: Device,
     queue: Queue,
-    inner: RefCell<WGPUResourceInner>,
+    inner: Mutex<WGPUResourceInner>,
 }
 
 impl WGPUResource {
@@ -42,21 +38,21 @@ impl WGPUResource {
         &self.queue
     }
     pub fn width(&self) -> u32 {
-        let inner = self.inner.borrow();
+        let inner = self.inner.lock().unwrap();
         inner.width
     }
     pub fn height(&self) -> u32 {
-        let inner = self.inner.borrow();
+        let inner = self.inner.lock().unwrap();
         inner.height
     }
 }
 
 pub struct WGPUBackend {
-    inner: Rc<WGPUResource>,
+    inner: Arc<WGPUResource>,
 }
 
 pub struct WGPUEventProcessor {
-    inner: Rc<WGPUResource>,
+    inner: Arc<WGPUResource>,
 }
 
 impl WGPUBackend {
@@ -70,7 +66,7 @@ impl WGPUBackend {
             compatible_surface: Some(&surface),
         });
         #[cfg(not(target_arch = "wasm32"))]
-        let adapter = pollster::block_on(adapter_fut).ok_or(anyhow!("no adapter found"))?;
+        let adapter = pollster::block_on(adapter_fut).ok_or_else(||anyhow!("no adapter found"))?;
 
         let device_fut = adapter.request_device(
             &DeviceDescriptor {
@@ -90,7 +86,7 @@ impl WGPUBackend {
                 adapter,
                 device,
                 queue,
-                inner: RefCell::new(WGPUResourceInner {
+                inner: Mutex::new(WGPUResourceInner {
                     width: 0,
                     height: 0,
                 }),
@@ -101,38 +97,184 @@ impl WGPUBackend {
 }
 
 #[self_referencing]
-struct WGPUSurfaceRenderer {
-    frame: Option<SurfaceTexture>,
-    texture_view: TextureView,
+struct FrameColorTargetView {
+    frame_texture_view: Option<TextureView>,
+
+    #[borrows(frame_texture_view)]
+    texture_view: &'this TextureView,
+
     #[borrows(texture_view)]
     #[covariant]
     color_attachments: [RenderPassColorAttachment<'this>; 1],
-    #[borrows(color_attachments)]
+}
+
+#[self_referencing]
+struct FrameDepthTargetView {
+    texture_view: TextureView,
+
+    #[borrows(texture_view)]
     #[covariant]
-    desc: RenderPassDescriptor<'this, 'this>,
+    depth_attachment: RenderPassDepthStencilAttachment<'this>,
 }
 
+#[derive(Debug)]
+struct WGPUFrame {
+    frame: SurfaceTexture,
+
+    frame_texture_view: TextureView,
+}
+
+#[derive(Debug)]
 pub struct WGPURenderer {
-    inner: Rc<WGPUResource>,
+    inner: Arc<WGPUResource>,
     encoder: Option<CommandEncoder>,
-    surface_renderer: Option<WGPUSurfaceRenderer>,
+    command_buffers: Vec<CommandBuffer>,
+    frame: Option<WGPUFrame>,
 }
 
+struct WGPURenderTargetInner<'a, 'b> {
+    color_attachments: Vec<RenderPassColorAttachment<'a>>,
+    render_pass_desc: RenderPassDescriptor<'a, 'b>,
+}
+
+impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
+    pub fn new(label: &'static str) -> Self {
+        Self {
+            color_attachments: Vec::new(),
+            render_pass_desc: RenderPassDescriptor {
+                label: Some(label),
+                color_attachments: &[],
+                depth_stencil_attachment: None,
+            },
+        }
+    }
+    pub fn desc(&mut self) -> &RenderPassDescriptor<'a, 'b> {
+        unsafe {
+            self.render_pass_desc.color_attachments =
+                std::mem::transmute(self.color_attachments.as_slice());
+        }
+        &self.render_pass_desc
+    }
+}
+
+#[derive(Debug)]
+pub struct WGPURenderTarget {
+    inner: std::ptr::NonNull<u8>,
+}
+
+unsafe impl core::marker::Send for WGPURenderTarget {}
+
+impl WGPURenderTarget {
+    pub fn new(label: &'static str) -> Self {
+        let inner = Box::new(WGPURenderTargetInner::new(label));
+        let ptr = Box::into_raw(inner);
+        Self {
+            inner: std::ptr::NonNull::new(ptr as *mut u8).unwrap(),
+        }
+    }
+    fn get_mut<'a, 'b>(&mut self) -> &mut WGPURenderTargetInner<'a, 'b> {
+        unsafe { std::mem::transmute(self.inner.as_ptr()) }
+    }
+    fn get<'a, 'b>(&self) -> &WGPURenderTargetInner<'a, 'b> {
+        unsafe { std::mem::transmute(self.inner.as_ptr()) }
+    }
+    pub fn desc<'a, 'b>(&mut self) -> &RenderPassDescriptor<'a, 'b> {
+        self.get_mut().desc()
+    }
+
+    fn map_ops(color: Option<crate::types::Color>) -> Operations<Color> {
+        Operations {
+            load: match color {
+                Some(v) => LoadOp::Clear(wgpu::Color {
+                    r: v.x as f64,
+                    g: v.y as f64,
+                    b: v.z as f64,
+                    a: v.w as f64,
+                }),
+                None => LoadOp::Load,
+            },
+            store: true,
+        }
+    }
+
+    pub fn set_clear_color(&mut self, color: Option<crate::types::Color>) {
+        let inner = self.get_mut();
+        assert!(inner.color_attachments.len() > 0);
+        let ops = Self::map_ops(color);
+
+        for att in &mut inner.color_attachments {
+            att.ops = ops
+        }
+    }
+
+    pub fn set_render_target(
+        &mut self,
+        texture_view: &TextureView,
+        color: Option<crate::types::Color>,
+    ) {
+        let inner = self.get_mut();
+        let ops = Self::map_ops(color);
+        if inner.color_attachments.len() == 0 {
+            inner.color_attachments.push(RenderPassColorAttachment {
+                view: texture_view,
+                resolve_target: None,
+                ops,
+            })
+        }
+    }
+}
+
+impl Drop for WGPURenderTarget {
+    fn drop(&mut self) {}
+}
+
+#[derive(Debug)]
 pub struct PassEncoder<'a> {
     renderer: &'a mut WGPURenderer,
+    render_target: &'a mut WGPURenderTarget,
 }
 
 impl<'a> PassEncoder<'a> {
-    pub fn new_pass(&'a mut self) -> RenderPass<'a> {
+    pub fn new_pass<'b>(&'b mut self) -> RenderPass<'b> {
         let encoder = self.renderer.encoder.as_mut().unwrap();
-        let surface = self.renderer.surface_renderer.as_ref().unwrap();
-        encoder.begin_render_pass(surface.borrow_desc())
+        encoder.begin_render_pass(self.render_target.desc())
+    }
+}
+
+impl WGPURenderer {
+    pub fn new(gpu: Arc<WGPUResource>) -> Self {
+        let encoder = gpu
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("wgpu encoder"),
+            });
+        Self {
+            inner: gpu,
+            encoder: Some(encoder),
+            command_buffers: Vec::new(),
+            frame: None,
+        }
+    }
+    pub fn resource(&self) -> Arc<WGPUResource> {
+        self.inner.clone()
+    }
+    pub fn remake_encoder(&mut self) {
+        self.command_buffers
+            .push(self.encoder.take().unwrap().finish());
+        let encoder = self
+            .inner
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("wgpu encoder"),
+            });
+        self.encoder = Some(encoder);
     }
 }
 
 impl WGPURenderer {
     pub fn begin_surface<'a>(
         &'a mut self,
+        render_target: &'a mut WGPURenderTarget,
         clear_color: Option<crate::types::Color>,
     ) -> Option<PassEncoder<'a>> {
         let frame = match self.inner.surface.get_current_texture() {
@@ -143,53 +285,44 @@ impl WGPURenderer {
             }
         };
         let texture_view = frame.texture.create_view(&TextureViewDescriptor::default());
-        let surface_renderer = WGPUSurfaceRendererBuilder {
-            frame: Some(frame),
-            texture_view,
-            color_attachments_builder: |view: &TextureView| {
-                [RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: clear_color.map_or(LoadOp::Load, |v| {
-                            LoadOp::Clear(Color {
-                                r: v.x as f64,
-                                g: v.y as f64,
-                                b: v.z as f64,
-                                a: v.w as f64,
-                            })
-                        }),
-                        store: true,
-                    },
-                }]
-            },
-            desc_builder: |color_attachments: &[RenderPassColorAttachment; 1]| {
-                RenderPassDescriptor {
-                    label: None,
-                    color_attachments: color_attachments,
-                    depth_stencil_attachment: None,
-                }
-            },
-        }
-        .build();
-        self.surface_renderer = Some(surface_renderer);
-        Some(PassEncoder { renderer: self })
+        self.frame = Some(WGPUFrame {
+            frame,
+            frame_texture_view: texture_view,
+        });
+        render_target.set_render_target(
+            &self.frame.as_ref().unwrap().frame_texture_view,
+            clear_color,
+        );
+
+        Some(PassEncoder {
+            renderer: self,
+            render_target,
+        })
     }
 
-    pub fn resource(&self) -> Rc<WGPUResource> {
-        self.inner.clone()
+    pub fn begin<'a>(
+        &'a mut self,
+        render_target: &'a mut WGPURenderTarget,
+    ) -> Option<PassEncoder<'a>> {
+        Some(PassEncoder {
+            renderer: self,
+            render_target,
+        })
     }
 }
 
 impl Drop for WGPURenderer {
     fn drop(&mut self) {
-        self.inner
-            .queue
-            .submit(std::iter::once(self.encoder.take().unwrap().finish()));
-        if let Some(mut sr) = self.surface_renderer.take() {
-            sr.with_frame_mut(|f| {
-                f.take().unwrap().present();
-            });
+        self.command_buffers
+            .push(self.encoder.take().unwrap().finish());
+
+        let mut tmp = Vec::new();
+
+        std::mem::swap(&mut tmp, &mut self.command_buffers);
+
+        self.inner.queue.submit(tmp.into_iter());
+        if let Some(sr) = self.frame.take() {
+            sr.frame.present();
         }
     }
 }
@@ -200,20 +333,16 @@ impl WGPUBackend {
             inner: self.inner.clone(),
         })
     }
+}
 
-    pub fn renderer(&self) -> WGPURenderer {
-        let encoder = self
-            .inner
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("wgpu encoder"),
-            });
-        WGPURenderer {
-            inner: self.inner.clone(),
-            encoder: Some(encoder),
-            surface_renderer: None,
-        }
+impl Renderer for WGPUBackend {
+    fn renderer(&self) -> WGPURenderer {
+        WGPURenderer::new(self.inner.clone())
     }
+}
+
+pub trait Renderer {
+    fn renderer(&self) -> WGPURenderer;
 }
 
 impl EventProcessor for WGPUEventProcessor {
@@ -228,7 +357,7 @@ impl EventProcessor for WGPUEventProcessor {
                     &self.inner.device,
                     &WGPUResource::build_surface_desc(width, height),
                 );
-                let mut inner = self.inner.inner.borrow_mut();
+                let mut inner = self.inner.inner.lock().unwrap();
                 inner.width = width;
                 inner.height = height;
                 let _ = source.event_proxy().send_event(Event::JustRenderOnce);

@@ -1,8 +1,13 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use winit::event_loop::EventLoopProxy;
 
-use crate::{event::*, util};
+use crate::{
+    event::*,
+    render::{Canvas, Executor},
+    types::Color,
+    util,
+};
 
 pub mod egui_renderer;
 mod logic;
@@ -15,6 +20,7 @@ struct UIInner {
     frame: Option<egui_renderer::EguiRenderFrame>,
     cursor: egui::CursorIcon,
     must_render: bool,
+    ui_context: Option<Box<UIContext>>,
 }
 
 pub struct UI {
@@ -38,6 +44,24 @@ pub struct UIEventProcessor {
     inner: Rc<RefCell<UIInner>>,
 }
 
+pub struct UIContext {
+    pub executor: Executor,
+    canvas_map: HashMap<u64, Arc<Canvas>>,
+    last_texture_id: u64,
+}
+
+impl UIContext {
+    pub fn alloc(&mut self) -> u64 {
+        self.last_texture_id += 1;
+        self.last_texture_id
+    }
+    pub fn add_canvas_and_alloc(&mut self, canvas: Arc<Canvas>) -> u64 {
+        let id = self.alloc();
+        self.canvas_map.insert(id, canvas);
+        id
+    }
+}
+
 impl UIInner {
     fn new() -> Self {
         let mut ui_logic = Vec::new();
@@ -50,6 +74,11 @@ impl UIInner {
             frame: None,
             cursor: egui::CursorIcon::Default,
             must_render: true,
+            ui_context: Some(Box::new(UIContext {
+                executor: Executor::new(),
+                canvas_map: HashMap::new(),
+                last_texture_id: 0,
+            })),
         }
     }
 }
@@ -59,9 +88,13 @@ impl UIEventProcessor {
         let mut inner = self.inner.borrow_mut();
         let ctx = inner.render.ctx();
         ctx.begin_frame(inner.input.clone());
+        let mut ui_context = inner.ui_context.take().unwrap();
         for logic in &mut inner.ui_logic {
-            logic.update(ctx.clone());
+            logic.update(ctx.clone(), &mut ui_context);
         }
+        ui_context.executor.update();
+        inner.ui_context = Some(ui_context);
+
         let output = ctx.end_frame();
         if output.platform_output.cursor_icon != inner.cursor {
             inner.cursor = output.platform_output.cursor_icon;
@@ -69,7 +102,7 @@ impl UIEventProcessor {
                 let _ = proxy.send_event(Event::UpdateCursor(c));
             }
         }
-        if output.platform_output.copied_text.len() > 0 {
+        if !output.platform_output.copied_text.is_empty() {
             let err = arboard::Clipboard::new()
                 .and_then(|mut c| c.set_text(output.platform_output.copied_text.clone()));
             if let Err(err) = err {
@@ -92,7 +125,7 @@ impl UIEventProcessor {
             inner.must_render = false;
         }
 
-        return ProcessEventResult::Received;
+        ProcessEventResult::Received
     }
 }
 
@@ -104,12 +137,30 @@ impl EventProcessor for UIEventProcessor {
             }
             Event::Render => {
                 let mut inner = self.inner.borrow_mut();
+                let ctx = inner.render.ctx();
+                let style = ctx.style();
                 let frame = inner.frame.take().unwrap();
-                inner.render.render(source.backend(), frame);
+                let raw_window_color = style.visuals.window_fill();
+                let target_color = if style.visuals.dark_mode {
+                    egui::Color32::BLACK
+                } else {
+                    egui::Color32::WHITE
+                };
+                let rgba: egui::Rgba =
+                    egui::color::tint_color_towards(raw_window_color, target_color).into();
+
+                let color = Color::new(rgba.r(), rgba.g(), rgba.b(), rgba.a());
+
+                let mut ui_context = inner.ui_context.take().unwrap();
+
+                inner
+                    .render
+                    .render(source.backend(), frame, color, &mut ui_context);
                 // clear all input
                 inner.input.dropped_files.clear();
                 inner.input.events.clear();
                 inner.input.hovered_files.clear();
+                inner.ui_context = Some(ui_context);
             }
             Event::Resized(size) => {
                 let mut inner = self.inner.borrow_mut();
@@ -144,7 +195,7 @@ impl EventProcessor for UIEventProcessor {
                                 .unwrap_or_default();
                             inner.input.events.push(egui::Event::Paste(text));
                         }
-                        let modifiers = inner.input.modifiers.clone();
+                        let modifiers = inner.input.modifiers;
                         inner.input.events.push(egui::Event::Key {
                             pressed: input.state == winit::event::ElementState::Pressed,
                             modifiers,
@@ -227,7 +278,7 @@ impl EventProcessor for UIEventProcessor {
                         winit::event::ElementState::Released => false,
                     };
                     let pos = inner.cursor_position;
-                    let modifiers = inner.input.modifiers.clone();
+                    let modifiers = inner.input.modifiers;
                     inner.input.events.push(egui::Event::PointerButton {
                         pos: egui::pos2(pos.0, pos.1),
                         modifiers,
@@ -240,7 +291,18 @@ impl EventProcessor for UIEventProcessor {
             Event::JustRenderOnce => {
                 let mut inner = self.inner.borrow_mut();
                 inner.must_render = true;
-            },
+            }
+            Event::Theme(theme) => {
+                let inner = self.inner.borrow_mut();
+                match theme {
+                    Theme::Light => {
+                        inner.render.ctx().set_visuals(egui::Visuals::light());
+                    }
+                    Theme::Dark => {
+                        inner.render.ctx().set_visuals(egui::Visuals::dark());
+                    }
+                }
+            }
             _ => (),
         };
         ProcessEventResult::Received

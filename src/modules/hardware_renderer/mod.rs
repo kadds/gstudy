@@ -1,4 +1,8 @@
-use crate::render::material::BasicMaterial;
+use crate::{
+    backends::wgpu_backend::{self, WGPURenderTarget},
+    render::material::BasicMaterial,
+    types::Color,
+};
 
 use self::material::{BasicMaterialHardwareRenderer, MaterialRenderContext, MaterialRenderer};
 
@@ -9,6 +13,7 @@ mod material;
 
 pub struct HardwareRenderer {
     basic_material: BasicMaterialHardwareRenderer,
+    render_target: WGPURenderTarget,
 }
 
 pub struct HardwareRendererFactory {}
@@ -43,6 +48,7 @@ impl HardwareRenderer {
     pub fn new() -> Self {
         Self {
             basic_material: BasicMaterialHardwareRenderer::new(),
+            render_target: WGPURenderTarget::new("hardware renderer"),
         }
     }
 }
@@ -52,41 +58,19 @@ impl ModuleRenderer for HardwareRenderer {
         if !p.canvas.prepared() {
             return;
         }
-        let label = Some("hardware renderer");
-        let mut encoder = p
-            .gpu
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-        let default_render_pass_desc = wgpu::RenderPassDescriptor {
-            label,
-            color_attachments: &[wgpu::RenderPassColorAttachment {
-                view: p.canvas.get_texture().1,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: true,
-                },
-            }],
-            depth_stencil_attachment: None,
-        };
-        let last_render_pass_desc = wgpu::RenderPassDescriptor {
-            label,
-            color_attachments: &[wgpu::RenderPassColorAttachment {
-                view: p.canvas.get_texture().1,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: true,
-                },
-            }],
-            depth_stencil_attachment: None,
-        };
+        let mut renderer = wgpu_backend::WGPURenderer::new(p.gpu.clone());
+        self.render_target.set_render_target(
+            p.canvas.get_texture().1,
+            Some(Color::new(0f32, 0f32, 0f32, 1f32)),
+        );
+
+        let mut encoder = renderer.begin(&mut self.render_target).unwrap();
+
         let mut ctx = MaterialRenderContext {
             gpu: &p.gpu,
             camera: p.camera,
             scene: p.scene,
             encoder: &mut encoder,
-            final_pass_desc: &default_render_pass_desc,
         };
 
         let mo = p.scene.load_material_objects();
@@ -94,9 +78,7 @@ impl ModuleRenderer for HardwareRenderer {
             if *material_id == BasicMaterial::self_type_id() {
                 self.basic_material.render(&mut ctx, objects);
             }
-            ctx.final_pass_desc = &last_render_pass_desc;
         }
-        p.gpu.queue().submit(std::iter::once(encoder.finish()))
     }
 
     fn stop(&mut self) {}

@@ -1,4 +1,4 @@
-use std::{path::Path, borrow::BorrowMut};
+use std::path::Path;
 use vergen::*;
 
 fn compile_shaders(
@@ -23,7 +23,7 @@ fn compile_shaders(
             };
             let file_content = std::fs::read_to_string(path).unwrap();
             let result = compiler
-                .compile_into_spirv(&file_content, shader_type, path_str, "main", Some(&opt))
+                .compile_into_spirv(&file_content, shader_type, path_str, "main", Some(opt))
                 .unwrap();
 
             let bytes_u8 = result.as_binary_u8();
@@ -56,5 +56,5 @@ fn main() {
 
     compile_shaders(Path::new("src/shaders/"), &mut compiler, &mut options);
 
-    println!("cargo:rerun-if-changed={}", "src/shaders/");
+    println!("cargo:rerun-if-changed=src/shaders/");
 }

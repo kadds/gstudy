@@ -1,13 +1,14 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    marker::PhantomData,
     sync::Mutex,
 };
 
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::{
-    backends::wgpu_backend::WGPUResource,
+    backends::wgpu_backend::{PassEncoder, WGPUResource},
     modules::hardware_renderer::common::FsTarget,
     render::{material::BasicMaterial, scene::Object, Camera, Material, Scene},
     util,
@@ -20,17 +21,14 @@ pub struct MaterialRenderContext<'a, 'b> {
     pub gpu: &'a WGPUResource,
     pub camera: &'a Camera,
     pub scene: &'a Scene,
-    pub encoder: &'a mut wgpu::CommandEncoder,
-    pub final_pass_desc: &'a wgpu::RenderPassDescriptor<'a, 'b>,
+    pub encoder: &'a mut PassEncoder<'b>,
 }
-
 
 pub trait MaterialRenderer<T: Material> {
     fn render<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &HashSet<u64>);
 }
 
-pub struct MaterialHardwareRenderer {
-}
+pub struct MaterialHardwareRenderer {}
 
 struct BufferCache {
     vertex: wgpu::Buffer,
@@ -55,7 +53,6 @@ impl BasicMaterialHardwareRenderer {
                 pipeline_pass: None,
                 buffer_cache: HashMap::new(),
             }
-            .into(),
         }
     }
     pub fn prepare_pipeline(&mut self, device: &wgpu::Device) {
@@ -79,11 +76,11 @@ impl BasicMaterialHardwareRenderer {
 impl MaterialRenderer<BasicMaterial> for BasicMaterialHardwareRenderer {
     fn render<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &HashSet<u64>) {
         let device = ctx.gpu.device();
-        self.prepare_pipeline(&device);
+        self.prepare_pipeline(device);
         let label = self.label();
         let inner = &mut self.inner;
         let pipeline = inner.pipeline_pass.as_ref().unwrap();
-        let mut pass = ctx.encoder.begin_render_pass(&ctx.final_pass_desc);
+        let mut pass = ctx.encoder.new_pass();
         pass.set_pipeline(&pipeline.pipeline);
         // render it
         let device = ctx.gpu.device();
