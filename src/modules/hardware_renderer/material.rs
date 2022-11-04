@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    sync::Mutex,
-};
+use std::collections::{HashMap, HashSet};
 
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
@@ -52,7 +47,7 @@ impl BasicMaterialHardwareRenderer {
             inner: BasicMaterialHardwareRendererInner {
                 pipeline_pass: None,
                 buffer_cache: HashMap::new(),
-            }
+            },
         }
     }
     pub fn prepare_pipeline(&mut self, device: &wgpu::Device) {

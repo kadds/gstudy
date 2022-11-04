@@ -216,9 +216,9 @@ impl Looper {
                 self.window.request_redraw();
             }
             WEvent::RedrawEventsCleared => {
-                let (ins, ok) = self.frame.next_frame();
+                let (ins, d, ok) = self.frame.next_frame();
                 if ok {
-                    let _ = event_proxy.send_event(Event::Update);
+                    let _ = event_proxy.send_event(Event::Update(d.as_secs_f64()));
                 }
             }
             WEvent::UserEvent(event) => match event {
@@ -235,7 +235,7 @@ impl Looper {
                 },
                 ev => {
                     let ok = match ev {
-                        Event::Update => self.frame.new_frame(),
+                        Event::Update(_) => self.frame.new_frame(),
                         _ => true,
                     };
                     if ok {
@@ -259,7 +259,7 @@ impl Looper {
             _ => {}
         };
         if ret == ControlFlow::Wait {
-            let (ins, _) = self.frame.next_frame();
+            let (ins, _, _) = self.frame.next_frame();
             ret = ControlFlow::WaitUntil(ins);
         }
         if self.frame.changed() {

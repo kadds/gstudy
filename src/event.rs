@@ -70,7 +70,7 @@ pub enum Event {
     JustRenderOnce,
 
     // need update window
-    Update,
+    Update(f64),
     // render window
     Render,
 

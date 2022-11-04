@@ -84,9 +84,10 @@ impl UIInner {
 }
 
 impl UIEventProcessor {
-    fn update(&mut self, proxy: EventLoopProxy<Event>) -> ProcessEventResult {
+    fn update(&mut self, proxy: EventLoopProxy<Event>, dt: f64) -> ProcessEventResult {
         let mut inner = self.inner.borrow_mut();
         let ctx = inner.render.ctx();
+        inner.input.predicted_dt = dt as f32;
         ctx.begin_frame(inner.input.clone());
         let mut ui_context = inner.ui_context.take().unwrap();
         for logic in &mut inner.ui_logic {
@@ -125,6 +126,11 @@ impl UIEventProcessor {
             inner.must_render = false;
         }
 
+        // clear all input
+        inner.input.dropped_files.clear();
+        inner.input.events.clear();
+        inner.input.hovered_files.clear();
+
         ProcessEventResult::Received
     }
 }
@@ -132,8 +138,8 @@ impl UIEventProcessor {
 impl EventProcessor for UIEventProcessor {
     fn on_event(&mut self, source: &dyn EventSource, event: &Event) -> ProcessEventResult {
         match event {
-            Event::Update => {
-                return self.update(source.event_proxy());
+            Event::Update(dt) => {
+                return self.update(source.event_proxy(), *dt);
             }
             Event::Render => {
                 let mut inner = self.inner.borrow_mut();
@@ -156,10 +162,6 @@ impl EventProcessor for UIEventProcessor {
                 inner
                     .render
                     .render(source.backend(), frame, color, &mut ui_context);
-                // clear all input
-                inner.input.dropped_files.clear();
-                inner.input.events.clear();
-                inner.input.hovered_files.clear();
                 inner.ui_context = Some(ui_context);
             }
             Event::Resized(size) => {

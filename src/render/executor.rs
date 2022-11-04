@@ -1,11 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
     f32::consts::PI,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
-    },
-    thread::{self, JoinHandle, Thread},
+    sync::{mpsc, Arc},
+    thread,
 };
 
 use super::{
@@ -16,7 +13,6 @@ use super::{
 };
 use crate::{
     backends::wgpu_backend::WGPUResource,
-    event::Event,
     geometry::plane::Plane,
     modules::*,
     types::{Vec2f, Vec3f, Vec4f},
@@ -45,6 +41,7 @@ pub enum InputEvent {
 }
 
 enum TaskOperation {
+    None,
     Pause,
     Resume,
     Start(Arc<WGPUResource>),
@@ -66,13 +63,13 @@ impl Task {
         renderer: Box<dyn ModuleRenderer>,
         rx: mpsc::Receiver<TaskOperation>,
     ) {
-            log::info!("{} task running ", info.name);
-            thread::Builder::new()
-                .name(info.name.to_string())
-                .spawn(move || {
-                    self.main(renderer, rx);
-                })
-                .unwrap();
+        log::info!("{} task running ", info.name);
+        thread::Builder::new()
+            .name(info.name.to_string())
+            .spawn(move || {
+                self.main(renderer, rx);
+            })
+            .unwrap();
     }
 
     pub fn main(
@@ -113,26 +110,33 @@ impl Task {
                 };
                 renderer.render(parameter);
             }
+            let mut op = TaskOperation::None;
 
             if pause {
-                if let Ok(op) = rx.recv() {
-                    match op {
-                        TaskOperation::Resume => {
-                            pause = false;
-                        }
-                        TaskOperation::Pause => {
-                            pause = true;
-                        }
-                        TaskOperation::Start(gpu_tmp) => {
-                            gpu = Some(gpu_tmp);
-                            pause = false
-                        }
-                        TaskOperation::Stop => {
-                            stop = true;
-                        }
-                        TaskOperation::Input(ev) => ctr.on_input(ev),
-                    }
+                if let Ok(tmp_op) = rx.recv() {
+                    op = tmp_op;
                 }
+            } else {
+                if let Ok(tmp_op) = rx.try_recv() {
+                    op = tmp_op;
+                }
+            }
+            match op {
+                TaskOperation::Resume => {
+                    pause = false;
+                }
+                TaskOperation::Pause => {
+                    pause = true;
+                }
+                TaskOperation::Start(gpu_tmp) => {
+                    gpu = Some(gpu_tmp.new_queue());
+                    pause = false
+                }
+                TaskOperation::Stop => {
+                    stop = true;
+                }
+                TaskOperation::Input(ev) => ctr.on_input(ev),
+                _ => (),
             }
         }
     }

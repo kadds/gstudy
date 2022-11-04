@@ -70,17 +70,18 @@ impl Statistics {
         true
     }
 
-    pub fn next_frame(&self) -> (Instant, bool) {
+    pub fn next_frame(&self) -> (Instant, Duration, bool) {
         let now = Instant::now();
+        let d = now - self.last_timestamp;
         match self.target_frame_secends {
             Some(target) => {
-                let d = now - self.last_timestamp;
                 if target > d {
-                    return (now + (target - d), false);
+                    (now + (target - d), d, false)
+                } else {
+                    (now, d, true)
                 }
-                (now, true)
             }
-            None => (now, true),
+            None => (now, d, true),
         }
     }
 

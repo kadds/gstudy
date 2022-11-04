@@ -2,7 +2,7 @@ use crate::{geometry::Geometry, render::Material};
 use std::{
     any::TypeId,
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 #[derive(Debug)]

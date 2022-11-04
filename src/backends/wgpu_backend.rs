@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::event::{Event, EventProcessor, EventSource, ProcessEventResult};
 use anyhow::{anyhow, Result};
-use ouroboros::self_referencing;
 use wgpu::*;
 
 #[derive(Debug)]
@@ -12,13 +11,18 @@ struct WGPUResourceInner {
 }
 
 #[derive(Debug)]
-pub struct WGPUResource {
-    instance: Instance,
+struct WGPUInstance {
     surface: Surface,
+    inner: Mutex<WGPUResourceInner>,
+    instance: Instance,
     adapter: Adapter,
+}
+
+#[derive(Debug)]
+pub struct WGPUResource {
     device: Device,
     queue: Queue,
-    inner: Mutex<WGPUResourceInner>,
+    instance: Arc<WGPUInstance>,
 }
 
 impl WGPUResource {
@@ -37,13 +41,39 @@ impl WGPUResource {
     pub fn queue(&self) -> &Queue {
         &self.queue
     }
+    pub fn surface(&self) -> &Surface {
+        &self.instance.surface
+    }
     pub fn width(&self) -> u32 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.instance.inner.lock().unwrap();
         inner.width
     }
     pub fn height(&self) -> u32 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.instance.inner.lock().unwrap();
         inner.height
+    }
+    pub fn set_width_height(&self, width: u32, height: u32) {
+        let mut inner = self.instance.inner.lock().unwrap();
+        inner.width = width;
+        inner.height = height;
+    }
+    pub fn new_queue(self: Arc<Self>) -> Arc<Self> {
+        let device_fut = self.instance.adapter.request_device(
+            &DeviceDescriptor {
+                features: Features::empty(),
+                limits: Limits::default(),
+                label: Some("wgpu device"),
+            },
+            None,
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        let (device, queue) = pollster::block_on(device_fut).unwrap();
+
+        Arc::new(Self {
+            instance: self.instance.clone(),
+            device,
+            queue,
+        })
     }
 }
 
@@ -65,14 +95,27 @@ impl WGPUBackend {
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         });
+        let adapter_fut2 = instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::LowPower,
+            force_fallback_adapter: true,
+            compatible_surface: Some(&surface),
+        });
         #[cfg(not(target_arch = "wasm32"))]
-        let adapter = pollster::block_on(adapter_fut).ok_or_else(||anyhow!("no adapter found"))?;
+        let adapter = {
+            match pollster::block_on(adapter_fut) {
+                Some(v) => v,
+                None => {
+                    // fallback to adapter config 2
+                    pollster::block_on(adapter_fut2).ok_or_else(|| anyhow!("no adapter found"))?
+                }
+            }
+        };
 
         let device_fut = adapter.request_device(
             &DeviceDescriptor {
                 features: Features::empty(),
                 limits: Limits::default(),
-                label: Some("wgpu_desc"),
+                label: Some("wgpu device"),
             },
             None,
         );
@@ -81,40 +124,21 @@ impl WGPUBackend {
 
         Ok(WGPUBackend {
             inner: WGPUResource {
-                instance,
-                surface,
-                adapter,
+                instance: Arc::new(WGPUInstance {
+                    instance,
+                    surface,
+                    adapter,
+                    inner: Mutex::new(WGPUResourceInner {
+                        width: 0,
+                        height: 0,
+                    }),
+                }),
                 device,
                 queue,
-                inner: Mutex::new(WGPUResourceInner {
-                    width: 0,
-                    height: 0,
-                }),
             }
             .into(),
         })
     }
-}
-
-#[self_referencing]
-struct FrameColorTargetView {
-    frame_texture_view: Option<TextureView>,
-
-    #[borrows(frame_texture_view)]
-    texture_view: &'this TextureView,
-
-    #[borrows(texture_view)]
-    #[covariant]
-    color_attachments: [RenderPassColorAttachment<'this>; 1],
-}
-
-#[self_referencing]
-struct FrameDepthTargetView {
-    texture_view: TextureView,
-
-    #[borrows(texture_view)]
-    #[covariant]
-    depth_attachment: RenderPassDepthStencilAttachment<'this>,
 }
 
 #[derive(Debug)]
@@ -277,7 +301,7 @@ impl WGPURenderer {
         render_target: &'a mut WGPURenderTarget,
         clear_color: Option<crate::types::Color>,
     ) -> Option<PassEncoder<'a>> {
-        let frame = match self.inner.surface.get_current_texture() {
+        let frame = match self.inner.surface().get_current_texture() {
             Ok(v) => v,
             Err(e) => {
                 log::error!("get swapchain fail {}", e);
@@ -353,13 +377,11 @@ impl EventProcessor for WGPUEventProcessor {
                 let width = u32::max(size.width, 16);
                 let height = u32::max(size.height, 16);
 
-                self.inner.surface.configure(
+                self.inner.surface().configure(
                     &self.inner.device,
                     &WGPUResource::build_surface_desc(width, height),
                 );
-                let mut inner = self.inner.inner.lock().unwrap();
-                inner.width = width;
-                inner.height = height;
+                self.inner.set_width_height(width, height);
                 let _ = source.event_proxy().send_event(Event::JustRenderOnce);
             }
             Event::Render => {}

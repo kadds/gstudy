@@ -221,6 +221,9 @@ impl Logic for EntryLogic {
         }
 
         for id in closed_window {
+            let s = state.render_windows.get(&id).unwrap();
+            ui_context.executor.stop(s.task_id);
+
             state.render_windows.remove(&id);
         }
 

@@ -9,7 +9,7 @@ use crate::{
     },
     modules::hardware_renderer::common::{FsTarget, PipelinePass, PipelineReflector},
     types::{Color, Rectu, Size},
-    util::{any_as_u8_slice, any_as_u8_slice_array},
+    util::any_as_u8_slice_array,
 };
 use std::num::NonZeroU32;
 

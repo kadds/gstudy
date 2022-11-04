@@ -388,7 +388,7 @@ impl<'a> PipelineReflector<'a> {
                 buffers: &vertex_buffer_layouts,
             },
             fragment: None,
-            primitive: primitive,
+            primitive,
             depth_stencil: None,
             multisample: MultisampleState::default(),
             multiview: None,
@@ -402,11 +402,7 @@ impl<'a> PipelineReflector<'a> {
             })
         }
 
-        log::info!(
-            "pipeline stage {} {:?}",
-            label.unwrap_or_default(),
-            pipeline_desc
-        );
+        log::info!("{:?}", pipeline_desc);
 
         let pipeline = self.device.create_render_pipeline(&pipeline_desc);
 

@@ -139,18 +139,12 @@ impl Canvas {
         }
     }
 
-    pub fn get_texture(
-        & self,
-    ) -> (
-        & wgpu::Texture,
-        & wgpu::TextureView,
-        & wgpu::BindGroup,
-    ) {
+    pub fn get_texture(&self) -> (&wgpu::Texture, &wgpu::TextureView, &wgpu::BindGroup) {
         let t = self.texture.load(Ordering::Relaxed);
         unsafe { (&(*t).0, &(*t).1, &(*t).2) }
     }
 
-    pub fn get_texture_bind_group(& self) -> Option<& wgpu::BindGroup> {
+    pub fn get_texture_bind_group(&self) -> Option<&wgpu::BindGroup> {
         let t = self.texture.load(Ordering::Relaxed);
         if t.is_null() {
             return None;
