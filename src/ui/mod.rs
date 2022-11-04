@@ -256,6 +256,10 @@ impl EventProcessor for UIEventProcessor {
                         inner.input.events.push(egui::Event::Text(c.to_string()));
                     }
                 }
+                InputEvent::ReceivedString(s) => {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.input.events.push(egui::Event::Text(s.clone()));
+                }
                 InputEvent::CursorLeft { device_id } => {
                     let mut inner = self.inner.borrow_mut();
                     inner.input.events.push(egui::Event::PointerGone);

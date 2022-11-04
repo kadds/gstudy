@@ -89,6 +89,7 @@ impl Looper {
             window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
         }
         window.set_visible(true);
+        window.set_ime_allowed(true);
         let event_proxy = event_loop.create_proxy();
         Self {
             window,
@@ -145,6 +146,12 @@ impl Looper {
             WindowEvent::Focused(f) => Event::Focused(f),
             ev => Event::Input(match ev {
                 WindowEvent::ReceivedCharacter(c) => InputEvent::ReceivedCharacter(c),
+                WindowEvent::Ime(ime) => match ime {
+                    winit::event::Ime::Commit(s) => InputEvent::ReceivedString(s),
+                    _ => {
+                        return None;
+                    }
+                },
                 WindowEvent::KeyboardInput {
                     device_id,
                     input,

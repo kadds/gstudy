@@ -466,4 +466,10 @@ impl<'a> PipelineReflector<'a> {
     pub fn build_default(self) -> PipelinePass {
         self.build(PrimitiveState::default())
     }
+
+    pub fn build_line(self) -> PipelinePass {
+        let mut ps = PrimitiveState::default();
+        ps.topology = PrimitiveTopology::LineList;
+        self.build(ps)
+    }
 }

@@ -28,7 +28,9 @@ struct EntryState {
     show_inspection: bool,
     show_memory: bool,
     show_about: bool,
+    about_text: String,
     render_windows: HashMap<TaskId, RenderWindowState>,
+    focus_window: Option<TaskId>,
 }
 
 impl Default for EntryState {
@@ -41,7 +43,9 @@ impl Default for EntryState {
             show_inspection: false,
             show_memory: false,
             show_about: false,
+            about_text: "".to_owned(),
             render_windows: HashMap::new(),
+            focus_window: None,
         }
     }
 }
@@ -162,6 +166,7 @@ impl Logic for EntryLogic {
             .show(&ctx, |ui| {
                 ctx.memory_ui(ui);
             });
+        let text = &mut state.about_text;
         egui::Window::new("About")
             .vscroll(true)
             .collapsible(false)
@@ -178,6 +183,11 @@ impl Logic for EntryLogic {
                     env!("VERGEN_BUILD_DATE"),
                     env!("VERGEN_GIT_SHA_SHORT")
                 )));
+                ui.horizontal(|ui| {
+                    ui.label("🌞 => ");
+                    ui.text_edit_singleline(text);
+                });
+
                 ui.separator();
                 ui.hyperlink_to(
                     format!("{} github", GITHUB),
@@ -203,6 +213,7 @@ impl Logic for EntryLogic {
                     // ui.allocate_space(size);
                     ui.image(egui::TextureId::User(texture_id), size);
                 });
+
             if !window_state.opened {
                 if let Some(c) = window_state.closed_time {
                     if Instant::now() - c > Duration::from_secs(1) {
@@ -216,6 +227,9 @@ impl Logic for EntryLogic {
                 if window_state.new_open {
                     resp.response.request_focus();
                     window_state.new_open = false;
+                }
+                if resp.response.has_focus() {
+                    state.focus_window = Some(*id);
                 }
             }
         }

@@ -35,6 +35,7 @@ pub enum InputEvent {
     },
 
     ReceivedCharacter(char),
+    ReceivedString(String),
 
     CursorEntered {
         device_id: DeviceId,

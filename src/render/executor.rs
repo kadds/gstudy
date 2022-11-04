@@ -5,15 +5,18 @@ use std::{
     thread,
 };
 
+use winit::event::VirtualKeyCode;
+
 use super::{
     camera::{Camera, CameraController, EventController},
     material::BasicMaterial,
     scene::Object,
-    Canvas, Scene,
+    transform::TransformBuilder,
+    Canvas, Scene, Transform,
 };
 use crate::{
     backends::wgpu_backend::WGPUResource,
-    geometry::plane::Plane,
+    geometry::{axis::Axis, plane::Plane, sphere::Sphere},
     modules::*,
     types::{Vec2f, Vec3f, Vec4f},
 };
@@ -32,12 +35,29 @@ pub struct Executor {
     tasks_to_wakeup: Vec<TaskId>,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum MouseButton {
+    Left,
+    Mid,
+    Right,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
-    MouseMove(),
-    MouseInput(),
-    TouchInput(),
-    KeyboardInput(),
+    MouseMove(Vec2f),
+    MouseDrag(Vec2f),
+    MouseStartDrag,
+    MouseEndDrag,
+
+    MouseDown(MouseButton),
+    MouseUp(MouseButton),
+
+    KeyboardDown(VirtualKeyCode),
+    KeyboardUp(VirtualKeyCode),
+    KeyboardInput(VirtualKeyCode),
+
+    Enable,
+    Disable,
 }
 
 enum TaskOperation {
@@ -80,20 +100,43 @@ impl Task {
         let camera = Camera::new();
         let mut scene = Scene::new();
         let basic_material = Arc::new(BasicMaterial::new(Vec4f::new(1f32, 1f32, 1f32, 1f32)));
+
+        let axis = Object::new(Box::new(Axis::new()), basic_material.clone());
+        scene.add_object(axis);
+
         let ground = Object::new(
-            Box::new(Plane::new(Vec2f::new(10f32, 10f32))),
-            basic_material,
+            Box::new(
+                Plane::new().set_transform(
+                    TransformBuilder::new()
+                        .scale(Vec3f::new(40f32, 400f32, 1f32))
+                        .build(),
+                ),
+            ),
+            basic_material.clone(),
         );
         scene.add_object(ground);
+
+        let sphere = Object::new(
+            Box::new(
+                Sphere::new(20, 20).set_transform(
+                    TransformBuilder::new()
+                        .translate(Vec3f::new(1f32, 10f32, 0f32))
+                        .build(),
+                ),
+            ),
+            basic_material,
+        );
+
+        scene.add_object(sphere);
 
         let mut ctr = Box::new(EventController::new(&camera));
 
         // camera.make_orthographic(Vec4f::new(0f32, 0f32, 40f32, 40f32), 0.001f32, 100f32);
         camera.make_perspective(1.0f32, PI / 2.0f32 * 0.8f32, 0.001f32, 820f32);
         camera.look_at(
-            Vec3f::new(0f32, 30f32, 0f32).into(),
+            Vec3f::new(30f32, 15f32, 30f32).into(),
             Vec3f::new(0f32, 0f32, 0f32).into(),
-            Vec3f::new(0f32, 0f32, 1f32),
+            Vec3f::new(0f32, 1f32, 0f32),
         );
         let mut pause = true;
         let mut stop = false;
@@ -230,5 +273,12 @@ impl Executor {
         self.tasks_to_wakeup.clear();
     }
 
-    pub fn on_input(&self, event: InputEvent) {}
+    pub fn send_input(&self, task_id: TaskId, event: InputEvent) {
+        let _ = self
+            .tasks
+            .get(&task_id)
+            .unwrap()
+            .tx
+            .send(TaskOperation::Input(event));
+    }
 }

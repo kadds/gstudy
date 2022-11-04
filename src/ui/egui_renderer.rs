@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::File, io::Read};
 
-use egui::TextureId;
+use egui::{FontFamily, TextureId};
+use font_kit::{family_name::FamilyName, properties::Properties};
 
 use crate::{
     backends::{
@@ -213,10 +214,58 @@ impl BufferCache {
     }
 }
 
+fn load_font(
+    fd: &mut egui::FontDefinitions,
+    source: &mut impl font_kit::source::Source,
+    name: &str,
+    family: FontFamily,
+) -> anyhow::Result<()> {
+    let font =
+        source.select_best_match(&[FamilyName::Title(name.to_string())], &Properties::new())?;
+    let data = font.load()?;
+
+    fd.font_data.insert(
+        name.to_string(),
+        egui::FontData::from_owned(
+            data.copy_font_data()
+                .ok_or(anyhow::Error::msg("load font data fail"))?
+                .to_vec(),
+        ),
+    );
+    fd.families
+        .entry(family)
+        .and_modify(|v| v.insert(0, name.to_string()))
+        .or_default();
+    Ok(())
+}
+
+fn load_fonts(fd: &mut egui::FontDefinitions) {
+    let mut s = font_kit::source::SystemSource::new();
+    // for f in s.all_families().unwrap() {
+    //     log::info!("{}", f);
+    // }
+
+    let fonts = vec![
+        ("Microsoft YaHei UI", FontFamily::Proportional),
+        ("Segoe UI", FontFamily::Proportional),
+        ("Consolas", FontFamily::Monospace),
+    ];
+    for (name, family) in fonts.into_iter() {
+        if let Err(e) = load_font(fd, &mut s, name, family) {
+            log::warn!("load font {} fail with {}", name, e);
+        }
+    }
+}
+
 impl EguiRenderer {
     pub fn new() -> Self {
+        let ctx = egui::Context::default();
+        let mut fd = egui::FontDefinitions::default();
+        load_fonts(&mut fd);
+
+        ctx.set_fonts(fd);
         Self {
-            ctx: egui::Context::default(),
+            ctx,
             inner: None,
             constant_size: None,
         }
