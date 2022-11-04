@@ -57,8 +57,8 @@ impl BasicMaterialHardwareRenderer {
             let vs = wgpu::include_spirv!("../../compile_shaders/material/basic/forward.vert");
             let fs = wgpu::include_spirv!("../../compile_shaders/material/basic/forward.frag");
             let pipeline_info = super::common::PipelineReflector::new(label, device)
-                .add_vs(&vs)
-                .add_fs(&fs, FsTarget::new(wgpu::TextureFormat::Rgba8Unorm))
+                .add_vs(vs)
+                .add_fs(fs, FsTarget::new(wgpu::TextureFormat::Rgba8Unorm))
                 .build(wgpu::PrimitiveState::default());
             inner.pipeline_pass = Some(pipeline_info);
         }

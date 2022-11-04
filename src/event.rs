@@ -96,6 +96,8 @@ pub enum Event {
     UpdateImePosition((u32, u32)),
 
     FullScreen(bool),
+
+    ScaleFactorChanged(f64),
 }
 
 pub enum ProcessEventResult {

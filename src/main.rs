@@ -20,6 +20,10 @@ fn main() {
     #[cfg(windows)]
     unsafe {
         windows::Win32::System::Console::AttachConsole(u32::MAX);
+        windows::Win32::UI::HiDpi::SetProcessDpiAwareness(
+            windows::Win32::UI::HiDpi::PROCESS_PER_MONITOR_DPI_AWARE,
+        )
+        .unwrap();
     }
     env_logger::init();
 

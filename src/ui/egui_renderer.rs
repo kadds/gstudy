@@ -341,9 +341,9 @@ impl EguiRenderer {
     fn init(&mut self, gpu_resource: &WGPUResource) {
         let device = gpu_resource.device();
         let pipeline_pass = PipelineReflector::new(Some("egui"), device)
-            .add_vs(&wgpu::include_spirv!("../compile_shaders/ui.vert"))
+            .add_vs(wgpu::include_spirv!("../compile_shaders/ui.vert"))
             .add_fs(
-                &wgpu::include_spirv!("../compile_shaders/ui.frag"),
+                wgpu::include_spirv!("../compile_shaders/ui.frag"),
                 FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8UnormSrgb),
             )
             .build_default();
@@ -401,6 +401,7 @@ impl EguiRenderer {
         backend: &WGPUBackend,
         frame: EguiRenderFrame,
         color: Color,
+        scale_factor: f32,
         ui_context: &mut UIContext,
     ) {
         struct RenderPrimitive<'a> {
@@ -497,10 +498,10 @@ impl EguiRenderer {
             pass.set_bind_group(0, &inner.bind_group, &[]);
             for primitive in render_primitive {
                 let clip = primitive.clip;
-                let mut x = clip.left() as u32;
-                let mut y = clip.top() as u32;
-                let mut width = clip.width() as u32;
-                let mut height = clip.height() as u32;
+                let mut x = (clip.left() * scale_factor) as u32;
+                let mut y = (clip.top() * scale_factor) as u32;
+                let mut width = (clip.width() * scale_factor) as u32;
+                let mut height = (clip.height() * scale_factor) as u32;
                 if !clip.is_finite() {
                     x = 0;
                     y = 0;

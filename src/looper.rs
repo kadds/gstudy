@@ -5,7 +5,6 @@ use crate::backends::wgpu_backend::WGPUBackend;
 use crate::event::*;
 use crate::statistics::Statistics;
 use crate::types::*;
-use wasm_timer::Instant;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy, EventLoopWindowTarget};
 use winit::window::Window;
@@ -82,8 +81,9 @@ impl Looper {
         let event_loop = EventLoop::with_user_event();
         let window = builder.build(&event_loop).unwrap();
         if let Some(m) = window.current_monitor() {
-            let msize = m.size();
-            let size = window.outer_size();
+            let msize: winit::dpi::LogicalSize<u32> = m.size().to_logical(m.scale_factor());
+            let size: winit::dpi::LogicalSize<u32> =
+                window.outer_size().to_logical(m.scale_factor());
             let x = (msize.width - size.width) / 2;
             let y = (msize.height - size.height) / 2;
             window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
@@ -191,6 +191,12 @@ impl Looper {
                         winit::window::Theme::Dark => Some(Event::Theme(Theme::Dark)),
                     }
                 }
+                WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                    new_inner_size,
+                } => {
+                    return Some(Event::ScaleFactorChanged(scale_factor));
+                }
                 _ => {
                     return None;
                 }
@@ -252,7 +258,9 @@ impl Looper {
                     ret = ControlFlow::Poll;
                 }
                 winit::event::StartCause::Init => {
-                    log::info!("init event");
+                    log::info!("init window scale {}", self.window.scale_factor());
+                    ret = self
+                        .run_event_processor(&Event::ScaleFactorChanged(self.window.scale_factor()))
                 }
                 _ => {}
             },

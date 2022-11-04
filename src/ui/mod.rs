@@ -1,11 +1,14 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
-use winit::event_loop::EventLoopProxy;
+use winit::{
+    dpi::{LogicalSize, PhysicalSize},
+    event_loop::EventLoopProxy,
+};
 
 use crate::{
     event::*,
     render::{Canvas, Executor},
-    types::Color,
+    types::{Color, Size},
     util,
 };
 
@@ -21,6 +24,7 @@ struct UIInner {
     cursor: egui::CursorIcon,
     must_render: bool,
     ui_context: Option<Box<UIContext>>,
+    ppi: f32,
 }
 
 pub struct UI {
@@ -74,6 +78,7 @@ impl UIInner {
             frame: None,
             cursor: egui::CursorIcon::Default,
             must_render: true,
+            ppi: 1.0f32,
             ui_context: Some(Box::new(UIContext {
                 executor: Executor::new(),
                 canvas_map: HashMap::new(),
@@ -88,6 +93,8 @@ impl UIEventProcessor {
         let mut inner = self.inner.borrow_mut();
         let ctx = inner.render.ctx();
         inner.input.predicted_dt = dt as f32;
+        inner.input.pixels_per_point = Some(inner.ppi);
+
         ctx.begin_frame(inner.input.clone());
         let mut ui_context = inner.ui_context.take().unwrap();
         for logic in &mut inner.ui_logic {
@@ -121,7 +128,7 @@ impl UIEventProcessor {
             textures: output.textures_delta,
             shapes: output.shapes,
         });
-        if output.needs_repaint || inner.must_render {
+        if output.repaint_after.is_zero() || inner.must_render {
             let _ = proxy.send_event(Event::Render);
             inner.must_render = false;
         }
@@ -159,18 +166,23 @@ impl EventProcessor for UIEventProcessor {
 
                 let mut ui_context = inner.ui_context.take().unwrap();
 
+                let ppi = inner.ppi;
                 inner
                     .render
-                    .render(source.backend(), frame, color, &mut ui_context);
+                    .render(source.backend(), frame, color, ppi, &mut ui_context);
                 inner.ui_context = Some(ui_context);
             }
-            Event::Resized(size) => {
+            Event::Resized(_) => {
                 let mut inner = self.inner.borrow_mut();
+                let size: PhysicalSize<u32> = source.window().inner_size();
+                let logic_size: LogicalSize<u32> = size.to_logical(source.window().scale_factor());
                 inner.input.screen_rect = Some(egui::Rect::from_min_max(
                     egui::pos2(0f32, 0f32),
-                    egui::pos2(size.x as f32, size.y as f32),
+                    egui::pos2(logic_size.width as f32, logic_size.height as f32),
                 ));
-                inner.render.resize(*size);
+                inner
+                    .render
+                    .resize(Size::new(logic_size.width, logic_size.height));
             }
             Event::Input(ev) => match ev {
                 InputEvent::KeyboardInput {
@@ -225,6 +237,8 @@ impl EventProcessor for UIEventProcessor {
                     device_id,
                     position,
                 } => {
+                    let position: winit::dpi::LogicalPosition<f64> =
+                        position.to_logical(source.window().scale_factor());
                     let mut inner = self.inner.borrow_mut();
                     inner
                         .input
@@ -304,6 +318,11 @@ impl EventProcessor for UIEventProcessor {
                         inner.render.ctx().set_visuals(egui::Visuals::dark());
                     }
                 }
+            }
+            Event::ScaleFactorChanged(factor) => {
+                let mut inner = self.inner.borrow_mut();
+                inner.ppi = *factor as f32;
+                inner.must_render = true;
             }
             _ => (),
         };

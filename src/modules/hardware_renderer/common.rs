@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use spirq::{ty::ImageArrangement, EntryPoint, Locator, ReflectConfig, SpirvBinary, Variable};
+use spirq::{EntryPoint, Locator, ReflectConfig, SpirvBinary, Variable};
 use wgpu::*;
 
 #[allow(dead_code)]
@@ -52,13 +52,13 @@ fn make_reflection(shader: &ShaderModuleDescriptor) -> SpirvBinary {
 
 #[derive(Debug)]
 pub struct FsTarget {
-    states: Vec<ColorTargetState>,
+    states: Vec<Option<ColorTargetState>>,
 }
 
 impl FsTarget {
     pub fn new_single(state: ColorTargetState) -> Self {
         Self {
-            states: vec![state],
+            states: vec![Some(state)],
         }
     }
 
@@ -145,15 +145,39 @@ fn scalar_to_wgpu_format(stype: &ScalarType, num: u32) -> Option<VertexFormat> {
     }
 }
 
-fn image_to_wgpu_image(arrangement: ImageArrangement) -> Option<TextureViewDimension> {
-    match arrangement {
-        ImageArrangement::Image1D => Some(TextureViewDimension::D1),
-        spirq::ty::ImageArrangement::Image2D => Some(TextureViewDimension::D2),
-        spirq::ty::ImageArrangement::Image3D => Some(TextureViewDimension::D3),
-        spirq::ty::ImageArrangement::CubeMap => Some(TextureViewDimension::Cube),
-        spirq::ty::ImageArrangement::Image2DArray => Some(TextureViewDimension::D2Array),
-        spirq::ty::ImageArrangement::CubeMapArray => Some(TextureViewDimension::CubeArray),
-        _ => None,
+fn image_to_wgpu_dimension(dim: spirv_headers::Dim, is_array: bool) -> TextureViewDimension {
+    match dim {
+        spirv_headers::Dim::Dim1D => {
+            if is_array {
+                todo!();
+            }
+            TextureViewDimension::D1
+        }
+        spirv_headers::Dim::Dim2D => {
+            if is_array {
+                TextureViewDimension::D2Array
+            } else {
+                TextureViewDimension::D2
+            }
+        }
+        spirv_headers::Dim::Dim3D => {
+            if is_array {
+                todo!();
+            }
+            TextureViewDimension::D3
+        }
+        spirv_headers::Dim::DimCube => {
+            if is_array {
+                TextureViewDimension::CubeArray
+            } else {
+                TextureViewDimension::Cube
+            }
+        }
+        spirv_headers::Dim::DimRect => {
+            todo!();
+        }
+        spirv_headers::Dim::DimBuffer => todo!(),
+        spirv_headers::Dim::DimSubpassData => todo!(),
     }
 }
 
@@ -224,20 +248,25 @@ impl<'a> PipelineReflector<'a> {
                         use spirq::ty::*;
                         match ty {
                             spirq::ty::Type::Image(img) => {
-                                let view_dimension = image_to_wgpu_image(img.arng).unwrap();
-                                let multisampled = false;
-                                let sample_type = match img.unit_fmt {
-                                    ImageUnitFormat::Color(t) => {
-                                        TextureSampleType::Float { filterable: false }
+                                let multisampled = img.is_multisampled;
+
+                                let sample_type = loop {
+                                    if let Some(is_depth) = img.is_depth {
+                                        if is_depth {
+                                            break TextureSampleType::Depth;
+                                        }
                                     }
-                                    ImageUnitFormat::Sampled => {
-                                        TextureSampleType::Float { filterable: false }
+                                    if let Some(is_sampled) = img.is_sampled {
+                                        if is_sampled {
+                                            break TextureSampleType::Float { filterable: false };
+                                        }
                                     }
-                                    ImageUnitFormat::Depth => TextureSampleType::Depth,
+                                    break TextureSampleType::Float { filterable: false };
                                 };
+                                let view_dimension = image_to_wgpu_dimension(img.dim, img.is_array);
                                 Some(BindGroupLayoutEntry {
                                     binding,
-                                    visibility: visibility,
+                                    visibility,
                                     count: None,
                                     ty: BindingType::Texture {
                                         multisampled,
@@ -246,7 +275,26 @@ impl<'a> PipelineReflector<'a> {
                                     },
                                 })
                             }
-                            _ => None,
+                            spirq::ty::Type::SampledImage(sample) => {
+                                let view_dimension =
+                                    image_to_wgpu_dimension(sample.dim, sample.is_array);
+                                let multisampled = sample.is_multisampled;
+                                let sample_type = TextureSampleType::Float { filterable: false };
+
+                                Some(BindGroupLayoutEntry {
+                                    binding,
+                                    visibility,
+                                    count: None,
+                                    ty: BindingType::Texture {
+                                        multisampled,
+                                        view_dimension,
+                                        sample_type,
+                                    },
+                                })
+                            }
+                            _ => {
+                                todo!()
+                            }
                         }
                     }
                     spirq::DescriptorType::Sampler() => Some(BindGroupLayoutEntry {
@@ -257,7 +305,10 @@ impl<'a> PipelineReflector<'a> {
                     }),
                     spirq::DescriptorType::InputAttachment(_) => todo!(),
                     spirq::DescriptorType::AccelStruct() => todo!(),
-                    _ => None,
+                    dt => {
+                        log::error!("{:?}", dt);
+                        None
+                    }
                 }
                 .unwrap();
                 let position = Position::new(set, binding);
@@ -274,11 +325,11 @@ impl<'a> PipelineReflector<'a> {
         }
     }
 
-    pub fn add_vs(mut self, vs: &ShaderModuleDescriptor) -> Self {
+    pub fn add_vs(mut self, vs: ShaderModuleDescriptor) -> Self {
+        let vs_ref = make_reflection(&vs);
         self.vs = Some(self.device.create_shader_module(vs));
-        let vs = make_reflection(vs);
         let entry = ReflectConfig::new()
-            .spv(vs)
+            .spv(vs_ref)
             .ref_all_rscs(false)
             .reflect()
             .unwrap();
@@ -287,11 +338,11 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
-    pub fn add_fs(mut self, fs: &ShaderModuleDescriptor, fs_target: FsTarget) -> Self {
+    pub fn add_fs(mut self, fs: ShaderModuleDescriptor, fs_target: FsTarget) -> Self {
+        let fs_ref = make_reflection(&fs);
         self.fs = Some((self.device.create_shader_module(fs), fs_target));
-        let fs = make_reflection(fs);
         let entry = ReflectConfig::new()
-            .spv(fs)
+            .spv(fs_ref)
             .ref_all_rscs(false)
             .reflect()
             .unwrap();

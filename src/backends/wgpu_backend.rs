@@ -33,6 +33,7 @@ impl WGPUResource {
             width,
             height,
             present_mode: wgpu::PresentMode::Immediate,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
         }
     }
     pub fn device(&self) -> &Device {
