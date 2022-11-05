@@ -205,7 +205,7 @@ impl BufferCache {
         size: u64,
     ) -> wgpu::Buffer {
         let mat_buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
-            label: None,
+            label: Some("egui mat buffer"),
             size,
             usage: wgpu::BufferUsages::COPY_DST | buffer_type,
             mapped_at_creation: false,

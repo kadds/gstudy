@@ -108,7 +108,7 @@ impl Canvas {
         if need_create {
             let texture_bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: None,
+                    label: Some("canvas bind group layout"),
                     entries: &[wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -159,7 +159,7 @@ impl Canvas {
         texture_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
+            label: Some("canvas texture"),
             size: wgpu::Extent3d {
                 width: size.x,
                 height: size.y,
@@ -171,11 +171,12 @@ impl Canvas {
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                | wgpu::TextureUsages::RENDER_ATTACHMENT|
+                wgpu::TextureUsages::COPY_SRC,
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
+            label: Some("canvas bind group"),
             layout: texture_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,

@@ -18,6 +18,7 @@ pub struct Looper {
     event_proxy: EventLoopProxy<Event>,
     processors: Vec<RefCell<Box<dyn EventProcessor>>>,
     frame: Statistics,
+    first_render: bool,
 }
 
 pub struct DefaultProcessor {}
@@ -88,13 +89,14 @@ impl Looper {
             let y = (msize.height - size.height) / 2;
             window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
         }
-        window.set_visible(true);
         window.set_ime_allowed(true);
+
         let event_proxy = event_loop.create_proxy();
         Self {
             window,
             backend: None,
             event_loop: RefCell::new(event_loop.into()),
+            first_render: false,
             event_proxy,
             processors: Vec::new(),
             frame: Statistics::new(Duration::from_millis(1000), Some(1.0 / 60.0)),
@@ -247,12 +249,17 @@ impl Looper {
                     _ => (),
                 },
                 ev => {
-                    let ok = match ev {
-                        Event::Update(_) => self.frame.new_frame(),
-                        _ => true,
+                    let (ok, render) = match ev {
+                        Event::Update(_) => (self.frame.new_frame(), false),
+                        Event::Render => (true, true),
+                        _ => (true, false),
                     };
                     if ok {
                         ret = self.run_event_processor(&ev);
+                        if render && !self.first_render {
+                            self.first_render = true;
+                            self.window.set_visible(true);
+                        }
                     }
                 }
             },

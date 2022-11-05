@@ -9,14 +9,14 @@ use winit::event::VirtualKeyCode;
 
 use super::{
     camera::{Camera, CameraController, EventController},
-    material::BasicMaterial,
+    material::{BasicMaterial, DepthMaterial, ConstantMaterial, BasicMaterialParameter, ConstantMaterialParameter, DepthMaterialParameter},
     scene::Object,
     transform::TransformBuilder,
     Canvas, Scene, Transform,
 };
 use crate::{
     backends::wgpu_backend::WGPUResource,
-    geometry::{axis::Axis, plane::Plane, sphere::Sphere},
+    geometry::{axis::{Axis, AxisMesh}, plane::{Plane, PlaneMesh}, sphere::{Sphere, SphereMesh}},
     modules::*,
     types::{Vec2f, Vec3f, Vec4f},
 };
@@ -99,35 +99,39 @@ impl Task {
     ) {
         let camera = Camera::new();
         let mut scene = Scene::new();
-        let basic_material = Arc::new(BasicMaterial::new(Vec4f::new(1f32, 1f32, 1f32, 1f32)));
+        let basic_material = Arc::new(BasicMaterial::new(BasicMaterialParameter::new()));
+        let constant_material = Arc::new(ConstantMaterial::new(ConstantMaterialParameter::new()));
+        let depth_material = Arc::new(DepthMaterial::new(DepthMaterialParameter::new()));
+        let depth_line_material = Arc::new(DepthMaterial::new(DepthMaterialParameter {line: true}));
+        let basic_line_material = Arc::new(BasicMaterial::new(BasicMaterialParameter{has_color: true, line: true, ..Default::default()}));
 
-        let axis = Object::new(Box::new(Axis::new()), basic_material.clone());
+        let axis = Object::new(Box::new(Axis::new(AxisMesh::new())), basic_line_material.clone());
         scene.add_object(axis);
 
         let ground = Object::new(
             Box::new(
-                Plane::new().set_transform(
+                Plane::new(PlaneMesh::new()).build_transform(
                     TransformBuilder::new()
-                        .scale(Vec3f::new(40f32, 400f32, 1f32))
+                        .scale(Vec3f::new(10f32, 1f32, 10f32))
                         .build(),
                 ),
             ),
-            basic_material.clone(),
+            depth_material.clone(),
         );
         scene.add_object(ground);
 
         let sphere = Object::new(
             Box::new(
-                Sphere::new(20, 20).set_transform(
+                Sphere::new(SphereMesh::new(20, 20)).build_transform(
                     TransformBuilder::new()
                         .translate(Vec3f::new(1f32, 10f32, 0f32))
                         .build(),
                 ),
             ),
-            basic_material,
+            depth_material,
         );
 
-        scene.add_object(sphere);
+        // scene.add_object(sphere);
 
         let mut ctr = Box::new(EventController::new(&camera));
 

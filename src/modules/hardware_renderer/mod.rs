@@ -1,10 +1,12 @@
+use std::{any::TypeId, collections::HashMap, sync::Arc};
+
 use crate::{
     backends::wgpu_backend::{self, WGPURenderTarget},
-    render::material::BasicMaterial,
+    render::{material::{BasicMaterial, ConstantMaterial, DepthMaterial}, Material},
     types::Color,
 };
 
-use self::material::{BasicMaterialHardwareRenderer, MaterialRenderContext, MaterialRenderer};
+use self::material::{BasicMaterialHardwareRenderer, MaterialRenderContext, MaterialRenderer, DepthMaterialHardwareRenderer};
 
 use super::{ModuleFactory, ModuleInfo, ModuleRenderer, RenderParameter};
 
@@ -12,7 +14,7 @@ pub mod common;
 mod material;
 
 pub struct HardwareRenderer {
-    basic_material: BasicMaterialHardwareRenderer,
+    material_renderer: HashMap<TypeId, Box<dyn MaterialRenderer>>,
     render_target: WGPURenderTarget,
 }
 
@@ -46,8 +48,13 @@ enum RenderMethod {
 
 impl HardwareRenderer {
     pub fn new() -> Self {
+        let mut material_renderer = HashMap::<TypeId, Box<dyn MaterialRenderer>>::new();
+        material_renderer.insert(BasicMaterial::static_type_id(), Box::new(BasicMaterialHardwareRenderer::new()));
+        material_renderer.insert(DepthMaterial::static_type_id(), Box::new(DepthMaterialHardwareRenderer::new()));
+        material_renderer.insert(ConstantMaterial::static_type_id(), Box::new(BasicMaterialHardwareRenderer::new()));
+
         Self {
-            basic_material: BasicMaterialHardwareRenderer::new(),
+            material_renderer,
             render_target: WGPURenderTarget::new("hardware renderer"),
         }
     }
@@ -74,9 +81,14 @@ impl ModuleRenderer for HardwareRenderer {
         };
 
         let mo = p.scene.load_material_objects();
-        for (material_id, objects) in mo {
-            if *material_id == BasicMaterial::self_type_id() {
-                self.basic_material.render(&mut ctx, objects);
+        for (material_type, group) in mo {
+            if let Some(r) = self.material_renderer.get_mut(material_type) {
+                for (m, v) in &group.map {
+                    let material = p.scene.get_material(*m).unwrap();
+                    // let objects = group.get_objects_from_material(*m);
+
+                    r.render_material(&mut ctx, v, material.as_ref());
+                }
             }
         }
     }

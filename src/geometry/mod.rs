@@ -1,19 +1,43 @@
 use crate::{render::Transform, types::*};
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::{Arc, Mutex}, collections::HashMap, any::Any};
 
 #[derive(Debug)]
+pub enum Topology {
+    Point,
+    Line,
+    Triangle,
+}
+
+impl Default for Topology {
+    fn default() -> Self {
+        Self::Triangle
+    }
+}
+
+#[derive(Debug)]
+pub struct IntersectResult {
+    pos: Vec3f,
+    color: Vec4f,
+    normal: Vec3f,
+    reflection_ray: Ray,
+    refraction_ray: Ray,
+}
+
+#[derive(Debug, Default)]
 pub struct Mesh {
     pub vertices: Vec<Vec3f>,
     pub indices: Vec<u32>,
     pub topology: Topology,
+
+    pub vertices_color: Option<Vec<Vec4f>>,
+    pub vertices_texcoord: Option<Vec<Vec2f>>,
+    pub vertices_normal_coord: Option<Vec<Vec2f>>,
 }
 
 impl Mesh {
     pub fn new() -> Self {
         Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            topology: Topology::Triangle,
+            ..Default::default()
         }
     }
 
@@ -51,37 +75,73 @@ impl Mesh {
     }
 }
 
-#[derive(Debug)]
-pub enum Topology {
-    Point,
-    Line,
-    Triangle,
-}
-
-#[derive(Debug)]
-pub struct OptionalMesh {
-    pub vertices_color: Vec<Vec4f>,
-    pub vertices_texcoord: Vec<Vec2f>,
-}
-
-#[derive(Debug)]
-pub struct IntersectResult {
-    pos: Vec3f,
-    color: Vec4f,
-    normal: Vec3f,
-    reflection_ray: Ray,
-    refraction_ray: Ray,
-}
-
-#[derive(Debug)]
-pub struct MeshTexture {
-    pub mesh: Arc<Mesh>,
-    pub optional: Option<Arc<OptionalMesh>>,
-}
-
 pub trait Geometry: Send + Sync + Debug {
-    fn mesh_texture(&self) -> MeshTexture;
+    fn mesh(&self) -> Arc<Mesh>;
     fn intersect(&self, ray: Ray) -> IntersectResult;
+    fn attribute(&self, attribute: &Attribute) -> Option<Arc<dyn Any + Send + Sync>>;
+    fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>);
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+enum Attribute {
+    ConstantColor,
+    Name(String),
+    Index(usize),
+}
+
+pub trait GeometryMeshGenerator: Send + Sync + Debug {
+    fn build_mesh(&self) -> Mesh;
+}
+
+#[derive(Debug)]
+pub struct BasicGeometry<G> where G: GeometryMeshGenerator {
+    inner: Mutex<DirtyMesh>,
+    transform: Transform,
+    attributes: HashMap<Attribute, Arc<dyn Any + Send + Sync>>,
+    g: G,
+}
+
+impl<G> BasicGeometry<G> where G: GeometryMeshGenerator{
+    pub fn new(g: G) -> Self {
+        Self {
+            inner: Mutex::new(DirtyMesh::default()),
+            transform: Transform::default(),
+            attributes: HashMap::new(),
+            g,
+        }
+    }
+
+    pub fn build_transform(mut self, transform: Transform) -> Self {
+        self.transform = transform;
+        self.inner.lock().unwrap().dirty_flag = true;
+        self
+    }
+}
+
+impl<G> Geometry for BasicGeometry<G> where G: GeometryMeshGenerator {
+    fn mesh(&self) -> Arc<Mesh> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.dirty_flag {
+            let mut mesh = self.g.build_mesh();
+            mesh.apply(&self.transform);
+
+            inner.mesh = Some(Arc::new(mesh));
+            inner.dirty_flag = false;
+        }
+        inner.mesh.as_ref().unwrap().clone()
+    }
+
+    fn intersect(&self, ray: Ray) -> IntersectResult {
+        todo!()
+    }
+
+    fn attribute(&self, attribute: &Attribute) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.attributes.get(attribute).cloned()
+    }
+
+    fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>) {
+        self.attributes.insert(attribute, value);
+    }
 }
 
 pub mod axis;

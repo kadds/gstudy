@@ -31,6 +31,12 @@ impl Camera {
         let inner = self.inner.borrow_mut();
         (inner.projection.clone(), inner.view.clone())
     }
+
+    pub fn vp(&self) -> Mat4x4f {
+        let inner = self.inner.borrow_mut();
+        inner.projection * inner.view
+    }
+
     pub fn make_orthographic(&self, rect: Vec4f, near: f32, far: f32) {
         let mut inner = self.inner.borrow_mut();
         inner.projection =

@@ -21,4 +21,5 @@ void main() {
     // srgba -> linear color
     vec4 color = vec4(color & 0xFFu, (color >> 8) & 0xFFu, (color >> 16) & 0xFFu, (color >> 24) & 0xFFu);
     o_color = vec4(srgb_2_linear(color.rgb), color.a / 255.0);
+    // o_color = vec4(color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0);
 }
