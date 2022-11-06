@@ -2,11 +2,17 @@ use std::{any::TypeId, collections::HashMap, sync::Arc};
 
 use crate::{
     backends::wgpu_backend::{self, WGPURenderTarget},
-    render::{material::{BasicMaterial, ConstantMaterial, DepthMaterial}, Material},
+    render::{
+        material::{BasicMaterial, ConstantMaterial, DepthMaterial},
+        Material,
+    },
     types::Color,
 };
 
-use self::material::{BasicMaterialHardwareRenderer, MaterialRenderContext, MaterialRenderer, DepthMaterialHardwareRenderer};
+use self::material::{
+    BasicMaterialHardwareRenderer, DepthMaterialHardwareRenderer, MaterialRenderContext,
+    MaterialRenderer,
+};
 
 use super::{ModuleFactory, ModuleInfo, ModuleRenderer, RenderParameter};
 
@@ -49,9 +55,18 @@ enum RenderMethod {
 impl HardwareRenderer {
     pub fn new() -> Self {
         let mut material_renderer = HashMap::<TypeId, Box<dyn MaterialRenderer>>::new();
-        material_renderer.insert(BasicMaterial::static_type_id(), Box::new(BasicMaterialHardwareRenderer::new()));
-        material_renderer.insert(DepthMaterial::static_type_id(), Box::new(DepthMaterialHardwareRenderer::new()));
-        material_renderer.insert(ConstantMaterial::static_type_id(), Box::new(BasicMaterialHardwareRenderer::new()));
+        material_renderer.insert(
+            BasicMaterial::static_type_id(),
+            Box::new(BasicMaterialHardwareRenderer::new()),
+        );
+        material_renderer.insert(
+            DepthMaterial::static_type_id(),
+            Box::new(DepthMaterialHardwareRenderer::new()),
+        );
+        material_renderer.insert(
+            ConstantMaterial::static_type_id(),
+            Box::new(BasicMaterialHardwareRenderer::new()),
+        );
 
         Self {
             material_renderer,

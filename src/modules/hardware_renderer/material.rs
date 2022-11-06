@@ -1,12 +1,22 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc, any::Any};
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::{
     backends::wgpu_backend::{PassEncoder, WGPUResource},
+    geometry::Mesh,
     modules::hardware_renderer::common::FsTarget,
-    render::{material::{DepthMaterial, downcast, BasicMaterial}, scene::Object, Camera, Material, Scene},
-    util::{self, any_as_u8_slice_array}, geometry::Mesh, types::{Vec3f, Vec4f, Vec2f},
+    render::{
+        material::{downcast, BasicMaterial, DepthMaterial},
+        scene::Object,
+        Camera, Material, Scene,
+    },
+    types::{Vec2f, Vec3f, Vec4f},
+    util::{self, any_as_u8_slice_array},
 };
 
 use super::common::PipelinePass;
@@ -20,7 +30,12 @@ pub struct MaterialRenderContext<'a, 'b> {
 }
 
 pub trait MaterialRenderer: Send {
-    fn render_material<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &Vec<u64>, material: &dyn Material);
+    fn render_material<'a, 'b>(
+        &mut self,
+        ctx: &mut MaterialRenderContext<'a, 'b>,
+        objects: &Vec<u64>,
+        material: &dyn Material,
+    );
 }
 
 struct BufferCache {
@@ -31,7 +46,11 @@ struct BufferCache {
 }
 
 impl BufferCache {
-    pub fn make_mvp(label: Option<&str>, device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> (wgpu::Buffer, wgpu::BindGroup) {
+    pub fn make_mvp(
+        label: Option<&str>,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
         let mvp = device.create_buffer(&wgpu::BufferDescriptor {
             label,
             size: 4 * 4 * 4,
@@ -55,7 +74,6 @@ impl BufferCache {
         (mvp, bind_group)
     }
 }
-
 
 #[repr(C)]
 struct BasicInput {
@@ -103,8 +121,10 @@ impl BasicMaterialHardwareRenderer {
                 ps.topology = wgpu::PrimitiveTopology::LineList;
             }
             let (vs, fs) = if material.inner().has_color {
-                let vs = wgpu::include_spirv!("../../compile_shaders/material/basic/forward_c.vert");
-                let fs = wgpu::include_spirv!("../../compile_shaders/material/basic/forward_c.frag");
+                let vs =
+                    wgpu::include_spirv!("../../compile_shaders/material/basic/forward_c.vert");
+                let fs =
+                    wgpu::include_spirv!("../../compile_shaders/material/basic/forward_c.frag");
                 (vs, fs)
             } else {
                 let vs = wgpu::include_spirv!("../../compile_shaders/material/basic/forward.vert");
@@ -123,14 +143,22 @@ impl BasicMaterialHardwareRenderer {
 }
 
 impl MaterialRenderer for BasicMaterialHardwareRenderer {
-    fn render_material<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &Vec<u64>, material: &dyn Material) {
+    fn render_material<'a, 'b>(
+        &mut self,
+        ctx: &mut MaterialRenderContext<'a, 'b>,
+        objects: &Vec<u64>,
+        material: &dyn Material,
+    ) {
         let material: &BasicMaterial = downcast(material);
         let device = ctx.gpu.device();
         self.prepare_pipeline(device, &material);
 
         let label = self.label();
         let inner = &mut self.inner;
-        let pipeline = inner.pipeline_pass.get(&material.material_id().unwrap()).unwrap();
+        let pipeline = inner
+            .pipeline_pass
+            .get(&material.material_id().unwrap())
+            .unwrap();
         let mut pass = ctx.encoder.new_pass();
         pass.set_pipeline(&pipeline.pipeline);
         // render it
@@ -140,15 +168,36 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
             let geo = object.geometry();
             let mesh = geo.mesh();
             inner.buffer_cache.entry(*id).or_insert_with(|| {
+                let (mvp, bind_group) =
+                    BufferCache::make_mvp(label, device, &pipeline.bind_group_layouts[0]);
+                let index = device.create_buffer_init(&BufferInitDescriptor {
+                    label,
+                    contents: any_as_u8_slice_array(&mesh.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                let mut vertex_data: Vec<BasicInputC> = mesh
+                    .vertices
+                    .iter()
+                    .zip(mesh.vertices_color.as_ref().unwrap().iter())
+                    .map(|(a, b)| BasicInputC {
+                        vertices: *a,
+                        colors: *b,
+                    })
+                    .collect();
 
-                let (mvp, bind_group) = BufferCache::make_mvp(label, device, &pipeline.bind_group_layouts[0]);
-                let index = device.create_buffer_init(&BufferInitDescriptor { label, contents: any_as_u8_slice_array(&mesh.indices), usage: wgpu::BufferUsages::INDEX });
-                let mut vertex_data: Vec<BasicInputC> = mesh.vertices.iter().zip(mesh.vertices_color.as_ref().unwrap().iter()).map(|(a, b)|
-            BasicInputC{vertices: *a, colors: *b}).collect();
+                let vertex = device.create_buffer_init(&BufferInitDescriptor {
+                    label,
+                    contents: any_as_u8_slice_array(&vertex_data),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
-                let vertex = device.create_buffer_init(&BufferInitDescriptor { label, contents: any_as_u8_slice_array(&vertex_data), usage: wgpu::BufferUsages::VERTEX});
-
-                BufferCache {vertex, index, mvp, bind_group }.into()
+                BufferCache {
+                    vertex,
+                    index,
+                    mvp,
+                    bind_group,
+                }
+                .into()
             });
         }
 
@@ -169,7 +218,6 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
         }
     }
 }
-
 
 pub struct DepthMaterialHardwareRendererInner {
     pipeline_pass: HashMap<u64, PipelinePass>,
@@ -214,14 +262,22 @@ impl DepthMaterialHardwareRenderer {
 }
 
 impl MaterialRenderer for DepthMaterialHardwareRenderer {
-    fn render_material<'a, 'b>(&mut self, ctx: &mut MaterialRenderContext<'a, 'b>, objects: &Vec<u64>, material: &dyn Material) {
+    fn render_material<'a, 'b>(
+        &mut self,
+        ctx: &mut MaterialRenderContext<'a, 'b>,
+        objects: &Vec<u64>,
+        material: &dyn Material,
+    ) {
         let material: &DepthMaterial = downcast(material);
         let device = ctx.gpu.device();
         self.prepare_pipeline(device, &material);
 
         let label = self.label();
         let inner = &mut self.inner;
-        let pipeline = inner.pipeline_pass.get(&material.material_id().unwrap()).unwrap();
+        let pipeline = inner
+            .pipeline_pass
+            .get(&material.material_id().unwrap())
+            .unwrap();
 
         let mut pass = ctx.encoder.new_pass();
         pass.set_pipeline(&pipeline.pipeline);
@@ -232,10 +288,25 @@ impl MaterialRenderer for DepthMaterialHardwareRenderer {
             let geo = object.geometry();
             let mesh = geo.mesh();
             inner.buffer_cache.entry(*id).or_insert_with(|| {
-                let (mvp, bind_group) = BufferCache::make_mvp(label, device, &pipeline.bind_group_layouts[0]);
-                let index = device.create_buffer_init(&BufferInitDescriptor { label, contents: any_as_u8_slice_array(&mesh.indices), usage: wgpu::BufferUsages::INDEX });
-                let vertex = device.create_buffer_init(&BufferInitDescriptor { label, contents: any_as_u8_slice_array(&mesh.vertices), usage: wgpu::BufferUsages::VERTEX });
-                BufferCache {vertex, index, mvp, bind_group }.into()
+                let (mvp, bind_group) =
+                    BufferCache::make_mvp(label, device, &pipeline.bind_group_layouts[0]);
+                let index = device.create_buffer_init(&BufferInitDescriptor {
+                    label,
+                    contents: any_as_u8_slice_array(&mesh.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                let vertex = device.create_buffer_init(&BufferInitDescriptor {
+                    label,
+                    contents: any_as_u8_slice_array(&mesh.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                BufferCache {
+                    vertex,
+                    index,
+                    mvp,
+                    bind_group,
+                }
+                .into()
             });
         }
 

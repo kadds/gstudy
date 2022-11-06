@@ -1,14 +1,12 @@
-use std::path::{Path, PathBuf};
 use shaderc::ShaderKind;
+use std::path::{Path, PathBuf};
 use vergen::*;
 
-struct State {
-}
+struct State {}
 
 impl State {
     pub fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 
     fn parse_combines(&self, content: &str) -> anyhow::Result<Vec<(String, Vec<String>)>> {
@@ -21,9 +19,19 @@ impl State {
                 }
 
                 let mut kv = line[3..].splitn(2, ":");
-                let key = kv.next().ok_or_else(|| anyhow::anyhow!("invalid compile flags, key not exist"))?.trim();
-                let value = kv.next().ok_or_else(|| anyhow::anyhow!("invalid compile flags, value not exist"))?.trim();
-                let value: Vec<String> = value.split(",").map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect();
+                let key = kv
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("invalid compile flags, key not exist"))?
+                    .trim();
+                let value = kv
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("invalid compile flags, value not exist"))?
+                    .trim();
+                let value: Vec<String> = value
+                    .split(",")
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 result.push((key.to_owned(), value));
             }
         }
@@ -33,9 +41,16 @@ impl State {
         Ok(result)
     }
 
-    pub fn compile(&self, compiler: &mut shaderc::Compiler, shader_type: ShaderKind, filepath: &Path) -> anyhow::Result<()> {
+    pub fn compile(
+        &self,
+        compiler: &mut shaderc::Compiler,
+        shader_type: ShaderKind,
+        filepath: &Path,
+    ) -> anyhow::Result<()> {
         let file_content = std::fs::read_to_string(filepath)?;
-        let path_str = filepath.to_str().ok_or_else(||anyhow::anyhow!("filepath"))?;
+        let path_str = filepath
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("filepath"))?;
         let compile_filename = path_str.replace("src/shaders/", "src/compile_shaders/");
         let stem = filepath.file_stem().unwrap().to_str().unwrap();
         let extension = filepath.extension().unwrap().to_str().unwrap();
@@ -51,8 +66,14 @@ impl State {
             }
 
             let result = compiler
-                .compile_into_spirv(&file_content, shader_type, filepath.to_str().unwrap(), "main", Some(&opt))
-                    .map_err(|e|anyhow::anyhow!("with {:?} flags {:?} {}", key, flags, e))?;
+                .compile_into_spirv(
+                    &file_content,
+                    shader_type,
+                    filepath.to_str().unwrap(),
+                    "main",
+                    Some(&opt),
+                )
+                .map_err(|e| anyhow::anyhow!("with {:?} flags {:?} {}", key, flags, e))?;
 
             let bytes = result.as_binary_u8();
             let mut target_path = PathBuf::from(&compile_filename);
@@ -73,14 +94,9 @@ impl State {
     }
 }
 
-fn compile_shaders(
-    path: &Path,
-    compiler: &mut shaderc::Compiler,
-    state: &mut State,
-    deep: usize,
-) {
+fn compile_shaders(path: &Path, compiler: &mut shaderc::Compiler, state: &mut State, deep: usize) {
     if deep > 8 {
-        return
+        return;
     }
 
     let dirs = std::fs::read_dir(path).unwrap();
@@ -90,7 +106,6 @@ fn compile_shaders(
         if path.is_dir() {
             compile_shaders(path, compiler, state, deep + 1);
         } else {
-
             let ext = path.extension().unwrap().to_str().unwrap();
             let shader_type = match ext {
                 "vert" => shaderc::ShaderKind::Vertex,

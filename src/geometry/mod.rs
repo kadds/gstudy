@@ -1,5 +1,10 @@
 use crate::{render::Transform, types::*};
-use std::{fmt::Debug, sync::{Arc, Mutex}, collections::HashMap, any::Any};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
 
 #[derive(Debug)]
 pub enum Topology {
@@ -94,14 +99,20 @@ pub trait GeometryMeshGenerator: Send + Sync + Debug {
 }
 
 #[derive(Debug)]
-pub struct BasicGeometry<G> where G: GeometryMeshGenerator {
+pub struct BasicGeometry<G>
+where
+    G: GeometryMeshGenerator,
+{
     inner: Mutex<DirtyMesh>,
     transform: Transform,
     attributes: HashMap<Attribute, Arc<dyn Any + Send + Sync>>,
     g: G,
 }
 
-impl<G> BasicGeometry<G> where G: GeometryMeshGenerator{
+impl<G> BasicGeometry<G>
+where
+    G: GeometryMeshGenerator,
+{
     pub fn new(g: G) -> Self {
         Self {
             inner: Mutex::new(DirtyMesh::default()),
@@ -118,7 +129,10 @@ impl<G> BasicGeometry<G> where G: GeometryMeshGenerator{
     }
 }
 
-impl<G> Geometry for BasicGeometry<G> where G: GeometryMeshGenerator {
+impl<G> Geometry for BasicGeometry<G>
+where
+    G: GeometryMeshGenerator,
+{
     fn mesh(&self) -> Arc<Mesh> {
         let mut inner = self.inner.lock().unwrap();
         if inner.dirty_flag {

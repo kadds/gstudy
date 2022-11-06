@@ -1,17 +1,18 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{render::Transform, types::{Vec3f, Vec4f}};
+use crate::{
+    render::Transform,
+    types::{Vec3f, Vec4f},
+};
 
-use super::{DirtyMesh, Geometry, Mesh, Topology, GeometryMeshGenerator, BasicGeometry};
+use super::{BasicGeometry, DirtyMesh, Geometry, GeometryMeshGenerator, Mesh, Topology};
 
 #[derive(Debug)]
-pub struct AxisMesh {
-}
+pub struct AxisMesh {}
 
 impl AxisMesh {
     pub fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 

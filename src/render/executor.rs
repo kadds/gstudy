@@ -9,14 +9,21 @@ use winit::event::VirtualKeyCode;
 
 use super::{
     camera::{Camera, CameraController, EventController},
-    material::{BasicMaterial, DepthMaterial, ConstantMaterial, BasicMaterialParameter, ConstantMaterialParameter, DepthMaterialParameter},
+    material::{
+        BasicMaterial, BasicMaterialParameter, ConstantMaterial, ConstantMaterialParameter,
+        DepthMaterial, DepthMaterialParameter,
+    },
     scene::Object,
     transform::TransformBuilder,
     Canvas, Scene, Transform,
 };
 use crate::{
     backends::wgpu_backend::WGPUResource,
-    geometry::{axis::{Axis, AxisMesh}, plane::{Plane, PlaneMesh}, sphere::{Sphere, SphereMesh}},
+    geometry::{
+        axis::{Axis, AxisMesh},
+        plane::{Plane, PlaneMesh},
+        sphere::{Sphere, SphereMesh},
+    },
     modules::*,
     types::{Vec2f, Vec3f, Vec4f},
 };
@@ -102,10 +109,18 @@ impl Task {
         let basic_material = Arc::new(BasicMaterial::new(BasicMaterialParameter::new()));
         let constant_material = Arc::new(ConstantMaterial::new(ConstantMaterialParameter::new()));
         let depth_material = Arc::new(DepthMaterial::new(DepthMaterialParameter::new()));
-        let depth_line_material = Arc::new(DepthMaterial::new(DepthMaterialParameter {line: true}));
-        let basic_line_material = Arc::new(BasicMaterial::new(BasicMaterialParameter{has_color: true, line: true, ..Default::default()}));
+        let depth_line_material =
+            Arc::new(DepthMaterial::new(DepthMaterialParameter { line: true }));
+        let basic_line_material = Arc::new(BasicMaterial::new(BasicMaterialParameter {
+            has_color: true,
+            line: true,
+            ..Default::default()
+        }));
 
-        let axis = Object::new(Box::new(Axis::new(AxisMesh::new())), basic_line_material.clone());
+        let axis = Object::new(
+            Box::new(Axis::new(AxisMesh::new())),
+            basic_line_material.clone(),
+        );
         scene.add_object(axis);
 
         let ground = Object::new(

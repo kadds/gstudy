@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{render::Transform, types::Vec3f};
 
-use super::{DirtyMesh, Geometry, Mesh, GeometryMeshGenerator, BasicGeometry};
+use super::{BasicGeometry, DirtyMesh, Geometry, GeometryMeshGenerator, Mesh};
 
 #[derive(Debug)]
 pub struct SphereMesh {
@@ -28,6 +28,5 @@ impl GeometryMeshGenerator for SphereMesh {
         mesh
     }
 }
-
 
 pub type Sphere = BasicGeometry<SphereMesh>;

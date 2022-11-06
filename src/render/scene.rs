@@ -1,6 +1,6 @@
 use crate::{geometry::Geometry, render::Material};
 use std::{
-    any::{TypeId, Any},
+    any::{Any, TypeId},
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -15,7 +15,6 @@ impl MaterialGroup {
         self.map.get(&id).unwrap()
     }
 }
-
 
 #[derive(Debug)]
 pub struct Scene {
@@ -38,8 +37,7 @@ impl Scene {
 
     pub fn add_object(&mut self, object: Object) -> u64 {
         let id = self.last_id;
-        self.last_id+=1;
-
+        self.last_id += 1;
 
         // save material
         let material_id = object.material().material_id();
@@ -53,8 +51,9 @@ impl Scene {
         } else {
             let material_id = self.last_id;
             object.material.reset_material_id(Some(material_id));
-            self.last_id+=1;
-            self.dyn_material_map.insert(material_id, object.material.clone());
+            self.last_id += 1;
+            self.dyn_material_map
+                .insert(material_id, object.material.clone());
             material_id
         };
 
@@ -62,7 +61,12 @@ impl Scene {
         let type_id = object.material.as_ref().type_id();
 
         let entry = self.material_objects.entry(type_id);
-        entry.or_insert_with(|| MaterialGroup::default()).map.entry(material_id).or_default().push(id);
+        entry
+            .or_insert_with(|| MaterialGroup::default())
+            .map
+            .entry(material_id)
+            .or_default()
+            .push(id);
         self.objects.insert(id, object);
 
         id
@@ -85,7 +89,6 @@ impl Scene {
     pub fn get_object(&self, id: u64) -> Option<&Object> {
         self.objects.get(&id)
     }
-
 
     pub fn get_material(&self, id: u64) -> Option<Arc<dyn Material>> {
         self.dyn_material_map.get(&id).cloned()
