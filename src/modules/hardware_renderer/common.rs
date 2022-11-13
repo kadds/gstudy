@@ -39,6 +39,7 @@ pub struct PipelineReflector<'a> {
     cs: Option<ShaderModule>,
     vertex_attrs: BTreeMap<Position, VertexFormat>,
     bind_group_layout_entries: BTreeMap<Position, BindGroupLayoutEntry>,
+    depth: Option<DepthStencilState>,
 }
 
 fn make_reflection(shader: &ShaderModuleDescriptor) -> SpirvBinary {
@@ -191,6 +192,7 @@ impl<'a> PipelineReflector<'a> {
             cs: None,
             vertex_attrs: BTreeMap::new(),
             bind_group_layout_entries: BTreeMap::new(),
+            depth: None,
         }
     }
 
@@ -350,6 +352,11 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
+    pub fn with_depth(mut self, depth: DepthStencilState) -> Self {
+        self.depth = Some(depth);
+        self
+    }
+
     pub fn build(self, primitive: PrimitiveState) -> PipelinePass {
         let label = self.label;
         // build vertex buffer layout firstly
@@ -430,6 +437,10 @@ impl<'a> PipelineReflector<'a> {
                 push_constant_ranges: &[],
             });
 
+        if self.depth.is_some() {
+            log::info!("{:?} init with depth", label);
+        }
+
         let mut pipeline_desc = RenderPipelineDescriptor {
             label,
             layout: Some(&pipeline_layout),
@@ -440,7 +451,7 @@ impl<'a> PipelineReflector<'a> {
             },
             fragment: None,
             primitive,
-            depth_stencil: None,
+            depth_stencil: self.depth,
             multisample: MultisampleState::default(),
             multiview: None,
         };
@@ -460,6 +471,26 @@ impl<'a> PipelineReflector<'a> {
         PipelinePass {
             pipeline,
             bind_group_layouts: layouts,
+        }
+    }
+
+    pub fn depth_with_format(format: TextureFormat) -> DepthStencilState {
+        let stencil = StencilState {
+            front: StencilFaceState::IGNORE,
+            back: StencilFaceState::IGNORE,
+            write_mask: 0,
+            read_mask: 0,
+        };
+        DepthStencilState {
+            format,
+            depth_write_enabled: true,
+            depth_compare: CompareFunction::LessEqual,
+            stencil,
+            bias: DepthBiasState {
+                constant: 0,
+                slope_scale: 0.0f32,
+                clamp: 0.0,
+            },
         }
     }
 

@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     f32::consts::PI,
     sync::{mpsc, Arc},
-    thread,
+    thread, time::Duration,
 };
 
 use winit::event::VirtualKeyCode;
@@ -25,7 +25,7 @@ use crate::{
         sphere::{Sphere, SphereMesh},
     },
     modules::*,
-    types::{Vec2f, Vec3f, Vec4f},
+    types::{Vec2f, Vec3f, Vec4f}, statistics::Statistics,
 };
 
 pub type TaskId = u64;
@@ -127,7 +127,8 @@ impl Task {
             Box::new(
                 Plane::new(PlaneMesh::new()).build_transform(
                     TransformBuilder::new()
-                        .scale(Vec3f::new(10f32, 1f32, 10f32))
+                        .scale(Vec3f::new(20f32, 1f32, 20f32))
+                        .translate(Vec3f::new(0f32, 1f32, 0f32))
                         .build(),
                 ),
             ),
@@ -151,7 +152,7 @@ impl Task {
         let mut ctr = Box::new(EventController::new(&camera));
 
         // camera.make_orthographic(Vec4f::new(0f32, 0f32, 40f32, 40f32), 0.001f32, 100f32);
-        camera.make_perspective(1.0f32, PI / 2.0f32 * 0.8f32, 0.001f32, 820f32);
+        camera.make_perspective(1.0f32, PI / 2.0f32 * 0.8f32, 0.1f32, 100f32);
         camera.look_at(
             Vec3f::new(30f32, 15f32, 30f32).into(),
             Vec3f::new(0f32, 0f32, 0f32).into(),
@@ -160,6 +161,7 @@ impl Task {
         let mut pause = true;
         let mut stop = false;
         let mut gpu: Option<Arc<WGPUResource>> = None;
+        let mut statistics = Statistics::new(Duration::from_secs(1), Some(1f32 / 60f32));
 
         while !stop {
             // do something
@@ -170,8 +172,12 @@ impl Task {
                     scene: &scene,
                     canvas: &self.canvas,
                 };
-                renderer.render(parameter);
+                if statistics.new_frame() {
+                    renderer.render(parameter);
+                }
             }
+            let (t, dur, _) = statistics.next_frame();
+            std::thread::sleep(dur);
             let mut op = TaskOperation::None;
 
             if pause {

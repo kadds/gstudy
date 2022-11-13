@@ -9,11 +9,15 @@ use crate::render::Transform;
 use crate::types::*;
 // normal (0, 1, 0)
 #[derive(Debug)]
-pub struct PlaneMesh {}
+pub struct PlaneMesh {
+    color: Vec4f,
+}
 
 impl PlaneMesh {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            color: Vec4f::new(1f32,1f32, 1f32, 1f32),
+        }
     }
 }
 impl GeometryMeshGenerator for PlaneMesh {
@@ -25,6 +29,13 @@ impl GeometryMeshGenerator for PlaneMesh {
         mesh.add_vertex(Vec3f::new(1f32, 0f32, 1f32));
         mesh.add_vertex(Vec3f::new(1f32, 0f32, -1f32));
         mesh.add_vertex(Vec3f::new(-1f32, 0f32, -1f32));
+
+        let mut color = Vec::new();
+        color.push(self.color);
+        color.push(self.color);
+        color.push(self.color);
+        color.push(self.color);
+        mesh.vertices_color = Some(color);
 
         mesh
     }

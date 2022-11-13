@@ -19,7 +19,7 @@ use crate::{
     util::{self, any_as_u8_slice_array},
 };
 
-use super::common::PipelinePass;
+use super::common::{PipelinePass, PipelineReflector};
 
 #[derive(Debug)]
 pub struct MaterialRenderContext<'a, 'b> {
@@ -131,9 +131,10 @@ impl BasicMaterialHardwareRenderer {
                 let fs = wgpu::include_spirv!("../../compile_shaders/material/basic/forward.frag");
                 (vs, fs)
             };
-            super::common::PipelineReflector::new(label, device)
+            PipelineReflector::new(label, device)
                 .add_vs(vs)
                 .add_fs(fs, FsTarget::new(wgpu::TextureFormat::Rgba8Unorm))
+                .with_depth(PipelineReflector::depth_with_format(wgpu::TextureFormat::Depth32Float))
                 .build(ps)
         });
     }
@@ -249,9 +250,10 @@ impl DepthMaterialHardwareRenderer {
             }
             let vs = wgpu::include_spirv!("../../compile_shaders/material/depth/depth.vert");
             let fs = wgpu::include_spirv!("../../compile_shaders/material/depth/depth.frag");
-            super::common::PipelineReflector::new(label, device)
+            PipelineReflector::new(label, device)
                 .add_vs(vs)
                 .add_fs(fs, FsTarget::new(wgpu::TextureFormat::Rgba8Unorm))
+                .with_depth(PipelineReflector::depth_with_format(wgpu::TextureFormat::Depth32Float))
                 .build(ps)
         });
     }

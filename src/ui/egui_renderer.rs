@@ -25,6 +25,7 @@ struct EguiInner {
     bind_group: wgpu::BindGroup,
     pipeline_pass: PipelinePass,
     textures: HashMap<TextureId, (wgpu::Texture, wgpu::BindGroup)>,
+    depth_texture: (wgpu::Texture, wgpu::TextureView),
     buffer_cache: BufferCache,
     render_target: WGPURenderTarget,
 }
@@ -387,6 +388,22 @@ impl EguiRenderer {
         });
     }
 
+    fn build_depth_texture(gpu: &WGPUResource, w: u32, h: u32) -> (wgpu::Texture, wgpu::TextureView){
+        let device = gpu.device();
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("egui"),
+            size: wgpu::Extent3d { width:
+                w , height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        });
+        let depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (depth_texture, depth_texture_view)
+    }
+
     fn init(&mut self, gpu_resource: &WGPUResource) {
         let device = gpu_resource.device();
         let pipeline_pass = PipelineReflector::new(Some("egui"), device)
@@ -395,7 +412,9 @@ impl EguiRenderer {
                 wgpu::include_spirv!("../compile_shaders/ui.frag"),
                 FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8Unorm),
             )
+            .with_depth(PipelineReflector::depth_with_format(wgpu::TextureFormat::Depth32Float))
             .build_default();
+
 
         let mat_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("egui"),
@@ -442,6 +461,7 @@ impl EguiRenderer {
             textures: HashMap::new(),
             buffer_cache: BufferCache::new(),
             render_target: WGPURenderTarget::new("egui renderer"),
+            depth_texture: Self::build_depth_texture(gpu_resource, gpu_resource.width(), gpu_resource.height()),
         })
     }
 
@@ -471,6 +491,9 @@ impl EguiRenderer {
         let inner = self.inner.as_mut().unwrap();
 
         if let Some(s) = &self.constant_size {
+            // rebuild depth texture
+            inner.depth_texture = Self::build_depth_texture(&gpu_resource, gpu_resource.width(), gpu_resource.height());
+
             gpu_resource
                 .queue()
                 .write_buffer(&inner.mat_buffer, 0, any_as_u8_slice_array(&s.size));
@@ -487,7 +510,7 @@ impl EguiRenderer {
 
         {
             let mut pass_encoder =
-                match renderer.begin_surface(&mut inner.render_target, Some(color)) {
+                match renderer.begin_surface_with_depth(&mut inner.render_target, Some(color), &inner.depth_texture.1, f32::MAX.into()) {
                     Some(v) => v,
                     None => return,
                 };

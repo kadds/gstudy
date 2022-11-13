@@ -244,11 +244,10 @@ impl Logic for EntryLogic {
                         if download_ok.unwrap_or(false) {
                             let file = rfd::FileDialog::new()
                                 .add_filter("png", &["png"])
+                                .add_filter("tiff", &["tiff"])
                                 .add_filter("bmp", &["bmp"])
                                 .add_filter("webp", &["webp"])
-                                .add_filter("tiff", &["tiff"])
                                 .add_filter("jpeg", &["jpg"])
-                                .add_filter("tga", &["tga"])
                                 .set_title("save snapshot")
                                 .save_file();
 
@@ -270,9 +269,22 @@ impl Logic for EntryLogic {
                                 1f32 - 1f32 / (Instant::now() - t).as_millis().min(1) as f32;
                         }
                     });
+                    let mut available = ui.available_size();
+                    if available.y < available.x {
+                        available.y = available.x
+                    }
+                    if available.x < available.y {
+                        available.x = available.y
+                    }
+                    if available.x < DEFAULT_CANVAS_SIZE[0] as f32 {
+                        available.x = DEFAULT_CANVAS_SIZE[0] as f32;
+                        available.y = DEFAULT_CANVAS_SIZE[1] as f32;
+                    }
+
                     ui.image(
                         egui::TextureId::User(texture_id),
-                        egui::vec2(DEFAULT_CANVAS_SIZE[0] as f32, DEFAULT_CANVAS_SIZE[1] as f32),
+                        available,
+                        // egui::vec2(DEFAULT_CANVAS_SIZE[0] as f32, DEFAULT_CANVAS_SIZE[1] as f32),
                     );
                 });
 

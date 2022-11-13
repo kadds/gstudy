@@ -159,10 +159,12 @@ pub struct WGPURenderer {
     encoder: Option<CommandEncoder>,
     command_buffers: Vec<CommandBuffer>,
     frame: Option<WGPUFrame>,
+    first_call: bool,
 }
 
 struct WGPURenderTargetInner<'a, 'b> {
     color_attachments: Vec<RenderPassColorAttachment<'a>>,
+    depth_attachment: Option<RenderPassDepthStencilAttachment<'a>>,
     render_pass_desc: RenderPassDescriptor<'a, 'b>,
 }
 
@@ -175,12 +177,14 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
                 color_attachments: &[],
                 depth_stencil_attachment: None,
             },
+            depth_attachment: None,
         }
     }
     pub fn desc(&mut self) -> &RenderPassDescriptor<'a, 'b> {
         unsafe {
             self.render_pass_desc.color_attachments =
                 std::mem::transmute(self.color_attachments.as_slice());
+            self.render_pass_desc.depth_stencil_attachment = self.depth_attachment.clone().map(|v| v);
         }
         &self.render_pass_desc
     }
@@ -189,6 +193,8 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
 #[derive(Debug)]
 pub struct WGPURenderTarget {
     inner: std::ptr::NonNull<u8>,
+    tail_inner: std::ptr::NonNull<u8>,
+    offset: u32,
 }
 
 unsafe impl core::marker::Send for WGPURenderTarget {}
@@ -197,18 +203,31 @@ impl WGPURenderTarget {
     pub fn new(label: &'static str) -> Self {
         let inner = Box::new(WGPURenderTargetInner::new(label));
         let ptr = Box::into_raw(inner);
+        let tail_inner = Box::new(WGPURenderTargetInner::new(label));
+        let tail_ptr = Box::into_raw(tail_inner);
         Self {
             inner: std::ptr::NonNull::new(ptr as *mut u8).unwrap(),
+            tail_inner: std::ptr::NonNull::new(tail_ptr as *mut u8).unwrap(),
+            offset: 0,
         }
     }
     fn get_mut<'a, 'b>(&mut self) -> &mut WGPURenderTargetInner<'a, 'b> {
         unsafe { std::mem::transmute(self.inner.as_ptr()) }
     }
-    fn get<'a, 'b>(&self) -> &WGPURenderTargetInner<'a, 'b> {
-        unsafe { std::mem::transmute(self.inner.as_ptr()) }
+    fn get_tail_mut<'a, 'b>(&mut self) -> &mut WGPURenderTargetInner<'a, 'b> {
+        unsafe { std::mem::transmute(self.tail_inner.as_ptr()) }
     }
+    pub fn reset(&mut self) {
+        self.offset = 0;
+    }
+
     pub fn desc<'a, 'b>(&mut self) -> &RenderPassDescriptor<'a, 'b> {
-        self.get_mut().desc()
+        self.offset += 1;
+        if self.offset == 1 {
+            unsafe { self.get_mut().desc() }
+        } else {
+            unsafe { self.get_tail_mut().desc() }
+        }
     }
 
     fn map_ops(color: Option<crate::types::Color>) -> Operations<Color> {
@@ -226,14 +245,25 @@ impl WGPURenderTarget {
         }
     }
 
-    pub fn set_clear_color(&mut self, color: Option<crate::types::Color>) {
+    pub fn set_depth_target(&mut self, view: &TextureView, clear: Option<f32>) {
         let inner = self.get_mut();
-        assert!(inner.color_attachments.len() > 0);
-        let ops = Self::map_ops(color);
-
-        for att in &mut inner.color_attachments {
-            att.ops = ops
-        }
+        let ops = Operations {
+            load: match clear {
+                Some(v) => LoadOp::Clear(v),
+                None => LoadOp::Load,
+            },
+            store: true,
+        };
+        inner.depth_attachment = Some(RenderPassDepthStencilAttachment {
+            view,
+            depth_ops: Some(ops),
+            stencil_ops: None,
+        });
+        let tail_inner= self.get_tail_mut();
+        tail_inner.depth_attachment = Some(RenderPassDepthStencilAttachment { view, depth_ops: Some(Operations {
+            load: LoadOp::Load,
+            store: true,
+        }), stencil_ops: None })
     }
 
     pub fn set_render_target(
@@ -256,6 +286,22 @@ impl WGPURenderTarget {
                 ops,
             }
         }
+        let default_ops = Operations { load: LoadOp::Load, store: true };
+        let tail_inner = self.get_tail_mut();
+        if tail_inner.color_attachments.len() == 0 {
+            tail_inner.color_attachments.push(RenderPassColorAttachment {
+                view: texture_view,
+                resolve_target: None,
+                ops: default_ops,
+            })
+        } else {
+            tail_inner.color_attachments[0] = RenderPassColorAttachment {
+                view: texture_view,
+                resolve_target: None,
+                ops: default_ops,
+            }
+        }
+
     }
 }
 
@@ -294,6 +340,7 @@ impl WGPURenderer {
             encoder: Some(encoder),
             command_buffers: Vec::new(),
             frame: None,
+            first_call: true,
         }
     }
     pub fn resource(&self) -> Arc<WGPUResource> {
@@ -325,6 +372,7 @@ impl WGPURenderer {
         render_target: &'a mut WGPURenderTarget,
         clear_color: Option<crate::types::Color>,
     ) -> Option<PassEncoder<'a>> {
+
         let frame = match self.inner.surface().get_current_texture() {
             Ok(v) => v,
             Err(e) => {
@@ -342,16 +390,38 @@ impl WGPURenderer {
             clear_color,
         );
 
+        if self.first_call {
+            render_target.reset();
+            self.first_call = false;
+        }
+
         Some(PassEncoder {
             renderer: self,
             render_target,
         })
     }
 
+    pub fn begin_surface_with_depth<'a>(
+        &'a mut self,
+        render_target: &'a mut WGPURenderTarget,
+        clear_color: Option<crate::types::Color>,
+        depth_view: &TextureView,
+        depth_clear: Option<f32>,
+    ) -> Option<PassEncoder<'a>> {
+        render_target.set_depth_target(depth_view, depth_clear);
+
+        self.begin_surface(render_target, clear_color)
+    }
+
     pub fn begin<'a>(
         &'a mut self,
         render_target: &'a mut WGPURenderTarget,
     ) -> Option<PassEncoder<'a>> {
+        if self.first_call {
+            render_target.reset();
+            self.first_call = false;
+        }
+
         Some(PassEncoder {
             renderer: self,
             render_target,

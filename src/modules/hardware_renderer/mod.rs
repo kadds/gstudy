@@ -77,12 +77,15 @@ impl HardwareRenderer {
 
 impl ModuleRenderer for HardwareRenderer {
     fn render(&mut self, p: RenderParameter) {
-        let view = match p.canvas.writer_frame() {
+        let (view, depth_view) = match p.canvas.writer_frame() {
             Some(v) => v,
             None => return,
         };
 
         let mut renderer = wgpu_backend::WGPURenderer::new(p.gpu.clone());
+        self.render_target
+            .set_depth_target(depth_view, Some(f32::MAX));
+
         self.render_target
             .set_render_target(view, Some(Color::new(0f32, 0f32, 0f32, 1f32)));
 

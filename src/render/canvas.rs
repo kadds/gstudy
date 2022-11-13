@@ -21,6 +21,8 @@ struct MatBuffer {
 struct CanvasInner {
     texture: wgpu::Texture,
     texture_view_list: Vec<(wgpu::TextureView, wgpu::BindGroup)>,
+
+    depth_texture: (wgpu::Texture, wgpu::TextureView),
 }
 
 pub struct Canvas {
@@ -113,6 +115,22 @@ impl Canvas {
     //     }
     // }
 
+    fn build_depth_texture(gpu: &WGPUResource, w: u32, h: u32) -> (wgpu::Texture, wgpu::TextureView){
+        let device = gpu.device();
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("canvas depth texture"),
+            size: wgpu::Extent3d { width:
+                w , height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        });
+        let depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (depth_texture, depth_texture_view)
+    }
+
     pub fn make_sure(&self, gpu: &WGPUResource, encoder: &mut wgpu::CommandEncoder) {
         self.prepare_texture(gpu, encoder);
     }
@@ -130,7 +148,7 @@ impl Canvas {
         Some(unsafe { &(*ptr).texture_view_list[read_index as usize].1 })
     }
 
-    pub fn writer_frame(&self) -> Option<&wgpu::TextureView> {
+    pub fn writer_frame(&self) -> Option<(&wgpu::TextureView, &wgpu::TextureView)> {
         if self.update_state.load(Ordering::Acquire) != 0 {
             return None;
         }
@@ -144,7 +162,7 @@ impl Canvas {
         self.write_index
             .store((write_index + 1) % 3, Ordering::Relaxed);
 
-        Some(unsafe { &(*ptr).texture_view_list[write_index as usize].0 })
+        Some(unsafe { (&(*ptr).texture_view_list[write_index as usize].0, &(*ptr).depth_texture.1) })
     }
 
     fn prepare_texture(&self, gpu: &WGPUResource, encoder: &mut wgpu::CommandEncoder) {
@@ -190,6 +208,7 @@ impl Canvas {
             let box_inner = Box::new(CanvasInner {
                 texture,
                 texture_view_list: views,
+                depth_texture: Self::build_depth_texture(gpu, self.size.x , self.size.y),
             });
 
             self.inner
