@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use wasm_timer::Instant;
+use instant::Instant;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
@@ -242,23 +242,26 @@ impl Logic for EntryLogic {
                         });
 
                         if download_ok.unwrap_or(false) {
-                            let file = rfd::FileDialog::new()
-                                .add_filter("png", &["png"])
-                                .add_filter("tiff", &["tiff"])
-                                .add_filter("bmp", &["bmp"])
-                                .add_filter("webp", &["webp"])
-                                .add_filter("jpeg", &["jpg"])
-                                .set_title("save snapshot")
-                                .save_file();
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                let file = rfd::FileDialog::new()
+                                    .add_filter("png", &["png"])
+                                    .add_filter("tiff", &["tiff"])
+                                    .add_filter("bmp", &["bmp"])
+                                    .add_filter("webp", &["webp"])
+                                    .add_filter("jpeg", &["jpg"])
+                                    .set_title("save snapshot")
+                                    .save_file();
 
-                            if let Some(file) = file {
-                                let size = canvas.size();
-                                let data = canvas.texture_data();
-                                let buf = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                                    size.x, size.y, data,
-                                )
-                                .unwrap();
-                                buf.save(file).unwrap();
+                                if let Some(file) = file {
+                                    let size = canvas.size();
+                                    let data = canvas.texture_data();
+                                    let buf = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+                                        size.x, size.y, data,
+                                    )
+                                    .unwrap();
+                                    buf.save(file).unwrap();
+                                }
                             }
                             canvas.clean_download_state();
                             window_state.request_time = None;

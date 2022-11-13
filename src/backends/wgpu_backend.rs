@@ -92,7 +92,17 @@ pub struct WGPUEventProcessor {
 
 impl WGPUBackend {
     pub fn new(window: &winit::window::Window) -> Result<WGPUBackend> {
-        let bits = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let bits = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY)
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                wgpu::Backends::BROWSER_WEBGPU
+            }
+        };
+
         let instance = Instance::new(bits);
         let surface = unsafe { instance.create_surface(window) };
         let adapter_fut = instance.request_adapter(&RequestAdapterOptions {
@@ -102,16 +112,24 @@ impl WGPUBackend {
         });
         let adapter_fut2 = instance.request_adapter(&RequestAdapterOptions {
             power_preference: PowerPreference::LowPower,
-            force_fallback_adapter: true,
+            force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         });
-        #[cfg(not(target_arch = "wasm32"))]
+        let adapter_fut3 = instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::LowPower,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        });
         let adapter = {
             match pollster::block_on(adapter_fut) {
                 Some(v) => v,
                 None => {
                     // fallback to adapter config 2
-                    pollster::block_on(adapter_fut2).ok_or_else(|| anyhow!("no adapter found"))?
+                    match pollster::block_on(adapter_fut2) {
+                        Some(v) => v,
+                        None => pollster::block_on(adapter_fut3)
+                            .ok_or_else(|| anyhow!("no adapter found"))?,
+                    }
                 }
             }
         };
@@ -124,8 +142,19 @@ impl WGPUBackend {
             },
             None,
         );
-        #[cfg(not(target_arch = "wasm32"))]
-        let (device, queue) = pollster::block_on(device_fut)?;
+        let device_fut2 = adapter.request_device(
+            &DeviceDescriptor {
+                features: Features::empty(),
+                limits: Limits::downlevel_webgl2_defaults(),
+                label: Some("wgpu device"),
+            },
+            None,
+        );
+
+        let (device, queue) = match pollster::block_on(device_fut) {
+            Ok(v) => v,
+            Err(e) => pollster::block_on(device_fut2)?,
+        };
 
         Ok(WGPUBackend {
             inner: WGPUResource {

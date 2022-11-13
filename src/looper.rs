@@ -81,15 +81,19 @@ impl Looper {
     pub fn new(builder: WindowBuilder) -> Self {
         let event_loop = EventLoop::with_user_event();
         let window = builder.build(&event_loop).unwrap();
-        if let Some(m) = window.current_monitor() {
-            let msize: winit::dpi::LogicalSize<u32> = m.size().to_logical(m.scale_factor());
-            let size: winit::dpi::LogicalSize<u32> =
-                window.outer_size().to_logical(m.scale_factor());
-            let x = (msize.width - size.width) / 2;
-            let y = (msize.height - size.height) / 2;
-            window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(m) = window.current_monitor() {
+                let msize: winit::dpi::LogicalSize<u32> = m.size().to_logical(m.scale_factor());
+                let size: winit::dpi::LogicalSize<u32> =
+                    window.outer_size().to_logical(m.scale_factor());
+                let x = (msize.width - size.width) / 2;
+                let y = (msize.height - size.height) / 2;
+                window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+            }
+            window.set_ime_allowed(true);
         }
-        window.set_ime_allowed(true);
 
         let event_proxy = event_loop.create_proxy();
         Self {

@@ -117,10 +117,13 @@ impl UIEventProcessor {
             }
         }
         if !output.platform_output.copied_text.is_empty() {
-            let err = arboard::Clipboard::new()
-                .and_then(|mut c| c.set_text(output.platform_output.copied_text.clone()));
-            if let Err(err) = err {
-                log::error!("{} text {}", err, output.platform_output.copied_text);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let err = arboard::Clipboard::new()
+                    .and_then(|mut c| c.set_text(output.platform_output.copied_text.clone()));
+                if let Err(err) = err {
+                    log::error!("{} text {}", err, output.platform_output.copied_text);
+                }
             }
         }
         if let Some(url) = output.platform_output.open_url {
@@ -222,10 +225,13 @@ impl EventProcessor for UIEventProcessor {
                             inner.input.events.push(egui::Event::Cut);
                         }
                         if key == egui::Key::V && pressed && inner.input.modifiers.command {
-                            let text = arboard::Clipboard::new()
-                                .and_then(|mut c| c.get_text())
-                                .unwrap_or_default();
-                            inner.input.events.push(egui::Event::Paste(text));
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                let text = arboard::Clipboard::new()
+                                    .and_then(|mut c| c.get_text())
+                                    .unwrap_or_default();
+                                inner.input.events.push(egui::Event::Paste(text));
+                            }
                         }
                         let modifiers = inner.input.modifiers;
                         inner.input.events.push(egui::Event::Key {

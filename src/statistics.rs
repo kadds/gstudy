@@ -1,5 +1,5 @@
+use instant::Instant;
 use std::time::Duration;
-use wasm_timer::Instant;
 #[derive(Debug)]
 pub struct Statistics {
     statistics_tick: Duration,

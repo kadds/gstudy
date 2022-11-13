@@ -1,7 +1,6 @@
 use std::{collections::HashMap, fs::File, io::Read};
 
 use egui::{FontFamily, TextureId};
-use font_kit::{family_name::FamilyName, properties::Properties};
 
 use crate::{
     backends::{
@@ -215,14 +214,17 @@ impl BufferCache {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_font(
     fd: &mut egui::FontDefinitions,
     source: &mut impl font_kit::source::Source,
     name: &str,
     family: FontFamily,
 ) -> anyhow::Result<()> {
-    let font =
-        source.select_best_match(&[FamilyName::Title(name.to_string())], &Properties::new())?;
+    let font = source.select_best_match(
+        &[font_kit::family_name::FamilyName::Title(name.to_string())],
+        &font_kit::properties::Properties::new(),
+    )?;
     let data = font.load()?;
 
     fd.font_data.insert(
@@ -240,6 +242,7 @@ fn load_font(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_fonts(fd: &mut egui::FontDefinitions) {
     let mut s = font_kit::source::SystemSource::new();
     // for f in s.all_families().unwrap() {
@@ -262,6 +265,8 @@ impl EguiRenderer {
     pub fn new() -> Self {
         let ctx = egui::Context::default();
         let mut fd = egui::FontDefinitions::default();
+
+        #[cfg(not(target_arch = "wasm32"))]
         load_fonts(&mut fd);
 
         ctx.set_fonts(fd);
