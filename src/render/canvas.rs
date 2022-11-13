@@ -115,12 +115,19 @@ impl Canvas {
     //     }
     // }
 
-    fn build_depth_texture(gpu: &WGPUResource, w: u32, h: u32) -> (wgpu::Texture, wgpu::TextureView){
+    fn build_depth_texture(
+        gpu: &WGPUResource,
+        w: u32,
+        h: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
         let device = gpu.device();
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("canvas depth texture"),
-            size: wgpu::Extent3d { width:
-                w , height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -162,7 +169,12 @@ impl Canvas {
         self.write_index
             .store((write_index + 1) % 3, Ordering::Relaxed);
 
-        Some(unsafe { (&(*ptr).texture_view_list[write_index as usize].0, &(*ptr).depth_texture.1) })
+        Some(unsafe {
+            (
+                &(*ptr).texture_view_list[write_index as usize].0,
+                &(*ptr).depth_texture.1,
+            )
+        })
     }
 
     fn prepare_texture(&self, gpu: &WGPUResource, encoder: &mut wgpu::CommandEncoder) {
@@ -208,7 +220,7 @@ impl Canvas {
             let box_inner = Box::new(CanvasInner {
                 texture,
                 texture_view_list: views,
-                depth_texture: Self::build_depth_texture(gpu, self.size.x , self.size.y),
+                depth_texture: Self::build_depth_texture(gpu, self.size.x, self.size.y),
             });
 
             self.inner

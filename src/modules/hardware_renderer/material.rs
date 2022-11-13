@@ -134,7 +134,9 @@ impl BasicMaterialHardwareRenderer {
             PipelineReflector::new(label, device)
                 .add_vs(vs)
                 .add_fs(fs, FsTarget::new(wgpu::TextureFormat::Rgba8Unorm))
-                .with_depth(PipelineReflector::depth_with_format(wgpu::TextureFormat::Depth32Float))
+                .with_depth(PipelineReflector::depth_with_format(
+                    wgpu::TextureFormat::Depth32Float,
+                ))
                 .build(ps)
         });
     }
@@ -253,7 +255,9 @@ impl DepthMaterialHardwareRenderer {
             PipelineReflector::new(label, device)
                 .add_vs(vs)
                 .add_fs(fs, FsTarget::new(wgpu::TextureFormat::Rgba8Unorm))
-                .with_depth(PipelineReflector::depth_with_format(wgpu::TextureFormat::Depth32Float))
+                .with_depth(PipelineReflector::depth_with_format(
+                    wgpu::TextureFormat::Depth32Float,
+                ))
                 .build(ps)
         });
     }

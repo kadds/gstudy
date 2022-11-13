@@ -184,7 +184,8 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
         unsafe {
             self.render_pass_desc.color_attachments =
                 std::mem::transmute(self.color_attachments.as_slice());
-            self.render_pass_desc.depth_stencil_attachment = self.depth_attachment.clone().map(|v| v);
+            self.render_pass_desc.depth_stencil_attachment =
+                self.depth_attachment.clone().map(|v| v);
         }
         &self.render_pass_desc
     }
@@ -259,11 +260,15 @@ impl WGPURenderTarget {
             depth_ops: Some(ops),
             stencil_ops: None,
         });
-        let tail_inner= self.get_tail_mut();
-        tail_inner.depth_attachment = Some(RenderPassDepthStencilAttachment { view, depth_ops: Some(Operations {
-            load: LoadOp::Load,
-            store: true,
-        }), stencil_ops: None })
+        let tail_inner = self.get_tail_mut();
+        tail_inner.depth_attachment = Some(RenderPassDepthStencilAttachment {
+            view,
+            depth_ops: Some(Operations {
+                load: LoadOp::Load,
+                store: true,
+            }),
+            stencil_ops: None,
+        })
     }
 
     pub fn set_render_target(
@@ -286,14 +291,19 @@ impl WGPURenderTarget {
                 ops,
             }
         }
-        let default_ops = Operations { load: LoadOp::Load, store: true };
+        let default_ops = Operations {
+            load: LoadOp::Load,
+            store: true,
+        };
         let tail_inner = self.get_tail_mut();
         if tail_inner.color_attachments.len() == 0 {
-            tail_inner.color_attachments.push(RenderPassColorAttachment {
-                view: texture_view,
-                resolve_target: None,
-                ops: default_ops,
-            })
+            tail_inner
+                .color_attachments
+                .push(RenderPassColorAttachment {
+                    view: texture_view,
+                    resolve_target: None,
+                    ops: default_ops,
+                })
         } else {
             tail_inner.color_attachments[0] = RenderPassColorAttachment {
                 view: texture_view,
@@ -301,7 +311,6 @@ impl WGPURenderTarget {
                 ops: default_ops,
             }
         }
-
     }
 }
 
@@ -372,7 +381,6 @@ impl WGPURenderer {
         render_target: &'a mut WGPURenderTarget,
         clear_color: Option<crate::types::Color>,
     ) -> Option<PassEncoder<'a>> {
-
         let frame = match self.inner.surface().get_current_texture() {
             Ok(v) => v,
             Err(e) => {

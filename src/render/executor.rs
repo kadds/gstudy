@@ -2,7 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     f32::consts::PI,
     sync::{mpsc, Arc},
-    thread, time::Duration,
+    thread,
+    time::Duration,
 };
 
 use winit::event::VirtualKeyCode;
@@ -25,7 +26,8 @@ use crate::{
         sphere::{Sphere, SphereMesh},
     },
     modules::*,
-    types::{Vec2f, Vec3f, Vec4f}, statistics::Statistics,
+    statistics::Statistics,
+    types::{Vec2f, Vec3f, Vec4f},
 };
 
 pub type TaskId = u64;

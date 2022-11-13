@@ -16,7 +16,7 @@ pub struct PlaneMesh {
 impl PlaneMesh {
     pub fn new() -> Self {
         Self {
-            color: Vec4f::new(1f32,1f32, 1f32, 1f32),
+            color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
         }
     }
 }
