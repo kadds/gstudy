@@ -18,7 +18,7 @@ impl State {
                     break;
                 }
 
-                let mut kv = line[3..].splitn(2, ":");
+                let mut kv = line[3..].splitn(2, ':');
                 let key = kv
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("invalid compile flags, key not exist"))?
@@ -28,7 +28,7 @@ impl State {
                     .ok_or_else(|| anyhow::anyhow!("invalid compile flags, value not exist"))?
                     .trim();
                 let value: Vec<String> = value
-                    .split(",")
+                    .split(',')
                     .map(|s| s.trim().to_owned())
                     .filter(|s| !s.is_empty())
                     .collect();
@@ -62,7 +62,7 @@ impl State {
                 shaderc::EnvVersion::Vulkan1_2 as u32,
             );
             for f in &flags {
-                opt.add_macro_definition(&f, None);
+                opt.add_macro_definition(f, None);
             }
 
             let result = compiler
@@ -112,7 +112,7 @@ fn compile_shaders(path: &Path, compiler: &mut shaderc::Compiler, state: &mut St
                 "frag" => shaderc::ShaderKind::Fragment,
                 _ => shaderc::ShaderKind::InferFromSource,
             };
-            if let Err(e) = state.compile(compiler, shader_type, &path) {
+            if let Err(e) = state.compile(compiler, shader_type, path) {
                 panic!("{} {}", path.to_str().unwrap(), e);
             }
         }

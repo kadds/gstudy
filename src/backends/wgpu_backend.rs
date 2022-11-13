@@ -1,6 +1,9 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicPtr, Arc, Mutex};
 
-use crate::event::{Event, EventProcessor, EventSource, ProcessEventResult};
+use crate::{
+    event::{Event, EventProcessor, EventSource, ProcessEventResult},
+    types::Size,
+};
 use anyhow::{anyhow, Result};
 use wgpu::*;
 
@@ -59,22 +62,23 @@ impl WGPUResource {
         inner.height = height;
     }
     pub fn new_queue(self: Arc<Self>) -> Arc<Self> {
-        let device_fut = self.instance.adapter.request_device(
-            &DeviceDescriptor {
-                features: Features::empty(),
-                limits: Limits::default(),
-                label: Some("wgpu device"),
-            },
-            None,
-        );
-        #[cfg(not(target_arch = "wasm32"))]
-        let (device, queue) = pollster::block_on(device_fut).unwrap();
+        self
+        // let device_fut = self.instance.adapter.request_device(
+        //     &DeviceDescriptor {
+        //         features: Features::empty(),
+        //         limits: Limits::default(),
+        //         label: Some("wgpu device"),
+        //     },
+        //     None,
+        // );
+        // #[cfg(not(target_arch = "wasm32"))]
+        // let (device, queue) = pollster::block_on(device_fut).unwrap();
 
-        Arc::new(Self {
-            instance: self.instance.clone(),
-            device,
-            queue,
-        })
+        // Arc::new(Self {
+        //     instance: self.instance.clone(),
+        //     device,
+        //     queue,
+        // })
     }
 }
 
@@ -245,6 +249,12 @@ impl WGPURenderTarget {
                 resolve_target: None,
                 ops,
             })
+        } else {
+            inner.color_attachments[0] = RenderPassColorAttachment {
+                view: texture_view,
+                resolve_target: None,
+                ops,
+            }
         }
     }
 }
@@ -263,6 +273,9 @@ impl<'a> PassEncoder<'a> {
     pub fn new_pass<'b>(&'b mut self) -> RenderPass<'b> {
         let encoder = self.renderer.encoder.as_mut().unwrap();
         encoder.begin_render_pass(self.render_target.desc())
+    }
+    pub fn encoder(&self) -> &wgpu::CommandEncoder {
+        self.renderer.encoder()
     }
 }
 
@@ -293,6 +306,10 @@ impl WGPURenderer {
                 label: Some("wgpu encoder"),
             });
         self.encoder = Some(encoder);
+    }
+
+    pub fn encoder(&self) -> &wgpu::CommandEncoder {
+        self.encoder.as_ref().unwrap()
     }
 }
 

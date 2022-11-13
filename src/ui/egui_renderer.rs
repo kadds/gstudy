@@ -492,8 +492,6 @@ impl EguiRenderer {
                     None => return,
                 };
 
-            let mut pass = pass_encoder.new_pass();
-
             for mut mesh in meshes {
                 let mut skip = false;
                 let clip = mesh.clip_rect;
@@ -506,10 +504,10 @@ impl EguiRenderer {
                             None => match mesh.texture_id {
                                 TextureId::User(u) => {
                                     if let Some(c) = ui_context.canvas_map.get(&u) {
-                                        match c.get_texture_bind_group() {
+                                        c.make_sure(&gpu_resource, pass_encoder.encoder());
+                                        match c.display_frame(&gpu_resource) {
                                             Some(v) => v,
                                             None => {
-                                                c.build_texture(&gpu_resource);
                                                 skip = true;
                                                 continue;
                                             }
@@ -542,6 +540,7 @@ impl EguiRenderer {
                         });
                     });
             }
+            let mut pass = pass_encoder.new_pass();
 
             pass.set_pipeline(&inner.pipeline_pass.pipeline);
             pass.set_bind_group(0, &inner.bind_group, &[]);
