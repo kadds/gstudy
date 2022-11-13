@@ -1,10 +1,12 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use wasm_timer::Instant;
+use winit::event_loop::EventLoopProxy;
 
 use crate::{
+    event::{CustomEvent, Event},
     render::{executor::TaskId, Canvas},
-    types::Size,
+    types::{Color, Size},
     ui::UIContext,
 };
 
@@ -33,6 +35,7 @@ struct EntryState {
     about_text: String,
     render_windows: HashMap<TaskId, RenderWindowState>,
     focus_window: Option<TaskId>,
+    background: [u8; 3],
 }
 
 impl Default for EntryState {
@@ -48,6 +51,7 @@ impl Default for EntryState {
             about_text: "".to_owned(),
             render_windows: HashMap::new(),
             focus_window: None,
+            background: [0, 0, 0],
         }
     }
 }
@@ -67,7 +71,12 @@ impl EntryLogic {
 }
 
 impl Logic for EntryLogic {
-    fn update(&mut self, ctx: egui::Context, ui_context: &mut UIContext) {
+    fn update(
+        &mut self,
+        ctx: egui::Context,
+        ui_context: &mut UIContext,
+        proxy: EventLoopProxy<Event>,
+    ) {
         let state = &mut self.state;
         egui::SidePanel::left("main_side")
             .min_width(200f32)
@@ -92,6 +101,20 @@ impl Logic for EntryLogic {
                     });
                 });
                 ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("background");
+                    if ui.color_edit_button_srgb(&mut state.background).changed() {
+                        let _ = proxy.send_event(Event::CustomEvent(CustomEvent::ClearColor(
+                            Some(Color::new(
+                                state.background[0] as f32 / 255f32,
+                                state.background[1] as f32 / 255f32,
+                                state.background[2] as f32 / 255f32,
+                                1f32,
+                            )),
+                        )));
+                    }
+                });
+
                 ui.heading("Functions");
                 ui.separator();
                 let list = ui_context.executor.module_list();
@@ -102,8 +125,8 @@ impl Logic for EntryLogic {
                         let label = ui.button(module.name);
                         if label.clicked() {
                             let canvas = Canvas::new(Size::new(
-                                DEFAULT_CANVAS_SIZE[0],
-                                DEFAULT_CANVAS_SIZE[1],
+                                (DEFAULT_CANVAS_SIZE[0] as f32 * ui_context.ppi) as u32,
+                                (DEFAULT_CANVAS_SIZE[1] as f32 * ui_context.ppi) as u32,
                             ));
                             let id = ui_context.executor.run(idx, canvas.clone());
                             let texture_id = ui_context.add_canvas_and_alloc(canvas.clone());
@@ -220,8 +243,12 @@ impl Logic for EntryLogic {
 
                         if download_ok.unwrap_or(false) {
                             let file = rfd::FileDialog::new()
-                                .add_filter("png image", &["png"])
-                                .add_filter("bmp image", &["bmp"])
+                                .add_filter("png", &["png"])
+                                .add_filter("bmp", &["bmp"])
+                                .add_filter("webp", &["webp"])
+                                .add_filter("tiff", &["tiff"])
+                                .add_filter("jpeg", &["jpg"])
+                                .add_filter("tga", &["tga"])
                                 .set_title("save snapshot")
                                 .save_file();
 
@@ -243,9 +270,10 @@ impl Logic for EntryLogic {
                                 1f32 - 1f32 / (Instant::now() - t).as_millis().min(1) as f32;
                         }
                     });
-                    let size = ui.available_size();
-                    // ui.allocate_space(size);
-                    ui.image(egui::TextureId::User(texture_id), size);
+                    ui.image(
+                        egui::TextureId::User(texture_id),
+                        egui::vec2(DEFAULT_CANVAS_SIZE[0] as f32, DEFAULT_CANVAS_SIZE[1] as f32),
+                    );
                 });
 
             window_state.opened = opened;

@@ -32,7 +32,7 @@ impl WGPUResource {
     fn build_surface_desc(width: u32, height: u32) -> SurfaceConfiguration {
         SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
-            format: TextureFormat::Rgba8UnormSrgb,
+            format: TextureFormat::Rgba8Unorm,
             width,
             height,
             present_mode: wgpu::PresentMode::Immediate,

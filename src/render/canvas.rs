@@ -375,10 +375,13 @@ impl Canvas {
                     if let Err(err) = callback {
                         log::error!("download {}", err);
                     } else {
-                        data.copy_from_slice(&buf_copy.slice(..).get_mapped_range());
-                        state.store(3, Ordering::SeqCst);
+                        std::thread::spawn(move || {
+                            data.copy_from_slice(&buf_copy.slice(..).get_mapped_range());
+                            std::thread::sleep(Duration::from_millis(500));
+                            state.store(3, Ordering::SeqCst);
+                            buf_copy.unmap();
+                        });
                     }
-                    buf_copy.unmap();
                 });
         });
     }

@@ -246,7 +246,9 @@ impl Looper {
                             log::error!("{}", err);
                         }
                     }
-                    _ => (),
+                    ev => {
+                        ret = self.run_event_processor(&Event::CustomEvent(ev));
+                    }
                 },
                 ev => {
                     let (ok, render) = match ev {

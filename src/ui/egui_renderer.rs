@@ -393,7 +393,7 @@ impl EguiRenderer {
             .add_vs(wgpu::include_spirv!("../compile_shaders/ui.vert"))
             .add_fs(
                 wgpu::include_spirv!("../compile_shaders/ui.frag"),
-                FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8UnormSrgb),
+                FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8Unorm),
             )
             .build_default();
 

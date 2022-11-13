@@ -25,6 +25,7 @@ struct UIInner {
     must_render: bool,
     ui_context: Option<Box<UIContext>>,
     ppi: f32,
+    clear_color: Option<Color>,
 }
 
 pub struct UI {
@@ -52,6 +53,7 @@ pub struct UIContext {
     pub executor: Executor,
     canvas_map: HashMap<u64, Arc<Canvas>>,
     last_texture_id: u64,
+    ppi: f32,
 }
 
 impl UIContext {
@@ -79,10 +81,12 @@ impl UIInner {
             cursor: egui::CursorIcon::Default,
             must_render: true,
             ppi: 1.0f32,
+            clear_color: None,
             ui_context: Some(Box::new(UIContext {
                 executor: Executor::new(),
                 canvas_map: HashMap::new(),
                 last_texture_id: 0,
+                ppi: 1.0f32,
             })),
         }
     }
@@ -97,8 +101,10 @@ impl UIEventProcessor {
 
         ctx.begin_frame(inner.input.clone());
         let mut ui_context = inner.ui_context.take().unwrap();
+        ui_context.ppi = inner.ppi;
+
         for logic in &mut inner.ui_logic {
-            logic.update(ctx.clone(), &mut ui_context);
+            logic.update(ctx.clone(), &mut ui_context, proxy.clone());
         }
         ui_context.executor.update();
         inner.ui_context = Some(ui_context);
@@ -148,6 +154,13 @@ impl EventProcessor for UIEventProcessor {
             Event::Update(dt) => {
                 return self.update(source.event_proxy(), *dt);
             }
+            Event::CustomEvent(ev) => match ev {
+                CustomEvent::ClearColor(c) => {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.clear_color = *c;
+                }
+                _ => (),
+            },
             Event::Render => {
                 let mut inner = self.inner.borrow_mut();
                 let ctx = inner.render.ctx();
@@ -162,11 +175,16 @@ impl EventProcessor for UIEventProcessor {
                 let rgba: egui::Rgba =
                     egui::color::tint_color_towards(raw_window_color, target_color).into();
 
-                let color = Color::new(rgba.r(), rgba.g(), rgba.b(), rgba.a());
+                let color = match inner.clear_color {
+                    Some(c) => c,
+                    None => Color::new(rgba.r(), rgba.g(), rgba.b(), rgba.a()),
+                };
 
                 let mut ui_context = inner.ui_context.take().unwrap();
 
                 let ppi = inner.ppi;
+                ui_context.ppi = ppi;
+
                 inner
                     .render
                     .render(source.backend(), frame, color, ppi, &mut ui_context);

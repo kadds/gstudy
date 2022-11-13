@@ -4,5 +4,5 @@
 layout (location = 0) out vec4 out_color;
 
 void main() {
-    out_color = vec4(0.0, 0.0, gl_FragCoord.z / gl_FragCoord.w, 1.0);
+    out_color = vec4(0.0, 0.0, gl_FragDepth, 1.0);
 }
