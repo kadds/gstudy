@@ -504,7 +504,7 @@ impl EguiRenderer {
                             None => match mesh.texture_id {
                                 TextureId::User(u) => {
                                     if let Some(c) = ui_context.canvas_map.get(&u) {
-                                        c.make_sure(&gpu_resource, pass_encoder.encoder());
+                                        c.make_sure(&gpu_resource, pass_encoder.encoder_mut());
                                         match c.display_frame(&gpu_resource) {
                                             Some(v) => v,
                                             None => {

@@ -32,6 +32,7 @@ pub struct Canvas {
     update_state: Arc<AtomicU32>,
     write_index: AtomicU32,
     read_index: AtomicU32,
+    download_state: Arc<AtomicU32>,
 }
 
 pub struct CanvasWriter<'a> {
@@ -98,6 +99,7 @@ impl Canvas {
             update_state: AtomicU32::new(1).into(),
             write_index: AtomicU32::new(1),
             read_index: AtomicU32::new(0),
+            download_state: AtomicU32::new(0).into(),
         }
         .into();
         this
@@ -111,7 +113,7 @@ impl Canvas {
     //     }
     // }
 
-    pub fn make_sure(&self, gpu: &WGPUResource, encoder: &wgpu::CommandEncoder) {
+    pub fn make_sure(&self, gpu: &WGPUResource, encoder: &mut wgpu::CommandEncoder) {
         self.prepare_texture(gpu, encoder);
     }
 
@@ -145,7 +147,11 @@ impl Canvas {
         Some(unsafe { &(*ptr).texture_view_list[write_index as usize].0 })
     }
 
-    fn prepare_texture(&self, gpu: &WGPUResource, encoder: &wgpu::CommandEncoder) {
+    fn prepare_texture(&self, gpu: &WGPUResource, encoder: &mut wgpu::CommandEncoder) {
+        if self.download_state.load(Ordering::Relaxed) == 1 {
+            self.download_texture(gpu.device(), gpu.queue(), encoder);
+        }
+
         if self.inner.load(Ordering::Relaxed).is_null() {
             let device = gpu.device();
             let (texture, texture_views) = Self::new_texture(device, self.size);
@@ -286,18 +292,46 @@ impl Canvas {
         });
     }
 
-    pub fn download_texture(
+    pub fn request_download_texture(&self) -> Option<()> {
+        if self
+            .download_state
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return None;
+        }
+        Some(())
+    }
+
+    pub fn download_ok(&self) -> Option<bool> {
+        let state = self.download_state.load(Ordering::Acquire);
+        if state == 0 {
+            None
+        } else {
+            if state == 3 {
+                Some(true)
+            } else {
+                Some(false)
+            }
+        }
+    }
+
+    pub fn clean_download_state(&self) {
+        self.download_state.store(0, Ordering::Release);
+    }
+
+    fn download_texture(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        let buf = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("download texture"),
-            usage: wgpu::BufferUsages::MAP_READ,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             size: (self.size.x * self.size.y * 4) as u64,
             mapped_at_creation: false,
-        });
+        }));
 
         let ptr = self.inner.load(Ordering::Relaxed);
         if ptr.is_null() {
@@ -325,16 +359,34 @@ impl Canvas {
             wgpu::Extent3d {
                 width: self.size.x,
                 height: self.size.y,
-                depth_or_array_layers: read_index,
+                depth_or_array_layers: 1,
             },
         );
+        let data_ptr = self.data.as_ptr();
+        let size = self.data.len();
+        let data = unsafe { std::slice::from_raw_parts_mut(data_ptr as *mut u8, size) };
+        self.download_state.store(2, Ordering::SeqCst);
+        let state = self.download_state.clone();
 
-        queue.on_submitted_work_done(|| {
-            // download ok
+        queue.on_submitted_work_done(move || {
+            let buf_copy = buf.clone();
+            buf.slice(..)
+                .map_async(wgpu::MapMode::Read, move |callback| {
+                    if let Err(err) = callback {
+                        log::error!("download {}", err);
+                    } else {
+                        data.copy_from_slice(&buf_copy.slice(..).get_mapped_range());
+                        state.store(3, Ordering::SeqCst);
+                    }
+                    buf_copy.unmap();
+                });
         });
     }
 
     pub fn texture_data(&self) -> &[u8] {
         &self.data
+    }
+    pub fn size(&self) -> Size {
+        self.size
     }
 }

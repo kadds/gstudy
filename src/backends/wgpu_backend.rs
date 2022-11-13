@@ -277,6 +277,9 @@ impl<'a> PassEncoder<'a> {
     pub fn encoder(&self) -> &wgpu::CommandEncoder {
         self.renderer.encoder()
     }
+    pub fn encoder_mut(&mut self) -> &mut wgpu::CommandEncoder {
+        self.renderer.encoder_mut()
+    }
 }
 
 impl WGPURenderer {
@@ -310,6 +313,9 @@ impl WGPURenderer {
 
     pub fn encoder(&self) -> &wgpu::CommandEncoder {
         self.encoder.as_ref().unwrap()
+    }
+    pub fn encoder_mut(&mut self) -> &mut wgpu::CommandEncoder {
+        self.encoder.as_mut().unwrap()
     }
 }
 
