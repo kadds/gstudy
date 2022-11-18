@@ -88,9 +88,11 @@ impl Looper {
                 let msize: winit::dpi::LogicalSize<u32> = m.size().to_logical(m.scale_factor());
                 let size: winit::dpi::LogicalSize<u32> =
                     window.outer_size().to_logical(m.scale_factor());
-                let x = (msize.width - size.width) / 2;
-                let y = (msize.height - size.height) / 2;
-                window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+                if msize.width > size.width && msize.height > size.height {
+                    let x = (msize.width - size.width) / 2;
+                    let y = (msize.height - size.height) / 2;
+                    window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+                }
             }
             window.set_ime_allowed(true);
         }
