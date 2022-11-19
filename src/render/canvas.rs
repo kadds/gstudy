@@ -35,6 +35,7 @@ pub struct Canvas {
     write_index: AtomicU32,
     read_index: AtomicU32,
     download_state: Arc<AtomicU32>,
+    dirty: AtomicBool,
 }
 
 pub struct CanvasWriter<'a> {
@@ -102,6 +103,7 @@ impl Canvas {
             write_index: AtomicU32::new(1),
             read_index: AtomicU32::new(0),
             download_state: AtomicU32::new(0).into(),
+            dirty: AtomicBool::new(true),
         }
         .into();
         this
@@ -168,6 +170,7 @@ impl Canvas {
         let write_index = self.write_index.load(Ordering::Relaxed);
         self.write_index
             .store((write_index + 1) % 3, Ordering::Relaxed);
+        self.dirty.store(true, Ordering::Release);
 
         Some(unsafe {
             (
@@ -349,6 +352,10 @@ impl Canvas {
 
     pub fn clean_download_state(&self) {
         self.download_state.store(0, Ordering::Release);
+    }
+
+    pub fn dirty(&self) -> bool {
+        self.dirty.load(Ordering::Acquire)
     }
 
     fn download_texture(

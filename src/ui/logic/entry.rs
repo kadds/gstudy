@@ -213,10 +213,15 @@ impl Logic for EntryLogic {
             });
 
         let mut closed_window = Vec::new();
+        let mut any_dirty = false;
 
         for (id, window_state) in &mut state.render_windows {
             let texture_id = window_state.texture_id;
             let canvas = window_state.canvas.clone();
+            if !any_dirty && canvas.dirty() {
+                any_dirty = true;
+            }
+
             let mut opened = window_state.opened;
             let resp = egui::Window::new(&window_state.name)
                 .collapsible(true)
@@ -319,7 +324,7 @@ impl Logic for EntryLogic {
             state.render_windows.remove(&id);
         }
 
-        if self.state.always_redraw {
+        if self.state.always_redraw || any_dirty {
             ctx.request_repaint();
         }
     }

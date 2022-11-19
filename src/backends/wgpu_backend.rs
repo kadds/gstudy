@@ -19,7 +19,7 @@ struct WGPUInstance {
     inner: Mutex<WGPUResourceInner>,
     instance: Instance,
     adapter: Adapter,
-    format: TextureFormat
+    format: TextureFormat,
 }
 
 #[derive(Debug)]
@@ -172,7 +172,6 @@ impl WGPUBackend {
             anyhow::bail!("no texture format found")
         };
         log::info!("use format {:?}", format);
-
 
         Ok(WGPUBackend {
             inner: WGPUResource {
