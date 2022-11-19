@@ -19,6 +19,7 @@ struct WGPUInstance {
     inner: Mutex<WGPUResourceInner>,
     instance: Instance,
     adapter: Adapter,
+    format: TextureFormat
 }
 
 #[derive(Debug)]
@@ -29,10 +30,10 @@ pub struct WGPUResource {
 }
 
 impl WGPUResource {
-    fn build_surface_desc(width: u32, height: u32) -> SurfaceConfiguration {
+    fn build_surface_desc(width: u32, height: u32, format: TextureFormat) -> SurfaceConfiguration {
         SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
-            format: TextureFormat::Rgba8Unorm,
+            format,
             width,
             height,
             present_mode: wgpu::PresentMode::Immediate,
@@ -88,6 +89,7 @@ pub struct WGPUBackend {
 
 pub struct WGPUEventProcessor {
     inner: Arc<WGPUResource>,
+    format: TextureFormat,
 }
 
 impl WGPUBackend {
@@ -156,6 +158,19 @@ impl WGPUBackend {
             Err(e) => pollster::block_on(device_fut2)?,
         };
 
+        let formats = surface.get_supported_formats(&adapter);
+        let has_format = formats.iter().find(|v| **v == TextureFormat::Rgba8Unorm);
+        let has_format_bgr = formats.iter().find(|v| **v == TextureFormat::Bgra8Unorm);
+        let format = if has_format.is_some() {
+            TextureFormat::Rgba8Unorm
+        } else if has_format_bgr.is_some() {
+            TextureFormat::Bgra8Unorm
+        } else {
+            anyhow::bail!("no texture format found")
+        };
+        log::info!("use format {:?}", format);
+
+
         Ok(WGPUBackend {
             inner: WGPUResource {
                 instance: Arc::new(WGPUInstance {
@@ -166,6 +181,7 @@ impl WGPUBackend {
                         width: 0,
                         height: 0,
                     }),
+                    format,
                 }),
                 device,
                 queue,
@@ -486,6 +502,7 @@ impl WGPUBackend {
     pub fn event_processor(&self) -> Box<dyn EventProcessor> {
         Box::new(WGPUEventProcessor {
             inner: self.inner.clone(),
+            format: self.inner.instance.format,
         })
     }
 }
@@ -507,10 +524,11 @@ impl EventProcessor for WGPUEventProcessor {
                 let size = source.window().inner_size();
                 let width = u32::max(size.width, 16);
                 let height = u32::max(size.height, 16);
+                let format = self.format;
 
                 self.inner.surface().configure(
                     &self.inner.device,
-                    &WGPUResource::build_surface_desc(width, height),
+                    &WGPUResource::build_surface_desc(width, height, format),
                 );
                 self.inner.set_width_height(width, height);
                 let _ = source.event_proxy().send_event(Event::JustRenderOnce);
