@@ -29,7 +29,7 @@ fn main() {
 
     let window_builder = winit::window::WindowBuilder::new()
         .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
-            1920f64, 1080f64,
+            1300f64, 900f64,
         )))
         .with_resizable(true)
         .with_visible(false)

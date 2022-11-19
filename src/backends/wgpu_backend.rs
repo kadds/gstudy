@@ -62,6 +62,9 @@ impl WGPUResource {
         inner.width = width;
         inner.height = height;
     }
+    pub fn format(&self) -> TextureFormat {
+        self.instance.format
+    }
     pub fn new_queue(self: Arc<Self>) -> Arc<Self> {
         self
         // let device_fut = self.instance.adapter.request_device(

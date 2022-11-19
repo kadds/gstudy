@@ -253,6 +253,7 @@ fn load_fonts(fd: &mut egui::FontDefinitions) {
         ("Microsoft YaHei UI", FontFamily::Proportional),
         ("Segoe UI", FontFamily::Proportional),
         ("Consolas", FontFamily::Monospace),
+        ("PingFang SC", FontFamily::Proportional),
     ];
     for (name, family) in fonts.into_iter() {
         if let Err(e) = load_font(fd, &mut s, name, family) {
@@ -422,7 +423,7 @@ impl EguiRenderer {
             .add_vs(wgpu::include_spirv!("../compile_shaders/ui.vert"))
             .add_fs(
                 wgpu::include_spirv!("../compile_shaders/ui.frag"),
-                FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8Unorm),
+                FsTarget::new_blend_alpha_add_mix(gpu_resource.format()),
             )
             .with_depth(PipelineReflector::depth_with_format(
                 wgpu::TextureFormat::Depth32Float,
