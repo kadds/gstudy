@@ -1,3 +1,5 @@
+use crate::types::*;
+use crate::{model::Model, render::Scene};
 use winit::{
     dpi::PhysicalPosition,
     event::{
@@ -6,8 +8,6 @@ use winit::{
     },
     window::CursorIcon,
 };
-
-use crate::types::*;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -18,6 +18,9 @@ pub enum CustomEvent {
     CanvasResize(Size),
     ModuleChanged(&'static str),
     ClearColor(Option<Color>),
+
+    Loading(String),
+    Loaded(Scene),
 }
 
 #[derive(Debug)]

@@ -87,9 +87,43 @@ pub trait Geometry: Send + Sync + Debug {
     fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>);
 }
 
+#[derive(Debug)]
+pub struct StaticGeometry {
+    mesh: Arc<Mesh>,
+    attributes: HashMap<Attribute, Arc<dyn Any + Send + Sync>>,
+}
+
+impl StaticGeometry {
+    pub fn new(mesh: Arc<Mesh>) -> Self {
+        Self {
+            mesh,
+            attributes: HashMap::new(),
+        }
+    }
+}
+
+impl Geometry for StaticGeometry {
+    fn mesh(&self) -> Arc<Mesh> {
+        self.mesh.clone()
+    }
+
+    fn intersect(&self, ray: Ray) -> IntersectResult {
+        todo!()
+    }
+
+    fn attribute(&self, attribute: &Attribute) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.attributes.get(attribute).cloned()
+    }
+
+    fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>) {
+        self.attributes.insert(attribute, value);
+    }
+}
+
 #[derive(Debug, Hash, PartialEq, Eq)]
-enum Attribute {
+pub enum Attribute {
     ConstantColor,
+    UV,
     Name(String),
     Index(usize),
 }

@@ -36,6 +36,7 @@ struct EntryState {
     render_windows: HashMap<TaskId, RenderWindowState>,
     focus_window: Option<TaskId>,
     background: [u8; 3],
+    has_background: bool,
 }
 
 impl Default for EntryState {
@@ -52,11 +53,12 @@ impl Default for EntryState {
             render_windows: HashMap::new(),
             focus_window: None,
             background: [0, 0, 0],
+            has_background: false,
         }
     }
 }
 
-const DEFAULT_CANVAS_SIZE: [u32; 2] = [256, 256];
+const DEFAULT_CANVAS_SIZE: [u32; 2] = [512, 512];
 
 pub struct EntryLogic {
     state: EntryState,
@@ -79,11 +81,29 @@ impl Logic for EntryLogic {
     ) {
         let state = &mut self.state;
         egui::SidePanel::left("main_side")
-            .min_width(200f32)
-            .default_width(300f32)
+            .min_width(180f32)
+            .default_width(240f32)
             .show(&ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
-                    ui.menu_button("File", |ui| {});
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Load scene").clicked() {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                let file = rfd::FileDialog::new()
+                                    .add_filter("gltf", &["gltf", "glb"])
+                                    .set_title("load gltf file")
+                                    .pick_file();
+
+                                if let Some(file) = file {
+                                    let _ =
+                                        proxy.send_event(Event::CustomEvent(CustomEvent::Loading(
+                                            file.to_str().unwrap_or_default().to_string(),
+                                        )));
+                                }
+                            }
+                            ui.close_menu();
+                        }
+                    });
                     ui.menu_button("Setting", |ui| {
                         ui.checkbox(&mut state.always_redraw, "Always redraw");
                         ui.separator();
@@ -102,17 +122,33 @@ impl Logic for EntryLogic {
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label("background");
-                    if ui.color_edit_button_srgb(&mut state.background).changed() {
-                        let _ = proxy.send_event(Event::CustomEvent(CustomEvent::ClearColor(
-                            Some(Color::new(
+                    if ui
+                        .checkbox(&mut state.has_background, "background")
+                        .changed()
+                    {
+                        let _ = proxy.send_event(if state.has_background {
+                            Event::CustomEvent(CustomEvent::ClearColor(Some(Color::new(
                                 state.background[0] as f32 / 255f32,
                                 state.background[1] as f32 / 255f32,
                                 state.background[2] as f32 / 255f32,
                                 1f32,
-                            )),
-                        )));
+                            ))))
+                        } else {
+                            Event::CustomEvent(CustomEvent::ClearColor(None))
+                        });
                     }
+                    ui.add_enabled_ui(state.has_background, |ui| {
+                        if ui.color_edit_button_srgb(&mut state.background).changed() {
+                            let _ = proxy.send_event(Event::CustomEvent(CustomEvent::ClearColor(
+                                Some(Color::new(
+                                    state.background[0] as f32 / 255f32,
+                                    state.background[1] as f32 / 255f32,
+                                    state.background[2] as f32 / 255f32,
+                                    1f32,
+                                )),
+                            )));
+                        }
+                    });
                 });
 
                 ui.heading("Functions");
