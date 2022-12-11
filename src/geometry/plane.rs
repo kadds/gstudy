@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use super::BasicGeometry;
 use super::DirtyMesh;
 use super::GeometryMeshGenerator;
+use super::MeshCoordType;
 use super::{Geometry, Mesh, Ray};
 use crate::render::Transform;
 use crate::types::*;
@@ -30,12 +31,10 @@ impl GeometryMeshGenerator for PlaneMesh {
         mesh.add_vertex(Vec3f::new(1f32, 0f32, -1f32));
         mesh.add_vertex(Vec3f::new(-1f32, 0f32, -1f32));
 
-        let mut color = Vec::new();
-        color.push(self.color);
-        color.push(self.color);
-        color.push(self.color);
-        color.push(self.color);
-        mesh.vertices_color = Some(color);
+        mesh.set_coord_vec4f(
+            MeshCoordType::Color,
+            vec![self.color, self.color, self.color, self.color],
+        );
 
         mesh
     }

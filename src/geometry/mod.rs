@@ -28,15 +28,37 @@ pub struct IntersectResult {
     refraction_ray: Ray,
 }
 
+#[repr(u8)]
+#[derive(Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+pub enum MeshCoordType {
+    Color,
+    TexCoord,
+    TexNormal,
+    TexBump,
+    TexCube,
+}
+
+#[derive(Debug)]
+pub enum MeshCoordValue {
+    Color(Vec<Vec4f>),
+    TexCoord(Vec<Vec2f>),
+    TexNormal(Vec<Vec2f>),
+    TexBump(Vec<Vec2f>),
+    TexCube(Vec<Vec2f>),
+}
+
 #[derive(Debug, Default)]
 pub struct Mesh {
     pub vertices: Vec<Vec3f>,
     pub indices: Vec<u32>,
     pub topology: Topology,
 
-    pub vertices_color: Option<Vec<Vec4f>>,
-    pub vertices_texcoord: Option<Vec<Vec2f>>,
-    pub vertices_normal_coord: Option<Vec<Vec2f>>,
+    pub mesh_coord: HashMap<MeshCoordType, MeshCoordValue>,
+}
+
+#[derive(Debug, Default)]
+pub struct TransformedMesh {
+    mesh: Mesh,
 }
 
 impl Mesh {
@@ -77,6 +99,54 @@ impl Mesh {
 
         let vertices = transform.apply_batch(tmp.into_iter()).collect();
         self.vertices = vertices;
+    }
+
+    pub fn coord(&self, ty: MeshCoordType) -> Option<&MeshCoordValue> {
+        self.mesh_coord.get(&ty)
+    }
+
+    pub fn coord_vec4f(&self, ty: MeshCoordType) -> Option<&Vec<Vec4f>> {
+        match self.mesh_coord.get(&ty)? {
+            MeshCoordValue::Color(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn coord_vec2f(&self, ty: MeshCoordType) -> Option<&Vec<Vec2f>> {
+        match self.mesh_coord.get(&ty)? {
+            MeshCoordValue::TexCoord(v) => Some(v),
+            MeshCoordValue::TexNormal(v) => Some(v),
+            MeshCoordValue::TexBump(v) => Some(v),
+            MeshCoordValue::TexCube(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn set_coord_vec4f(&mut self, ty: MeshCoordType, data: Vec<Vec4f>) {
+        match ty {
+            MeshCoordType::Color => {
+                self.mesh_coord.insert(ty, MeshCoordValue::Color(data));
+            }
+            _ => (),
+        }
+    }
+
+    pub fn set_coord_vec2f(&mut self, ty: MeshCoordType, data: Vec<Vec2f>) {
+        match ty {
+            MeshCoordType::TexCoord => {
+                self.mesh_coord.insert(ty, MeshCoordValue::TexCoord(data));
+            }
+            MeshCoordType::TexNormal => {
+                self.mesh_coord.insert(ty, MeshCoordValue::TexNormal(data));
+            }
+            MeshCoordType::TexBump => {
+                self.mesh_coord.insert(ty, MeshCoordValue::TexBump(data));
+            }
+            MeshCoordType::TexCube => {
+                self.mesh_coord.insert(ty, MeshCoordValue::TexCube(data));
+            }
+            _ => (),
+        }
     }
 }
 

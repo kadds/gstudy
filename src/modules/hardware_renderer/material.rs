@@ -8,7 +8,7 @@ use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::{
     backends::wgpu_backend::{PassEncoder, WGPUResource},
-    geometry::Mesh,
+    geometry::{Attribute, Mesh, MeshCoordType},
     modules::hardware_renderer::common::FsTarget,
     render::{
         material::{downcast, BasicMaterial, DepthMaterial},
@@ -181,7 +181,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
                 let mut vertex_data: Vec<BasicInputC> = mesh
                     .vertices
                     .iter()
-                    .zip(mesh.vertices_color.as_ref().unwrap().iter())
+                    .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
                     .map(|(a, b)| BasicInputC {
                         vertices: *a,
                         colors: *b,

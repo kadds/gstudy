@@ -72,6 +72,7 @@ impl EntryLogic {
     }
 }
 
+
 impl Logic for EntryLogic {
     fn update(
         &mut self,

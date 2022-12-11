@@ -347,7 +347,7 @@ impl EguiRenderer {
                 Self::copy_texture(gpu, texture, 4, rect, any_as_u8_slice_array(&c.pixels));
             }
             egui::epaint::ImageData::Font(f) => {
-                let data: Vec<egui::Color32> = f.srgba_pixels(1.0f32).collect();
+                let data: Vec<egui::Color32> = f.srgba_pixels(Some(1.0f32)).collect();
                 Self::copy_texture(gpu, texture, 4, rect, any_as_u8_slice_array(&data));
             }
         }

@@ -5,7 +5,9 @@ use crate::{
     types::{Vec3f, Vec4f},
 };
 
-use super::{BasicGeometry, DirtyMesh, Geometry, GeometryMeshGenerator, Mesh, Topology};
+use super::{
+    BasicGeometry, DirtyMesh, Geometry, GeometryMeshGenerator, Mesh, MeshCoordType, Topology,
+};
 
 #[derive(Debug)]
 pub struct AxisMesh {}
@@ -49,7 +51,10 @@ impl GeometryMeshGenerator for AxisMesh {
         let dg = Vec4f::new(0f32, 0.5f32, 0f32, 1f32);
         let db = Vec4f::new(0f32, 0f32, 0.5f32, 1f32);
 
-        mesh.vertices_color = Some(vec![r, r, g, g, b, b, dr, dr, dg, dg, db, db]);
+        mesh.set_coord_vec4f(
+            MeshCoordType::Color,
+            vec![r, r, g, g, b, b, dr, dr, dg, dg, db, db],
+        );
 
         mesh
     }

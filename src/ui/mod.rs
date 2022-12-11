@@ -176,7 +176,7 @@ impl EventProcessor for UIEventProcessor {
                     egui::Color32::WHITE
                 };
                 let rgba: egui::Rgba =
-                    egui::color::tint_color_towards(raw_window_color, target_color).into();
+                    egui::ecolor::tint_color_towards(raw_window_color, target_color).into();
 
                 let color = match inner.clear_color {
                     Some(c) => c,
