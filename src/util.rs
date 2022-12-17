@@ -14,6 +14,24 @@ pub fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
     }
 }
 
+pub fn any_as_u32_slice_array<T: Sized>(p: &[T]) -> &[u32] {
+    unsafe {
+        ::std::slice::from_raw_parts(
+            (p.as_ptr() as *const T) as *const u32,
+            ::std::mem::size_of::<T>() * p.len(),
+        )
+    }
+}
+
+pub fn any_as_f32_slice_array<T: Sized>(p: &[T]) -> &[f32] {
+    unsafe {
+        ::std::slice::from_raw_parts(
+            (p.as_ptr() as *const T) as *const f32,
+            ::std::mem::size_of::<T>() * p.len(),
+        )
+    }
+}
+
 type WI = winit::window::CursorIcon;
 type EI = egui::CursorIcon;
 

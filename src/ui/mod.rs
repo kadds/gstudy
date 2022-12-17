@@ -12,12 +12,14 @@ use crate::{
     util,
 };
 
-pub mod egui_renderer;
 mod logic;
+use self::logic::UILogic;
+
+pub mod egui_renderer;
 
 struct UIInner {
     render: egui_renderer::EguiRenderer,
-    ui_logic: Vec<Box<dyn logic::Logic>>,
+    ui_logic: UILogic,
     input: egui::RawInput,
     cursor_position: (f32, f32),
     frame: Option<egui_renderer::EguiRenderFrame>,
@@ -70,8 +72,7 @@ impl UIContext {
 
 impl UIInner {
     fn new() -> Self {
-        let mut ui_logic = Vec::new();
-        logic::init(&mut ui_logic);
+        let mut ui_logic = UILogic::new();
         Self {
             render: egui_renderer::EguiRenderer::new(),
             ui_logic,
@@ -103,9 +104,10 @@ impl UIEventProcessor {
         let mut ui_context = inner.ui_context.take().unwrap();
         ui_context.ppi = inner.ppi;
 
-        for logic in &mut inner.ui_logic {
-            logic.update(ctx.clone(), &mut ui_context, proxy.clone());
-        }
+        inner
+            .ui_logic
+            .update(ctx.clone(), &mut ui_context, proxy.clone());
+
         ui_context.executor.update();
         inner.ui_context = Some(ui_context);
 
@@ -205,133 +207,141 @@ impl EventProcessor for UIEventProcessor {
                     .render
                     .resize(Size::new(logic_size.width, logic_size.height));
             }
-            Event::Input(ev) => match ev {
-                InputEvent::KeyboardInput {
-                    device_id,
-                    input,
-                    is_synthetic,
-                } => {
-                    let mut inner = self.inner.borrow_mut();
-                    if let Some(key) = util::match_egui_key(
-                        input
-                            .virtual_keycode
-                            .unwrap_or(winit::event::VirtualKeyCode::Apostrophe),
-                    ) {
-                        let pressed = input.state == winit::event::ElementState::Pressed;
-                        if key == egui::Key::C && pressed && inner.input.modifiers.command {
-                            inner.input.events.push(egui::Event::Copy);
-                        }
-                        if key == egui::Key::X && pressed && inner.input.modifiers.command {
-                            inner.input.events.push(egui::Event::Cut);
-                        }
-                        if key == egui::Key::V && pressed && inner.input.modifiers.command {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                let text = arboard::Clipboard::new()
-                                    .and_then(|mut c| c.get_text())
-                                    .unwrap_or_default();
-                                inner.input.events.push(egui::Event::Paste(text));
+            Event::Input(ev) => {
+                let inner = self.inner.borrow();
+                inner
+                    .ui_logic
+                    .on_input(inner.ui_context.as_ref().unwrap(), ev);
+                drop(inner);
+
+                match ev {
+                    InputEvent::KeyboardInput {
+                        device_id,
+                        input,
+                        is_synthetic,
+                    } => {
+                        let mut inner = self.inner.borrow_mut();
+                        if let Some(key) = util::match_egui_key(
+                            input
+                                .virtual_keycode
+                                .unwrap_or(winit::event::VirtualKeyCode::Apostrophe),
+                        ) {
+                            let pressed = input.state == winit::event::ElementState::Pressed;
+                            if key == egui::Key::C && pressed && inner.input.modifiers.command {
+                                inner.input.events.push(egui::Event::Copy);
                             }
+                            if key == egui::Key::X && pressed && inner.input.modifiers.command {
+                                inner.input.events.push(egui::Event::Cut);
+                            }
+                            if key == egui::Key::V && pressed && inner.input.modifiers.command {
+                                #[cfg(not(target_arch = "wasm32"))]
+                                {
+                                    let text = arboard::Clipboard::new()
+                                        .and_then(|mut c| c.get_text())
+                                        .unwrap_or_default();
+                                    inner.input.events.push(egui::Event::Paste(text));
+                                }
+                            }
+                            let modifiers = inner.input.modifiers;
+                            inner.input.events.push(egui::Event::Key {
+                                pressed: input.state == winit::event::ElementState::Pressed,
+                                modifiers,
+                                key,
+                            });
                         }
+                    }
+                    InputEvent::ModifiersChanged(modifiers) => {
+                        let mut inner = self.inner.borrow_mut();
+                        let dst = &mut inner.input.modifiers;
+                        dst.alt = modifiers.alt();
+                        dst.ctrl = modifiers.ctrl();
+                        dst.shift = modifiers.shift();
+
+                        if cfg!(targetos = "macos") {
+                            dst.mac_cmd = modifiers.logo();
+                            dst.command = modifiers.logo();
+                        } else {
+                            dst.mac_cmd = false;
+                            dst.command = modifiers.ctrl();
+                        }
+                        log::info!("{:?}", *dst);
+                    }
+                    InputEvent::CursorMoved {
+                        device_id,
+                        position,
+                    } => {
+                        let position: winit::dpi::LogicalPosition<f64> =
+                            position.to_logical(source.window().scale_factor());
+                        let mut inner = self.inner.borrow_mut();
+                        inner
+                            .input
+                            .events
+                            .push(egui::Event::PointerMoved(egui::Pos2::new(
+                                position.x as f32,
+                                position.y as f32,
+                            )));
+                        inner.cursor_position = (position.x as f32, position.y as f32);
+                    }
+                    InputEvent::ReceivedCharacter(c) => {
+                        let c = *c;
+                        let mut inner = self.inner.borrow_mut();
+                        if !c.is_ascii_control() {
+                            inner.input.events.push(egui::Event::Text(c.to_string()));
+                        }
+                    }
+                    InputEvent::ReceivedString(s) => {
+                        let mut inner = self.inner.borrow_mut();
+                        inner.input.events.push(egui::Event::Text(s.clone()));
+                    }
+                    InputEvent::CursorLeft { device_id } => {
+                        let mut inner = self.inner.borrow_mut();
+                        inner.input.events.push(egui::Event::PointerGone);
+                    }
+                    InputEvent::MouseWheel {
+                        device_id,
+                        delta,
+                        phase,
+                    } => {
+                        let mut inner = self.inner.borrow_mut();
+                        inner.input.events.push(egui::Event::Scroll(match *delta {
+                            winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                                egui::Vec2::new(x * 50f32, y * 50f32)
+                            }
+                            winit::event::MouseScrollDelta::PixelDelta(a) => {
+                                egui::Vec2::new(a.x as f32, a.y as f32)
+                            }
+                        }));
+                    }
+                    InputEvent::MouseInput {
+                        device_id,
+                        state,
+                        button,
+                    } => {
+                        let mut inner = self.inner.borrow_mut();
+                        let button = match button {
+                            winit::event::MouseButton::Left => egui::PointerButton::Primary,
+                            winit::event::MouseButton::Right => egui::PointerButton::Secondary,
+                            winit::event::MouseButton::Middle => egui::PointerButton::Middle,
+                            winit::event::MouseButton::Other(_) => {
+                                return ProcessEventResult::Received;
+                            }
+                        };
+                        let pressed = match state {
+                            winit::event::ElementState::Pressed => true,
+                            winit::event::ElementState::Released => false,
+                        };
+                        let pos = inner.cursor_position;
                         let modifiers = inner.input.modifiers;
-                        inner.input.events.push(egui::Event::Key {
-                            pressed: input.state == winit::event::ElementState::Pressed,
+                        inner.input.events.push(egui::Event::PointerButton {
+                            pos: egui::pos2(pos.0, pos.1),
                             modifiers,
-                            key,
+                            pressed,
+                            button,
                         });
                     }
+                    _ => (),
                 }
-                InputEvent::ModifiersChanged(modifiers) => {
-                    let mut inner = self.inner.borrow_mut();
-                    let dst = &mut inner.input.modifiers;
-                    dst.alt = modifiers.alt();
-                    dst.ctrl = modifiers.ctrl();
-                    dst.shift = modifiers.shift();
-
-                    if cfg!(targetos = "macos") {
-                        dst.mac_cmd = modifiers.logo();
-                        dst.command = modifiers.logo();
-                    } else {
-                        dst.mac_cmd = false;
-                        dst.command = modifiers.ctrl();
-                    }
-                    log::info!("{:?}", *dst);
-                }
-                InputEvent::CursorMoved {
-                    device_id,
-                    position,
-                } => {
-                    let position: winit::dpi::LogicalPosition<f64> =
-                        position.to_logical(source.window().scale_factor());
-                    let mut inner = self.inner.borrow_mut();
-                    inner
-                        .input
-                        .events
-                        .push(egui::Event::PointerMoved(egui::Pos2::new(
-                            position.x as f32,
-                            position.y as f32,
-                        )));
-                    inner.cursor_position = (position.x as f32, position.y as f32);
-                }
-                InputEvent::ReceivedCharacter(c) => {
-                    let c = *c;
-                    let mut inner = self.inner.borrow_mut();
-                    if !c.is_ascii_control() {
-                        inner.input.events.push(egui::Event::Text(c.to_string()));
-                    }
-                }
-                InputEvent::ReceivedString(s) => {
-                    let mut inner = self.inner.borrow_mut();
-                    inner.input.events.push(egui::Event::Text(s.clone()));
-                }
-                InputEvent::CursorLeft { device_id } => {
-                    let mut inner = self.inner.borrow_mut();
-                    inner.input.events.push(egui::Event::PointerGone);
-                }
-                InputEvent::MouseWheel {
-                    device_id,
-                    delta,
-                    phase,
-                } => {
-                    let mut inner = self.inner.borrow_mut();
-                    inner.input.events.push(egui::Event::Scroll(match *delta {
-                        winit::event::MouseScrollDelta::LineDelta(x, y) => {
-                            egui::Vec2::new(x * 50f32, y * 50f32)
-                        }
-                        winit::event::MouseScrollDelta::PixelDelta(a) => {
-                            egui::Vec2::new(a.x as f32, a.y as f32)
-                        }
-                    }));
-                }
-                InputEvent::MouseInput {
-                    device_id,
-                    state,
-                    button,
-                } => {
-                    let mut inner = self.inner.borrow_mut();
-                    let button = match button {
-                        winit::event::MouseButton::Left => egui::PointerButton::Primary,
-                        winit::event::MouseButton::Right => egui::PointerButton::Secondary,
-                        winit::event::MouseButton::Middle => egui::PointerButton::Middle,
-                        winit::event::MouseButton::Other(_) => {
-                            return ProcessEventResult::Received;
-                        }
-                    };
-                    let pressed = match state {
-                        winit::event::ElementState::Pressed => true,
-                        winit::event::ElementState::Released => false,
-                    };
-                    let pos = inner.cursor_position;
-                    let modifiers = inner.input.modifiers;
-                    inner.input.events.push(egui::Event::PointerButton {
-                        pos: egui::pos2(pos.0, pos.1),
-                        modifiers,
-                        pressed,
-                        button,
-                    });
-                }
-                _ => (),
-            },
+            }
             Event::JustRenderOnce => {
                 let mut inner = self.inner.borrow_mut();
                 inner.must_render = true;

@@ -9,7 +9,7 @@ use std::{
 use winit::event::VirtualKeyCode;
 
 use super::{
-    camera::{Camera, CameraController, EventController},
+    camera::{Camera, CameraController, TrackballCameraController},
     material::{
         BasicMaterial, BasicMaterialParameter, ConstantMaterial, ConstantMaterialParameter,
         DepthMaterial, DepthMaterialParameter,
@@ -50,24 +50,7 @@ pub enum MouseButton {
     Mid,
     Right,
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum InputEvent {
-    MouseMove(Vec2f),
-    MouseDrag(Vec2f),
-    MouseStartDrag,
-    MouseEndDrag,
-
-    MouseDown(MouseButton),
-    MouseUp(MouseButton),
-
-    KeyboardDown(VirtualKeyCode),
-    KeyboardUp(VirtualKeyCode),
-    KeyboardInput(VirtualKeyCode),
-
-    Enable,
-    Disable,
-}
+pub type ExecutorInputEvent = crate::event::InputEvent;
 
 enum TaskOperation {
     None,
@@ -75,7 +58,7 @@ enum TaskOperation {
     Resume,
     Start(Arc<WGPUResource>),
     Stop,
-    Input(InputEvent),
+    Input(ExecutorInputEvent),
 }
 
 struct Task {
@@ -91,12 +74,13 @@ impl Task {
         info: ModuleInfo,
         renderer: Box<dyn ModuleRenderer>,
         rx: mpsc::Receiver<TaskOperation>,
+        scene: Scene,
     ) {
         log::info!("{} task running ", info.name);
         thread::Builder::new()
             .name(info.name.to_string())
             .spawn(move || {
-                self.main(renderer, rx);
+                self.main(renderer, rx, scene);
             })
             .unwrap();
     }
@@ -105,9 +89,9 @@ impl Task {
         self: Arc<Self>,
         mut renderer: Box<dyn ModuleRenderer>,
         rx: mpsc::Receiver<TaskOperation>,
+        mut scene: Scene,
     ) {
         let camera = Camera::new();
-        let mut scene = Scene::new();
         let basic_material = Arc::new(BasicMaterial::new(BasicMaterialParameter::new()));
         let constant_material = Arc::new(ConstantMaterial::new(ConstantMaterialParameter::new()));
         let depth_material = Arc::new(DepthMaterial::new(DepthMaterialParameter::new()));
@@ -151,7 +135,7 @@ impl Task {
 
         // scene.add_object(sphere);
 
-        let mut ctr = Box::new(EventController::new(&camera));
+        let mut ctr = Box::new(TrackballCameraController::new(&camera));
 
         // camera.make_orthographic(Vec4f::new(0f32, 0f32, 40f32, 40f32), 0.001f32, 100f32);
         camera.make_perspective(1.0f32, PI / 2.0f32 * 0.8f32, 0.1f32, 100f32);
@@ -181,32 +165,37 @@ impl Task {
             let (t, dur, _) = statistics.next_frame();
             std::thread::sleep(dur);
             let mut op = TaskOperation::None;
-
-            if pause {
-                if let Ok(tmp_op) = rx.recv() {
-                    op = tmp_op;
+            loop {
+                if pause {
+                    if let Ok(tmp_op) = rx.recv() {
+                        op = tmp_op;
+                    } else {
+                        break;
+                    }
+                } else {
+                    if let Ok(tmp_op) = rx.try_recv() {
+                        op = tmp_op;
+                    } else {
+                        break;
+                    }
                 }
-            } else {
-                if let Ok(tmp_op) = rx.try_recv() {
-                    op = tmp_op;
+                match op {
+                    TaskOperation::Resume => {
+                        pause = false;
+                    }
+                    TaskOperation::Pause => {
+                        pause = true;
+                    }
+                    TaskOperation::Start(gpu_tmp) => {
+                        gpu = Some(gpu_tmp.new_queue());
+                        pause = false
+                    }
+                    TaskOperation::Stop => {
+                        stop = true;
+                    }
+                    TaskOperation::Input(ev) => ctr.on_input(ev),
+                    _ => {}
                 }
-            }
-            match op {
-                TaskOperation::Resume => {
-                    pause = false;
-                }
-                TaskOperation::Pause => {
-                    pause = true;
-                }
-                TaskOperation::Start(gpu_tmp) => {
-                    gpu = Some(gpu_tmp.new_queue());
-                    pause = false
-                }
-                TaskOperation::Stop => {
-                    stop = true;
-                }
-                TaskOperation::Input(ev) => ctr.on_input(ev),
-                _ => (),
             }
         }
     }
@@ -232,14 +221,15 @@ impl Executor {
         }
     }
 
-    pub fn run(&mut self, index: usize, canvas: Arc<Canvas>) -> TaskId {
+    pub fn run(&mut self, index: usize, canvas: Arc<Canvas>, scene: Scene) -> TaskId {
         log::info!("click to run");
 
         let factory = self.modules[index].as_ref();
         let (tx, rx) = mpsc::channel();
         let task = Task::new(canvas);
         task.clone()
-            .start(factory.info(), factory.make_renderer(), rx);
+            .start(factory.info(), factory.make_renderer(), rx, scene);
+
         let id = self.last_task_id;
         self.tasks.insert(id, TaskProxy { tx, task });
         self.tasks_to_wakeup.push(id);
@@ -300,7 +290,7 @@ impl Executor {
         self.tasks_to_wakeup.clear();
     }
 
-    pub fn send_input(&self, task_id: TaskId, event: InputEvent) {
+    pub fn send_input(&self, task_id: TaskId, event: ExecutorInputEvent) {
         let _ = self
             .tasks
             .get(&task_id)

@@ -23,7 +23,7 @@ pub enum CustomEvent {
     Loaded(Scene),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InputEvent {
     KeyboardInput {
         device_id: DeviceId,

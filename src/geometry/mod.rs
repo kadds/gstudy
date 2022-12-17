@@ -78,6 +78,11 @@ impl Mesh {
         self.vertices.push(vertex);
     }
 
+    #[inline]
+    pub fn add_vertices(&mut self, vertices: &[Vec3f]) {
+        self.vertices.extend(vertices);
+    }
+
     pub fn add_triangle(&mut self, v0: Vec3f, v1: Vec3f, v2: Vec3f) {
         self.vertices.push(v0);
         self.vertices.push(v1);
