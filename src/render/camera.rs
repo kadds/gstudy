@@ -25,6 +25,9 @@ struct Inner {
     up: Vec3f,
     orthographic: bool,
     ortho_size: Vec2f,
+    fovy: f32,
+    near: f32,
+    far: f32,
 
     attachment: RenderAttachment,
 }
@@ -33,6 +36,7 @@ struct Inner {
 pub struct RenderAttachment {
     texture: Option<(OptionalTexture, OptionalTexture)>,
     clear_color: Option<Color>,
+    clear_depth: Option<f32>,
 }
 
 impl RenderAttachment {
@@ -40,12 +44,21 @@ impl RenderAttachment {
         color_attachment: Arc<wgpu::TextureView>,
         depth_attachment: Arc<wgpu::TextureView>,
         clear_color: Option<Color>,
+        clear_depth: Option<f32>,
     ) -> Self {
         Self {
             texture: Some((Some(color_attachment), Some(depth_attachment))),
             clear_color,
+            clear_depth,
         }
     }
+    pub fn set_clear_color(&mut self, color: Option<Color>) {
+        self.clear_color = color;
+    }
+    pub fn set_depth(&mut self, depth: Option<f32>) {
+        self.clear_depth = depth;
+    }
+
     pub fn color_attachment(&self) -> Option<&wgpu::TextureView> {
         self.texture.as_ref()?.0.as_ref().map(|v| v.as_ref())
     }
@@ -54,6 +67,9 @@ impl RenderAttachment {
     }
     pub fn clear_color(&self) -> Option<Color> {
         self.clear_color
+    }
+    pub fn clear_depth(&self) -> Option<f32> {
+        self.clear_depth
     }
 }
 
@@ -73,9 +89,14 @@ impl Camera {
                 to: Vec3f::new(0f32, 0f32, 0f32),
                 up: Vec3f::new(0f32, 1f32, 0f32),
                 ortho_size: Vec2f::zeros(),
+                near: 0.01f32,
+                far: f32::MAX,
+                fovy: 0f32,
+
                 attachment: RenderAttachment {
                     texture: None,
                     clear_color: None,
+                    clear_depth: None,
                 },
             }
             .into(),
@@ -95,12 +116,31 @@ impl Camera {
         let mut inner = self.inner.lock().unwrap();
         inner.projection =
             Mat4x4f::new_orthographic(rect.x, rect.z, rect.w, rect.y, near, far).into();
+        inner.orthographic = true;
         inner.ortho_size = Vec2f::new(rect.z - rect.x, rect.w - rect.y);
     }
     pub fn make_perspective(&self, aspect: f32, fovy: f32, znear: f32, zfar: f32) {
         let mut inner = self.inner.lock().unwrap();
-        inner.projection = Mat4x4f::new_perspective(aspect, fovy, znear, zfar).into()
+        inner.projection = Mat4x4f::new_perspective(aspect, fovy, znear, zfar).into();
+        inner.fovy = fovy;
+        inner.near = znear;
+        inner.far = zfar;
+        inner.orthographic = false;
+        inner.ortho_size = Vec2f::zeros();
     }
+    pub fn remake_perspective(&self, aspect: f32) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.projection =
+            Mat4x4f::new_perspective(aspect, inner.fovy, inner.near, inner.far).into();
+        inner.orthographic = false;
+        inner.ortho_size = Vec2f::zeros();
+    }
+
+    pub fn is_perspective(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        !inner.orthographic
+    }
+
     pub fn look_at(&self, from: Vec3f, to: Vec3f, up: Vec3f) {
         let mut inner = self.inner.lock().unwrap();
         inner.from = from;
@@ -144,7 +184,7 @@ impl Camera {
 }
 
 pub trait CameraController {
-    fn on_input(&mut self, duration: Duration, event: InputEvent);
+    fn on_input(&mut self, delta: f32, event: InputEvent);
 }
 
 pub struct TrackballCameraController {
@@ -164,15 +204,23 @@ impl TrackballCameraController {
 }
 
 impl CameraController for TrackballCameraController {
-    fn on_input(&mut self, duration: Duration, event: InputEvent) {
-        let d = duration.as_secs_f32();
+    fn on_input(&mut self, dt: f32, event: InputEvent) {
         match event {
             crate::event::InputEvent::KeyboardInput {
                 device_id,
                 input,
                 is_synthetic,
-            } => todo!(),
-            crate::event::InputEvent::ModifiersChanged(_) => todo!(),
+            } => {
+                if let Some(vk) = input.virtual_keycode {
+                    match vk {
+                        winit::event::VirtualKeyCode::W => {}
+                        winit::event::VirtualKeyCode::A => {}
+                        winit::event::VirtualKeyCode::S => {}
+                        winit::event::VirtualKeyCode::D => {}
+                        _ => (),
+                    }
+                };
+            }
             crate::event::InputEvent::CursorMoved {
                 device_id,
                 position,
@@ -193,11 +241,11 @@ impl CameraController for TrackballCameraController {
 
                 let q = Quaternion::from_axis_angle(
                     &unit_up,
-                    -delta.x * 0.1 * d * std::f32::consts::PI,
+                    -delta.x * 0.1 * dt * std::f32::consts::PI,
                 );
                 let q2 = Quaternion::from_axis_angle(
                     &unit_right,
-                    delta.y * 0.1 * d * std::f32::consts::PI,
+                    delta.y * 0.1 * dt * std::f32::consts::PI,
                 );
                 let q = q * q2;
 

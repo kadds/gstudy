@@ -165,7 +165,6 @@ impl ModuleRenderer for HardwareRenderer {
 
         // render objects
         let mut renderer = WGPURenderer::new(gpu.clone());
-        let mut has_clear = false;
 
         for (layer, objects) in scene.layers() {
             let camera = match objects.camera() {
@@ -186,11 +185,11 @@ impl ModuleRenderer for HardwareRenderer {
 
             // set render context
             let depth_target = render_attachment.depth_attachment().unwrap();
-            if !has_clear {
+            if !*reuse {
                 hardware_render_target
                     .set_render_target(&color_target, render_attachment.clear_color());
-                hardware_render_target.set_depth_target(&depth_target, Some(f32::MAX));
-                has_clear = true;
+                hardware_render_target
+                    .set_depth_target(&depth_target, render_attachment.clear_depth());
             } else {
                 hardware_render_target.set_render_target(&color_target, None);
                 hardware_render_target.set_depth_target(&depth_target, None);

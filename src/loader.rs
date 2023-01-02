@@ -322,6 +322,8 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
             s.nodes().len()
         );
     }
+    let aspect = rm.gpu.width() as f32 / rm.gpu.height() as f32;
+
     let camera = match gltf.cameras().next() {
         Some(c) => {
             log::info!("scene camera {}", c.name().unwrap_or_default());
@@ -338,7 +340,7 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
                 gltf::camera::Projection::Perspective(c) => {
                     let camera = crate::render::Camera::new();
                     camera.make_perspective(
-                        c.aspect_ratio().unwrap_or(1.0f32),
+                        c.aspect_ratio().unwrap_or(aspect),
                         c.yfov(),
                         c.znear(),
                         c.zfar().unwrap_or(1000_000f32),
@@ -349,7 +351,7 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
         }
         None => {
             let camera = crate::render::Camera::new();
-            camera.make_perspective(1.0f32, std::f32::consts::FRAC_PI_3, 0.01f32, 1000_000f32);
+            camera.make_perspective(aspect, std::f32::consts::FRAC_PI_3, 0.01f32, 1000_000f32);
             camera
         }
     };
@@ -361,8 +363,8 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
     let camera = Arc::new(camera);
 
     gscene.set_layer_camera(LAYER_NORMAL, camera.clone());
-    gscene.set_layer_camera(LAYER_BACKGROUND, camera.clone());
-    gscene.set_layer_camera(LAYER_TRANSPARENT, camera.clone());
+    // gscene.set_layer_camera(LAYER_BACKGROUND, camera.clone());
+    // gscene.set_layer_camera(LAYER_TRANSPARENT, camera.clone());
 
     Ok(gscene)
 }

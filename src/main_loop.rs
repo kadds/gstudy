@@ -9,12 +9,12 @@ use crate::{
     loader::ResourceManager,
     modules::{hardware_renderer::HardwareRenderer, ModuleRenderer, RenderParameter},
     render::{
-        camera::RenderAttachment,
+        camera::{CameraController, RenderAttachment, TrackballCameraController},
         material::{
             egui::{EguiMaterialFace, EguiMaterialFaceBuilder},
             MaterialBuilder,
         },
-        scene::{Object, LAYER_UI},
+        scene::{Object, LAYER_NORMAL, LAYER_UI},
         Camera, Material, Scene,
     },
     types::{Color, Size, Vec3f, Vec4f},
@@ -36,6 +36,9 @@ struct MainLoopInner {
 
     ui_materials: Option<HashMap<egui::TextureId, Arc<Material>>>,
     size: Size,
+
+    controller: Option<Box<dyn CameraController>>,
+    last_delta: f32,
 }
 
 struct MainLoopEventProcessor {
@@ -73,6 +76,8 @@ impl MainLoopInner {
             ui_materials: Some(HashMap::new()),
             ui_mesh,
             ui_textures: Some(ui_textures),
+            controller: None,
+            last_delta: 0f32,
         }
     }
 }
@@ -98,7 +103,8 @@ impl MainLoop {
 
 impl MainLoopEventProcessor {
     fn update(&mut self, delta: f64) {
-        let inner = self.inner.borrow_mut();
+        let mut inner = self.inner.borrow_mut();
+        inner.last_delta = delta as f32;
         inner.scene.update(delta)
     }
 
@@ -158,16 +164,19 @@ impl MainLoopEventProcessor {
         let (_, depth_view) = inner.main_depth_texture.as_ref().unwrap();
         let clear_color = inner.ui.clear_color();
 
-        let attachment = RenderAttachment::new_with_color_depth(
+        let mut attachment = RenderAttachment::new_with_color_depth(
             Arc::new(view),
             depth_view.clone(),
             Some(clear_color),
+            Some(f32::MAX),
         );
 
         // bind textures
         for (_, objects) in inner.scene.layers() {
             if let Some(c) = objects.camera() {
                 c.bind_render_attachment(attachment.clone());
+                attachment.set_depth(None);
+                attachment.set_clear_color(None);
             }
         }
 
@@ -223,6 +232,17 @@ impl EventProcessor for MainLoopEventProcessor {
                     Vec3f::zeros(),
                     Vec3f::new(0f32, 1f32, 0f32),
                 );
+                let aspect = size.x as f32 / size.y as f32;
+                for (_, layer) in inner.scene.layers() {
+                    match layer.camera() {
+                        Some(camera) => {
+                            if camera.is_perspective() {
+                                camera.remake_perspective(aspect);
+                            }
+                        }
+                        None => {}
+                    };
+                }
             }
             crate::event::Event::CustomEvent(ev) => match ev {
                 crate::event::CustomEvent::Loaded(scene) => {
@@ -231,9 +251,19 @@ impl EventProcessor for MainLoopEventProcessor {
                     inner.scene = scene;
                     let cam = inner.ui_camera.clone();
                     inner.scene.set_layer_camera(LAYER_UI, cam);
+                    // get camera
+                    let camera = inner.scene.layer(LAYER_NORMAL).camera_ref().unwrap();
+                    inner.controller = Some(Box::new(TrackballCameraController::new(camera)));
                 }
                 _ => (),
             },
+            crate::event::Event::Input(input) => {
+                let mut inner = self.inner.borrow_mut();
+                let delta = inner.last_delta;
+                if let Some(c) = inner.controller.as_mut() {
+                    c.on_input(delta, input.clone());
+                }
+            }
             _ => (),
         }
         crate::event::ProcessEventResult::Received
