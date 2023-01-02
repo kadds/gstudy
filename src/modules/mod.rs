@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
 use crate::{
-    backends,
-    render::{Camera, Canvas, Scene},
+    core::backends::wgpu_backend::WGPUResource,
+    render::{Camera, Scene},
 };
 
 pub struct RenderParameter<'a> {
-    pub gpu: Arc<backends::wgpu_backend::WGPUResource>,
-    pub camera: &'a Camera,
-    pub scene: &'a Scene,
-    pub canvas: &'a Canvas,
+    pub gpu: Arc<WGPUResource>,
+    pub scene: &'a mut Scene,
 }
 
 pub trait ModuleRenderer: Send {
@@ -23,11 +21,7 @@ pub trait ModuleFactory: Sync + Send {
 }
 
 pub mod hardware_renderer;
-pub mod ray_tracing;
-pub mod software_renderer;
 pub use hardware_renderer::HardwareRendererFactory;
-pub use ray_tracing::RayTracingFactory;
-pub use software_renderer::SoftwareRendererFactory;
 
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {

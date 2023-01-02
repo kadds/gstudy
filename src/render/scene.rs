@@ -1,120 +1,208 @@
-use crate::{geometry::Geometry, render::Material};
+use crate::{core::context::RContextRef, geometry::Geometry, render::Material};
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
+use super::{material::MaterialId, Camera};
+
 #[derive(Debug, Default)]
-pub struct MaterialGroup {
-    pub map: HashMap<u64, Vec<u64>>,
+pub struct LayerObjects {
+    pub map: HashMap<MaterialId, smallvec::SmallVec<[u64; 2]>>, // material id -> objects
+    dirty: bool,
+    target_camera: Option<Arc<Camera>>,
+
+    pub sorted_objects: BTreeMap<u64, Arc<Material>>, // sort key -> material id
 }
 
-impl MaterialGroup {
-    pub fn get_objects_from_material(&self, id: u64) -> &Vec<u64> {
-        self.map.get(&id).unwrap()
+impl LayerObjects {
+    pub fn camera(&self) -> Option<&Camera> {
+        match &self.target_camera {
+            Some(v) => Some(v.as_ref()),
+            None => None,
+        }
+    }
+    pub fn camera_ref(&self) -> Option<Arc<Camera>> {
+        self.target_camera.clone()
     }
 }
+
+pub const LAYER_BACKGROUND: u64 = 20000;
+pub const LAYER_NORMAL: u64 = 10000;
+pub const LAYER_TRANSPARENT: u64 = 5000;
+pub const LAYER_UI: u64 = 1000;
 
 #[derive(Debug)]
 pub struct Scene {
-    last_id: u64,
-    dyn_material_map: HashMap<u64, Arc<dyn Material>>,
+    context: RContextRef,
+
     objects: HashMap<u64, Object>,
 
-    material_objects: HashMap<TypeId, MaterialGroup>,
+    // reader layer -> objects
+    layers: BTreeMap<u64, LayerObjects>,
 }
 
 impl Scene {
-    pub fn new() -> Self {
+    pub fn new(context: RContextRef) -> Self {
         Self {
-            last_id: 1,
-            dyn_material_map: HashMap::new(),
+            context,
             objects: HashMap::new(),
-            material_objects: HashMap::new(),
+            layers: BTreeMap::new(),
         }
     }
 
+    pub fn object_size(&self) -> usize {
+        self.objects.len()
+    }
+
     pub fn add_object(&mut self, object: Object) -> u64 {
-        let id = self.last_id;
-        self.last_id += 1;
+        self.add_object_with(object, LAYER_NORMAL)
+    }
 
-        // save material
-        let material_id = object.material().material_id();
-        let material_id = if let Some(material_id) = material_id {
-            if let Some(material) = self.dyn_material_map.get(&material_id) {
-                if Arc::as_ptr(material) != Arc::as_ptr(&object.material) {
-                    panic!("Do not use material between scenes")
-                }
-            }
-            material_id
-        } else {
-            let material_id = self.last_id;
-            object.material.reset_material_id(Some(material_id));
-            self.last_id += 1;
-            self.dyn_material_map
-                .insert(material_id, object.material.clone());
-            material_id
-        };
+    pub fn add_ui(&mut self, object: Object) -> u64 {
+        self.add_object_with(object, LAYER_UI)
+    }
 
-        // insert into material group
-        let type_id = object.material.as_ref().type_id();
+    pub fn add_object_with(&mut self, object: Object, layer: u64) -> u64 {
+        let id = self.context.alloc_object_id();
 
-        let entry = self.material_objects.entry(type_id);
-        entry
-            .or_insert_with(|| MaterialGroup::default())
-            .map
-            .entry(material_id)
-            .or_default()
-            .push(id);
+        let material = object.material();
+        let material_id = material.id();
+
+        let entry = self.layers.entry(layer);
+        let entry = entry.or_insert_with(|| LayerObjects::default());
+
+        entry.map.entry(material_id).or_default().push(id);
+        entry.dirty = true;
+
         self.objects.insert(id, object);
 
         id
     }
 
-    pub fn delete_object(&mut self, id: u64) -> bool {
-        // let object = match self.objects.get(&id) {
-        //     Some(v) => v,
-        //     None => return false,
-        // };
-        // let typeid = object.material().type_id();
-        // self.objects.remove(&id);
+    // pub fn delete_object(&mut self, id: u64) -> bool {
+    //     let object = match self.objects.get(&id) {
+    //         Some(v) => v,
+    //         None => return false,
+    //     };
+    //     let material_id = object.material().id();
 
-        // if let Some(set) = self.material_objects.get_mut(&typeid) {
-        //     set.remove(&id);
-        // }
-        true
-    }
+    //     self.objects.remove(&id);
+
+    //     if let Some(set) = self.material_objects.get_mut(&typeid) {
+    //         set.remove(&id);
+    //     }
+    //     true
+    // }
 
     pub fn get_object(&self, id: u64) -> Option<&Object> {
         self.objects.get(&id)
     }
 
-    pub fn get_material(&self, id: u64) -> Option<Arc<dyn Material>> {
-        self.dyn_material_map.get(&id).cloned()
+    pub fn layers(&self) -> impl Iterator<Item = (&u64, &LayerObjects)> {
+        self.layers.iter().rev()
     }
 
-    pub fn load_material_objects(&self) -> &HashMap<TypeId, MaterialGroup> {
-        &self.material_objects
+    pub fn layer(&self, layer: u64) -> &LayerObjects {
+        self.layers.get(&layer).as_ref().unwrap()
+    }
+
+    pub fn sort_all<S: FnMut(u64, &Material) -> u64>(&mut self, mut sorter: S) {
+        for (level, objects) in self.layers.iter_mut().rev() {
+            if !objects.dirty {
+                continue;
+            }
+
+            objects.sorted_objects.clear();
+            if objects.camera().is_none() {
+                continue;
+            }
+
+            for (mat_id, id) in &objects.map {
+                let first = id.iter().next().unwrap();
+                let first_obj = self.objects.get(first).unwrap();
+
+                let material = first_obj.material.clone();
+                let key = sorter(*level, &material);
+
+                objects.sorted_objects.insert(key, material);
+            }
+
+            objects.dirty = false;
+        }
+    }
+
+    pub fn update(&self, delta: f64) {}
+
+    pub fn set_layer_camera(&mut self, layer: u64, camera: Arc<Camera>) {
+        self.layers
+            .entry(layer)
+            .and_modify(|v| {
+                v.target_camera = Some(camera.clone());
+                v.dirty = true;
+            })
+            .or_insert_with(|| {
+                let mut objs = LayerObjects::default();
+                objs.target_camera = Some(camera);
+                objs.dirty = true;
+                objs
+            });
+    }
+
+    pub fn clear_objects(&mut self) {
+        for (_, layer) in &mut self.layers {
+            layer.sorted_objects.clear();
+            layer.map.clear();
+            layer.dirty = true;
+        }
+        self.objects.clear();
+    }
+
+    pub fn clear_layer_objects(&mut self, layer: u64) {
+        let v = self.layers.get_mut(&layer);
+        if let Some(v) = v {
+            for (_, objs) in &v.map {
+                for obj in objs {
+                    self.objects.remove(&obj);
+                }
+            }
+            v.map.clear();
+            v.sorted_objects.clear();
+            v.dirty = true;
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Object {
     geometry: Box<dyn Geometry>,
-    material: Arc<dyn Material>,
+    material: Arc<Material>,
+    z_order: i8,
 }
 
 impl Object {
-    pub fn new(geometry: Box<dyn Geometry>, material: Arc<dyn Material>) -> Self {
-        Self { geometry, material }
+    pub fn new(geometry: Box<dyn Geometry>, material: Arc<Material>) -> Self {
+        Self {
+            geometry,
+            material,
+            z_order: 0,
+        }
     }
 
-    pub fn material(&self) -> &dyn Material {
+    pub fn material(&self) -> &Material {
         self.material.as_ref()
     }
 
     pub fn geometry(&self) -> &dyn Geometry {
         self.geometry.as_ref()
+    }
+
+    pub fn sub_objects(&self) -> usize {
+        0
+    }
+
+    pub fn z_order(&self) -> i8 {
+        self.z_order
     }
 }

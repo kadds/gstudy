@@ -1,8 +1,10 @@
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::backends::wgpu_backend::WGPUBackend;
+use crate::core::backends::WGPUBackend;
 use crate::event::*;
+use crate::loader::ResourceManager;
 use crate::statistics::Statistics;
 use crate::types::*;
 use winit::event::WindowEvent;
@@ -13,12 +15,13 @@ type WEvent<'a> = winit::event::Event<'a, Event>;
 
 pub struct Looper {
     window: Window,
-    backend: Option<WGPUBackend>,
+    backend: Option<Box<WGPUBackend>>,
     event_loop: RefCell<Option<EventLoop<Event>>>,
     event_proxy: EventLoopProxy<Event>,
     processors: Vec<RefCell<Box<dyn EventProcessor>>>,
     frame: Statistics,
     first_render: bool,
+    resource_manager: Option<Arc<ResourceManager>>,
 }
 
 pub struct DefaultProcessor {}
@@ -73,7 +76,11 @@ impl EventSource for Looper {
         self.event_proxy.clone()
     }
     fn backend(&self) -> &WGPUBackend {
-        self.backend.as_ref().unwrap()
+        self.backend.as_ref().unwrap().as_ref()
+    }
+
+    fn resource_manager(&self) -> &ResourceManager {
+        self.resource_manager.as_ref().unwrap()
     }
 }
 
@@ -106,10 +113,15 @@ impl Looper {
             event_proxy,
             processors: Vec::new(),
             frame: Statistics::new(Duration::from_millis(1000), Some(1.0 / 60.0)),
+            resource_manager: None,
         }
     }
 
-    pub fn bind_backend(&mut self, backend: WGPUBackend) {
+    pub fn bind_resource_manager(&mut self, manager: Arc<ResourceManager>) {
+        self.resource_manager = Some(manager);
+    }
+
+    pub fn bind_backend(&mut self, backend: Box<WGPUBackend>) {
         self.backend = Some(backend)
     }
 
@@ -148,7 +160,10 @@ impl Looper {
 
     fn map_event(&self, event: WindowEvent) -> Option<Event> {
         Some(match event {
-            WindowEvent::Resized(size) => Event::Resized(Size::new(size.width, size.height)),
+            WindowEvent::Resized(_) => {
+                let size = self.window.inner_size();
+                Event::Resized(Size::new(size.width, size.height))
+            }
             WindowEvent::Moved(pos) => Event::Moved(Size::new(pos.x as u32, pos.y as u32)),
             WindowEvent::CloseRequested => Event::CloseRequested,
             WindowEvent::Focused(f) => Event::Focused(f),

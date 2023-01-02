@@ -22,7 +22,7 @@ impl PlaneMesh {
     }
 }
 impl GeometryMeshGenerator for PlaneMesh {
-    fn build_mesh(&self) -> Mesh {
+    fn build_mesh(&self) -> Option<Mesh> {
         let mut mesh = Mesh::new();
         mesh.add_indices(&vec![0, 1, 2, 2, 3, 0]);
 
@@ -36,7 +36,7 @@ impl GeometryMeshGenerator for PlaneMesh {
             vec![self.color, self.color, self.color, self.color],
         );
 
-        mesh
+        Some(mesh)
     }
 }
 

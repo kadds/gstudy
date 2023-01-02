@@ -20,12 +20,12 @@ impl SphereMesh {
 }
 
 impl GeometryMeshGenerator for SphereMesh {
-    fn build_mesh(&self) -> Mesh {
+    fn build_mesh(&self) -> Option<Mesh> {
         let mut mesh = Mesh::new();
 
         // mesh.add_vertex(Vec3f::new(0f32, 1f32, 0f32));
 
-        mesh
+        Some(mesh)
     }
 }
 

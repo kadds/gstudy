@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
@@ -6,23 +11,27 @@ use winit::{
 };
 
 use crate::{
+    core::backends::wgpu_backend::WGPUResource,
     event::*,
-    render::{Canvas, Executor},
-    types::{Color, Size},
-    util,
+    geometry::{load_default_transformer, GeometryMeshGenerator, Mesh},
+    types::{Color, Rectu, Size, Vec4f},
+    util::{self, any_as_u8_slice_array},
 };
 
 mod logic;
 use self::logic::UILogic;
 
-pub mod egui_renderer;
+struct EguiRenderFrame {
+    pub textures: egui::epaint::textures::TexturesDelta,
+    pub shapes: Vec<egui::epaint::ClippedShape>,
+}
 
 struct UIInner {
-    render: egui_renderer::EguiRenderer,
+    ctx: Option<egui::Context>,
     ui_logic: UILogic,
     input: egui::RawInput,
     cursor_position: (f32, f32),
-    frame: Option<egui_renderer::EguiRenderFrame>,
+    frame: Option<EguiRenderFrame>,
     cursor: egui::CursorIcon,
     must_render: bool,
     ui_context: Option<Box<UIContext>>,
@@ -30,51 +39,126 @@ struct UIInner {
     clear_color: Option<Color>,
 }
 
+impl std::fmt::Debug for UIInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UIInner")
+            .field("input", &self.input)
+            .field("cursor_position", &self.cursor_position)
+            .field("cursor", &self.cursor)
+            .field("must_render", &self.must_render)
+            .field("ppi", &self.ppi)
+            .field("clear_color", &self.clear_color)
+            .finish()
+    }
+}
+
 pub struct UI {
-    inner: Rc<RefCell<UIInner>>,
+    inner: Arc<Mutex<UIInner>>,
 }
 
 impl UI {
     pub fn new() -> Self {
         Self {
-            inner: RefCell::new(UIInner::new()).into(),
+            inner: Arc::new(Mutex::new(UIInner::new())),
         }
     }
+
     pub fn event_processor(&self) -> Box<dyn EventProcessor> {
         Box::new(UIEventProcessor {
             inner: self.inner.clone(),
         })
     }
+    pub fn clear_color(&self) -> Color {
+        let inner = self.inner.lock().unwrap();
+        let ctx = &inner.ctx.as_ref().unwrap();
+        let style = ctx.style();
+        let raw_window_color = style.visuals.window_fill();
+        let target_color = if style.visuals.dark_mode {
+            egui::Color32::BLACK
+        } else {
+            egui::Color32::WHITE
+        };
+        let rgba: egui::Rgba =
+            egui::ecolor::tint_color_towards(raw_window_color, target_color).into();
+
+        let color = match inner.clear_color {
+            Some(c) => c,
+            None => Color::new(rgba.r(), rgba.g(), rgba.b(), rgba.a()),
+        };
+        color
+    }
+}
+
+use egui::FontFamily;
+#[cfg(not(target_arch = "wasm32"))]
+fn load_font(
+    fd: &mut egui::FontDefinitions,
+    source: &mut impl font_kit::source::Source,
+    name: &str,
+    family: FontFamily,
+) -> anyhow::Result<()> {
+    let font = source.select_best_match(
+        &[font_kit::family_name::FamilyName::Title(name.to_string())],
+        &font_kit::properties::Properties::new(),
+    )?;
+    let data = font.load()?;
+
+    fd.font_data.insert(
+        name.to_string(),
+        egui::FontData::from_owned(
+            data.copy_font_data()
+                .ok_or(anyhow::Error::msg("load font data fail"))?
+                .to_vec(),
+        ),
+    );
+    fd.families
+        .entry(family)
+        .and_modify(|v| v.insert(0, name.to_string()))
+        .or_default();
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_fonts(fd: &mut egui::FontDefinitions) {
+    let mut s = font_kit::source::SystemSource::new();
+
+    let fonts = vec![
+        ("Microsoft YaHei UI", FontFamily::Proportional),
+        ("Segoe UI", FontFamily::Proportional),
+        ("Consolas", FontFamily::Monospace),
+        ("PingFang SC", FontFamily::Proportional),
+    ];
+    for (name, family) in fonts.into_iter() {
+        if let Err(e) = load_font(fd, &mut s, name, family) {
+            log::warn!("load font {} fail with {}", name, e);
+        }
+    }
 }
 
 pub struct UIEventProcessor {
-    inner: Rc<RefCell<UIInner>>,
+    inner: Arc<Mutex<UIInner>>,
 }
 
 pub struct UIContext {
-    pub executor: Executor,
-    canvas_map: HashMap<u64, Arc<Canvas>>,
-    last_texture_id: u64,
     ppi: f32,
 }
 
-impl UIContext {
-    pub fn alloc(&mut self) -> u64 {
-        self.last_texture_id += 1;
-        self.last_texture_id
-    }
-    pub fn add_canvas_and_alloc(&mut self, canvas: Arc<Canvas>) -> u64 {
-        let id = self.alloc();
-        self.canvas_map.insert(id, canvas);
-        id
-    }
-}
+impl UIContext {}
 
 impl UIInner {
     fn new() -> Self {
         let mut ui_logic = UILogic::new();
+
+        let ctx = egui::Context::default();
+        let mut fd = egui::FontDefinitions::default();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        load_fonts(&mut fd);
+
+        ctx.set_fonts(fd);
+
         Self {
-            render: egui_renderer::EguiRenderer::new(),
+            ctx: Some(ctx),
             ui_logic,
             input: egui::RawInput::default(),
             cursor_position: (-1f32, -1f32),
@@ -83,24 +167,21 @@ impl UIInner {
             must_render: true,
             ppi: 1.0f32,
             clear_color: None,
-            ui_context: Some(Box::new(UIContext {
-                executor: Executor::new(),
-                canvas_map: HashMap::new(),
-                last_texture_id: 0,
-                ppi: 1.0f32,
-            })),
+            ui_context: Some(Box::new(UIContext { ppi: 1.0f32 })),
         }
     }
 }
 
 impl UIEventProcessor {
     fn update(&mut self, proxy: EventLoopProxy<Event>, dt: f64) -> ProcessEventResult {
-        let mut inner = self.inner.borrow_mut();
-        let ctx = inner.render.ctx();
+        let mut inner = self.inner.lock().unwrap();
+
         inner.input.predicted_dt = dt as f32;
         inner.input.pixels_per_point = Some(inner.ppi);
 
+        let ctx = inner.ctx.take().unwrap();
         ctx.begin_frame(inner.input.clone());
+
         let mut ui_context = inner.ui_context.take().unwrap();
         ui_context.ppi = inner.ppi;
 
@@ -108,7 +189,6 @@ impl UIEventProcessor {
             .ui_logic
             .update(ctx.clone(), &mut ui_context, proxy.clone());
 
-        ui_context.executor.update();
         inner.ui_context = Some(ui_context);
 
         let output = ctx.end_frame();
@@ -135,7 +215,7 @@ impl UIEventProcessor {
             let _ = proxy.send_event(Event::UpdateImePosition((pos.x as u32, pos.y as u32)));
         }
 
-        inner.frame = Some(egui_renderer::EguiRenderFrame {
+        inner.frame = Some(EguiRenderFrame {
             textures: output.textures_delta,
             shapes: output.shapes,
         });
@@ -148,6 +228,7 @@ impl UIEventProcessor {
         inner.input.dropped_files.clear();
         inner.input.events.clear();
         inner.input.hovered_files.clear();
+        inner.ctx = Some(ctx);
 
         ProcessEventResult::Received
     }
@@ -161,54 +242,23 @@ impl EventProcessor for UIEventProcessor {
             }
             Event::CustomEvent(ev) => match ev {
                 CustomEvent::ClearColor(c) => {
-                    let mut inner = self.inner.borrow_mut();
+                    let mut inner = self.inner.lock().unwrap();
                     inner.clear_color = *c;
                 }
                 _ => (),
             },
-            Event::Render => {
-                let mut inner = self.inner.borrow_mut();
-                let ctx = inner.render.ctx();
-                let style = ctx.style();
-                let frame = inner.frame.take().unwrap();
-                let raw_window_color = style.visuals.window_fill();
-                let target_color = if style.visuals.dark_mode {
-                    egui::Color32::BLACK
-                } else {
-                    egui::Color32::WHITE
-                };
-                let rgba: egui::Rgba =
-                    egui::ecolor::tint_color_towards(raw_window_color, target_color).into();
-
-                let color = match inner.clear_color {
-                    Some(c) => c,
-                    None => Color::new(rgba.r(), rgba.g(), rgba.b(), rgba.a()),
-                };
-
-                let mut ui_context = inner.ui_context.take().unwrap();
-
-                let ppi = inner.ppi;
-                ui_context.ppi = ppi;
-
-                inner
-                    .render
-                    .render(source.backend(), frame, color, ppi, &mut ui_context);
-                inner.ui_context = Some(ui_context);
-            }
-            Event::Resized(_) => {
-                let mut inner = self.inner.borrow_mut();
+            Event::Render => {}
+            Event::Resized(size) => {
+                let mut inner = self.inner.lock().unwrap();
                 let size: PhysicalSize<u32> = source.window().inner_size();
                 let logic_size: LogicalSize<u32> = size.to_logical(source.window().scale_factor());
                 inner.input.screen_rect = Some(egui::Rect::from_min_max(
                     egui::pos2(0f32, 0f32),
                     egui::pos2(logic_size.width as f32, logic_size.height as f32),
                 ));
-                inner
-                    .render
-                    .resize(Size::new(logic_size.width, logic_size.height));
             }
             Event::Input(ev) => {
-                let inner = self.inner.borrow();
+                let inner = self.inner.lock().unwrap();
                 inner
                     .ui_logic
                     .on_input(inner.ui_context.as_ref().unwrap(), ev);
@@ -220,7 +270,7 @@ impl EventProcessor for UIEventProcessor {
                         input,
                         is_synthetic,
                     } => {
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         if let Some(key) = util::match_egui_key(
                             input
                                 .virtual_keycode
@@ -251,7 +301,7 @@ impl EventProcessor for UIEventProcessor {
                         }
                     }
                     InputEvent::ModifiersChanged(modifiers) => {
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         let dst = &mut inner.input.modifiers;
                         dst.alt = modifiers.alt();
                         dst.ctrl = modifiers.ctrl();
@@ -272,7 +322,7 @@ impl EventProcessor for UIEventProcessor {
                     } => {
                         let position: winit::dpi::LogicalPosition<f64> =
                             position.to_logical(source.window().scale_factor());
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         inner
                             .input
                             .events
@@ -284,17 +334,17 @@ impl EventProcessor for UIEventProcessor {
                     }
                     InputEvent::ReceivedCharacter(c) => {
                         let c = *c;
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         if !c.is_ascii_control() {
                             inner.input.events.push(egui::Event::Text(c.to_string()));
                         }
                     }
                     InputEvent::ReceivedString(s) => {
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         inner.input.events.push(egui::Event::Text(s.clone()));
                     }
                     InputEvent::CursorLeft { device_id } => {
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         inner.input.events.push(egui::Event::PointerGone);
                     }
                     InputEvent::MouseWheel {
@@ -302,7 +352,7 @@ impl EventProcessor for UIEventProcessor {
                         delta,
                         phase,
                     } => {
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         inner.input.events.push(egui::Event::Scroll(match *delta {
                             winit::event::MouseScrollDelta::LineDelta(x, y) => {
                                 egui::Vec2::new(x * 50f32, y * 50f32)
@@ -317,7 +367,7 @@ impl EventProcessor for UIEventProcessor {
                         state,
                         button,
                     } => {
-                        let mut inner = self.inner.borrow_mut();
+                        let mut inner = self.inner.lock().unwrap();
                         let button = match button {
                             winit::event::MouseButton::Left => egui::PointerButton::Primary,
                             winit::event::MouseButton::Right => egui::PointerButton::Secondary,
@@ -343,27 +393,162 @@ impl EventProcessor for UIEventProcessor {
                 }
             }
             Event::JustRenderOnce => {
-                let mut inner = self.inner.borrow_mut();
+                let mut inner = self.inner.lock().unwrap();
                 inner.must_render = true;
             }
             Event::Theme(theme) => {
-                let inner = self.inner.borrow_mut();
+                let mut inner = self.inner.lock().unwrap();
                 match theme {
                     Theme::Light => {
-                        inner.render.ctx().set_visuals(egui::Visuals::light());
+                        inner
+                            .ctx
+                            .as_ref()
+                            .unwrap()
+                            .set_visuals(egui::Visuals::light());
                     }
                     Theme::Dark => {
-                        inner.render.ctx().set_visuals(egui::Visuals::dark());
+                        inner
+                            .ctx
+                            .as_ref()
+                            .unwrap()
+                            .set_visuals(egui::Visuals::dark());
                     }
                 }
             }
             Event::ScaleFactorChanged(factor) => {
-                let mut inner = self.inner.borrow_mut();
+                let mut inner = self.inner.lock().unwrap();
                 inner.ppi = *factor as f32;
                 inner.must_render = true;
             }
             _ => (),
         };
         ProcessEventResult::Received
+    }
+}
+
+#[derive(Default)]
+pub struct UITextures {
+    textures: HashMap<egui::TextureId, (wgpu::Texture, wgpu::TextureView)>,
+    user_textures: HashMap<egui::TextureId, wgpu::TextureView>,
+}
+
+impl UITextures {
+    fn update_texture(
+        &mut self,
+        gpu: &WGPUResource,
+        id: egui::TextureId,
+        data: egui::epaint::ImageDelta,
+    ) {
+        let size = data.image.size();
+        let mut rect = Rectu::new(0, 0, size[0] as u32, size[1] as u32);
+        if let Some(pos) = data.pos {
+            rect.x = pos[0] as u32;
+            rect.y = pos[1] as u32;
+            log::info!("{:?} {:?}", pos, rect);
+        } else {
+            log::info!("{:?}", rect);
+        }
+
+        let size = data.image.size();
+
+        if !self.textures.contains_key(&id) {
+            let texture = gpu.new_srgba_2d_texture(
+                Some("ui texture"),
+                Size::new(size[0] as u32, size[1] as u32),
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.textures.insert(id, (texture, view));
+        }
+
+        let texture = &self.textures.get(&id).unwrap().0;
+
+        match &data.image {
+            egui::epaint::ImageData::Color(c) => {
+                gpu.copy_texture(texture, 4, rect, any_as_u8_slice_array(&c.pixels));
+            }
+            egui::epaint::ImageData::Font(f) => {
+                let data: Vec<egui::Color32> = f.srgba_pixels(None).collect();
+                gpu.copy_texture(texture, 4, rect, any_as_u8_slice_array(&data));
+            }
+        }
+    }
+
+    pub fn get_view(&self, texture_id: egui::TextureId) -> wgpu::TextureView {
+        self.textures
+            .get(&texture_id)
+            .as_ref()
+            .unwrap()
+            .0
+            .create_view(&wgpu::TextureViewDescriptor::default())
+    }
+}
+
+#[derive(Debug)]
+pub struct UIMesh {}
+
+impl UIMesh {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn generate_mesh(
+        &self,
+        ui: &UI,
+        gpu: Arc<WGPUResource>,
+        size: Size,
+        ui_textures: &mut UITextures,
+    ) -> Vec<(Mesh, egui::TextureId)> {
+        let mut inner = ui.inner.lock().unwrap();
+        let ctx = inner.ctx.take().unwrap();
+        let frame = inner.frame.take().unwrap();
+        let ppi = ctx.pixels_per_point();
+
+        for (id, data) in frame.textures.set {
+            ui_textures.update_texture(&gpu, id, data);
+        }
+
+        for id in frame.textures.free {
+            ui_textures.textures.remove(&id);
+        }
+
+        let meshes = ctx.tessellate(frame.shapes);
+        let mut ret = vec![];
+        for mesh in meshes {
+            let mut clip = if mesh.clip_rect.is_finite() {
+                Vec4f::new(
+                    mesh.clip_rect.left() * ppi,
+                    mesh.clip_rect.top() * ppi,
+                    mesh.clip_rect.right() * ppi,
+                    mesh.clip_rect.bottom() * ppi,
+                )
+            } else {
+                Vec4f::new(0f32, 0f32, 0f32, 0f32)
+            };
+
+            clip.x = clip.x.max(0f32);
+            clip.y = clip.y.max(0f32);
+            clip.z = clip.z.min(size.x as f32);
+            clip.w = clip.w.min(size.y as f32);
+
+            let mut gmesh = Mesh::new();
+            gmesh.set_clip(clip);
+
+            let texture_id = match mesh.primitive {
+                egui::epaint::Primitive::Mesh(m) => {
+                    gmesh.set_mixed_mesh(
+                        any_as_u8_slice_array(&m.vertices),
+                        load_default_transformer(),
+                    );
+                    gmesh.add_indices(&m.indices);
+                    m.texture_id
+                }
+                egui::epaint::Primitive::Callback(_) => todo!(),
+            };
+
+            ret.push((gmesh, texture_id));
+        }
+
+        inner.ctx = Some(ctx);
+        ret
     }
 }

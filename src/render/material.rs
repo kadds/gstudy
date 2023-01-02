@@ -2,119 +2,116 @@ use std::{
     any::{Any, TypeId},
     fmt::Debug,
     hash::Hash,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::Arc,
 };
 
-pub trait Material: Any + Sync + Send + Debug {
-    fn material_id(&self) -> Option<u64>;
-    fn reset_material_id(&self, id: Option<u64>) -> Option<u64>;
+use crate::core::{
+    context::RContext,
+    ps::{BlendState, PrimitiveStateDescriptor},
+};
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub struct MaterialId(u64);
+
+impl MaterialId {
+    pub fn new(m: u64) -> Self {
+        Self(m)
+    }
+
+    pub fn id(&self) -> u64 {
+        self.0
+    }
 }
 
-pub fn downcast<T: Material>(obj: &dyn Material) -> &T {
-    unsafe { &*(obj as *const dyn Material as *const T) }
+pub trait MaterialFace: Any + Sync + Send + Debug {
+    // instance
+    fn shader_id(&self) -> u64;
 }
-
-pub trait MaterialParameter: Sync + Send + Debug + 'static {}
 
 #[derive(Debug)]
-pub struct BMaterial<P> {
-    p: P,
-    id: AtomicU64,
+pub struct Material {
+    id: MaterialId,
+    primitive: PrimitiveStateDescriptor,
+    blend: Option<BlendState>,
+
+    face: Box<dyn MaterialFace>, // material face
 }
 
-impl<P> BMaterial<P>
-where
-    P: MaterialParameter,
-{
-    pub fn new(p: P) -> Self {
-        Self {
-            p,
-            id: AtomicU64::new(0),
-        }
+impl Material {
+    pub fn primitive(&self) -> &PrimitiveStateDescriptor {
+        &self.primitive
+    }
+    pub fn blend(&self) -> Option<&BlendState> {
+        self.blend.as_ref()
     }
 
-    pub fn static_type_id() -> TypeId {
-        TypeId::of::<Self>()
+    pub fn is_transparent(&self) -> bool {
+        self.blend.is_some()
     }
 
-    pub fn inner(&self) -> &P {
-        &self.p
-    }
-}
-
-impl<P> Material for BMaterial<P>
-where
-    P: MaterialParameter,
-{
-    fn material_id(&self) -> Option<u64> {
-        let val = self.id.load(Ordering::Acquire);
-        if val == 0 {
-            None
-        } else {
-            Some(val)
-        }
+    pub fn id(&self) -> MaterialId {
+        self.id
     }
 
-    fn reset_material_id(&self, id: Option<u64>) -> Option<u64> {
-        let old = self.material_id();
-        if let Some(id) = id {
-            self.id.store(id, Ordering::Release);
-        } else {
-            self.id.store(0, Ordering::Release);
-        }
-        old
+    pub fn face(&self) -> &dyn MaterialFace {
+        self.face.as_ref()
+    }
+
+    pub fn face_id(&self) -> TypeId {
+        self.face.as_ref().type_id()
+    }
+
+    pub fn face_by<M: MaterialFace>(&self) -> &M {
+        (self.face.as_ref() as &dyn Any)
+            .downcast_ref::<M>()
+            .unwrap()
     }
 }
 
 #[derive(Debug, Default)]
-pub struct BasicMaterialParameter {
-    pub has_color: bool,
-    pub has_texture: bool,
-    pub has_normal: bool,
-    pub line: bool,
+pub struct MaterialBuilder {
+    primitive: PrimitiveStateDescriptor,
+    blend: Option<BlendState>,
+    face: Option<Box<dyn MaterialFace>>,
 }
 
-impl BasicMaterialParameter {
-    pub fn new() -> Self {
+impl Clone for MaterialBuilder {
+    fn clone(&self) -> Self {
         Self {
-            has_color: false,
-            has_texture: false,
-            has_normal: false,
-            line: false,
+            primitive: self.primitive.clone(),
+            blend: self.blend.clone(),
+            face: None,
         }
     }
 }
 
-impl MaterialParameter for BasicMaterialParameter {}
+impl MaterialBuilder {
+    pub fn with_blend(mut self, blend: BlendState) -> Self {
+        self.blend = Some(blend);
+        self
+    }
+    pub fn with_primitive(mut self, primitive: PrimitiveStateDescriptor) -> Self {
+        self.primitive = primitive;
+        self
+    }
 
-pub type BasicMaterial = BMaterial<BasicMaterialParameter>;
+    pub fn with_face<MF: MaterialFace>(mut self, face: MF) -> Self {
+        self.face = Some(Box::new(face));
+        self
+    }
 
-#[derive(Debug)]
-pub struct DepthMaterialParameter {
-    pub line: bool,
-}
-
-impl DepthMaterialParameter {
-    pub fn new() -> Self {
-        Self { line: false }
+    pub fn build(mut self, context: &RContext) -> Arc<Material> {
+        let face = self.face.take().unwrap();
+        Arc::new(Material {
+            id: MaterialId::new(context.alloc_material_id()),
+            primitive: self.primitive,
+            blend: self.blend,
+            face,
+        })
     }
 }
 
-impl MaterialParameter for DepthMaterialParameter {}
+pub trait MaterialShader: Any + Sync + Send + Debug + 'static {}
 
-pub type DepthMaterial = BMaterial<DepthMaterialParameter>;
-
-#[derive(Debug)]
-pub struct ConstantMaterialParameter {
-    pub line: bool,
-}
-
-impl ConstantMaterialParameter {
-    pub fn new() -> Self {
-        Self { line: false }
-    }
-}
-
-impl MaterialParameter for ConstantMaterialParameter {}
-
-pub type ConstantMaterial = BMaterial<ConstantMaterialParameter>;
+pub mod basic;
+pub mod egui;

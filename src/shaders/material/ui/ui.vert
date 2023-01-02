@@ -3,7 +3,7 @@ layout (location = 0) in vec2 pos;
 layout (location = 1) in vec2 tex;
 layout (location = 2) in uint color;
 
-layout (binding = 0, set = 0) uniform local { vec2 screen_size; };
+layout (set = 0, binding = 0) uniform local { vec2 screen_size; };
 
 layout (location = 0) out vec2 o_tex;
 layout (location = 1) out vec4 o_color;

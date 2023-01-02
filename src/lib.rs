@@ -1,9 +1,12 @@
-mod backends;
+#![feature(trait_upcasting)]
+#![feature(strict_provenance)]
+mod core;
 mod entry;
 mod event;
 mod geometry;
 mod loader;
 mod looper;
+mod main_loop;
 mod model;
 mod modules;
 mod render;

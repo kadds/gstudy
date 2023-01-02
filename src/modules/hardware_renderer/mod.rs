@@ -1,27 +1,60 @@
-use std::{any::TypeId, collections::HashMap, sync::Arc};
+use std::{any::TypeId, cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    backends::wgpu_backend::{self, WGPURenderTarget},
+    core::backends::wgpu_backend::{self, WGPURenderTarget, WGPURenderer},
     render::{
-        material::{BasicMaterial, ConstantMaterial, DepthMaterial},
-        Material,
+        material::{basic::BasicMaterialFace, egui::EguiMaterialFace},
+        Camera, Material,
     },
-    types::Color,
+    types::{Color, Mat4x4f},
 };
 
 use self::material::{
-    BasicMaterialHardwareRenderer, DepthMaterialHardwareRenderer, MaterialRenderContext,
-    MaterialRenderer,
+    basic::{BasicMaterialHardwareRenderer, BasicMaterialRendererFactory},
+    egui::{EguiMaterialHardwareRenderer, EguiMaterialRendererFactory},
+    MaterialRendererFactory,
 };
+use self::material::{MaterialRenderContext, MaterialRenderer};
 
 use super::{ModuleFactory, ModuleInfo, ModuleRenderer, RenderParameter};
 
 pub mod common;
 mod material;
 
+struct WVP {
+    mat: Mat4x4f,
+}
+
+struct SingleMaterialRenderer {
+    factory: Box<dyn MaterialRendererFactory>,
+
+    renderers: HashMap<usize, Box<dyn MaterialRenderer>>,
+}
+
+impl SingleMaterialRenderer {
+    pub fn new<T: MaterialRendererFactory + Default + 'static>() -> Self {
+        Self {
+            factory: Box::new(T::default()),
+            renderers: HashMap::new(),
+        }
+    }
+
+    pub fn make_sure(&mut self, ins: usize) {
+        if !self.renderers.contains_key(&ins) {
+            self.renderers.insert(ins, self.factory.new());
+        }
+    }
+
+    pub fn get(&self, ins: usize) -> &dyn MaterialRenderer {
+        self.renderers.get(&ins).unwrap().as_ref()
+    }
+    pub fn get_mut(&mut self, ins: usize) -> &mut dyn MaterialRenderer {
+        self.renderers.get_mut(&ins).unwrap().as_mut()
+    }
+}
+
 pub struct HardwareRenderer {
-    material_renderer: HashMap<TypeId, Box<dyn MaterialRenderer>>,
-    render_target: WGPURenderTarget,
+    material_renderer_factory: HashMap<TypeId, SingleMaterialRenderer>,
 }
 
 pub struct HardwareRendererFactory {}
@@ -54,59 +87,133 @@ enum RenderMethod {
 
 impl HardwareRenderer {
     pub fn new() -> Self {
-        let mut material_renderer = HashMap::<TypeId, Box<dyn MaterialRenderer>>::new();
-        material_renderer.insert(
-            BasicMaterial::static_type_id(),
-            Box::new(BasicMaterialHardwareRenderer::new()),
+        let mut material_renderer_factory = HashMap::<TypeId, SingleMaterialRenderer>::new();
+        material_renderer_factory.insert(
+            TypeId::of::<BasicMaterialFace>(),
+            SingleMaterialRenderer::new::<BasicMaterialRendererFactory>(),
         );
-        material_renderer.insert(
-            DepthMaterial::static_type_id(),
-            Box::new(DepthMaterialHardwareRenderer::new()),
-        );
-        material_renderer.insert(
-            ConstantMaterial::static_type_id(),
-            Box::new(BasicMaterialHardwareRenderer::new()),
+        material_renderer_factory.insert(
+            TypeId::of::<EguiMaterialFace>(),
+            SingleMaterialRenderer::new::<EguiMaterialRendererFactory>(),
         );
 
         Self {
-            material_renderer,
-            render_target: WGPURenderTarget::new("hardware renderer"),
+            material_renderer_factory,
         }
     }
+
+    fn prepare_frame(&mut self, p: RenderParameter) {}
 }
 
 impl ModuleRenderer for HardwareRenderer {
     fn render(&mut self, p: RenderParameter) {
-        let (view, depth_view) = match p.canvas.writer_frame() {
-            Some(v) => v,
-            None => return,
-        };
+        let gpu = p.gpu.clone();
+        let scene = p.scene;
 
-        let mut renderer = wgpu_backend::WGPURenderer::new(p.gpu.clone());
-        self.render_target
-            .set_depth_target(depth_view, Some(f32::MAX));
+        let mut layer_targets = HashMap::new();
+        let mut camera_targets = HashMap::new();
 
-        self.render_target
-            .set_render_target(view, Some(Color::new(0f32, 0f32, 0f32, 1f32)));
+        for (layer, objects) in scene.layers() {
+            let camera = match objects.camera_ref() {
+                Some(v) => v,
+                None => continue,
+            };
 
-        let mut encoder = renderer.begin(&mut self.render_target).unwrap();
+            let ptr = camera.as_ref() as *const Camera;
+            let camera_id = ptr.addr();
+            let mut reuse = true;
 
-        let mut ctx = MaterialRenderContext {
-            gpu: &p.gpu,
-            camera: p.camera,
-            scene: p.scene,
-            encoder: &mut encoder,
-        };
+            camera_targets.entry(camera_id).or_insert_with(|| {
+                reuse = false;
+                WGPURenderTarget::new("target level")
+            });
 
-        let mo = p.scene.load_material_objects();
-        for (material_type, group) in mo {
-            if let Some(r) = self.material_renderer.get_mut(material_type) {
-                for (m, v) in &group.map {
-                    let material = p.scene.get_material(*m).unwrap();
-                    // let objects = group.get_objects_from_material(*m);
+            layer_targets.insert(*layer, (reuse, camera_id));
+        }
 
-                    r.render_material(&mut ctx, v, material.as_ref());
+        // clean cameras last frame
+        for (_, s) in &mut self.material_renderer_factory {
+            let mut tobe_clean = Vec::new();
+            for (camera_id, _) in &s.renderers {
+                if !camera_targets.contains_key(camera_id) {
+                    tobe_clean.push(*camera_id);
                 }
+            }
+            for cam in tobe_clean {
+                s.renderers.remove(&cam);
+            }
+        }
+
+        // sort objects
+        scene.sort_all(|layer, m| {
+            let s = self
+                .material_renderer_factory
+                .get_mut(&m.face_id())
+                .unwrap();
+            let (_, camera_id) = layer_targets.get(&layer).unwrap();
+            s.make_sure(*camera_id);
+
+            s.get_mut(*camera_id).sort_key(m, &gpu)
+        });
+
+        // mark new frame
+        for (_, s) in &mut self.material_renderer_factory {
+            for (_, r) in &mut s.renderers {
+                r.new_frame(&gpu);
+            }
+        }
+
+        // render objects
+        let mut renderer = WGPURenderer::new(gpu.clone());
+        let mut has_clear = false;
+
+        for (layer, objects) in scene.layers() {
+            let camera = match objects.camera() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let render_attachment = camera.render_attachment();
+            let color_target = match render_attachment.color_attachment() {
+                Some(v) => v,
+                None => {
+                    return;
+                }
+            };
+
+            let (reuse, cam) = layer_targets.get(layer).unwrap();
+            let hardware_render_target = camera_targets.get_mut(cam).unwrap();
+
+            // set render context
+            let depth_target = render_attachment.depth_attachment().unwrap();
+            if !has_clear {
+                hardware_render_target
+                    .set_render_target(&color_target, render_attachment.clear_color());
+                hardware_render_target.set_depth_target(&depth_target, Some(f32::MAX));
+                has_clear = true;
+            } else {
+                hardware_render_target.set_render_target(&color_target, None);
+                hardware_render_target.set_depth_target(&depth_target, None);
+            }
+
+            let mut encoder = renderer.begin(hardware_render_target).unwrap();
+
+            for (_, material) in &objects.sorted_objects {
+                let mat_renderers = self
+                    .material_renderer_factory
+                    .get_mut(&material.face_id())
+                    .unwrap();
+                let r = mat_renderers.get_mut(*cam);
+
+                let mut ctx = MaterialRenderContext {
+                    gpu: p.gpu.as_ref(),
+                    camera,
+                    scene: scene,
+                    encoder: &mut encoder,
+                };
+                r.prepare_render(&mut ctx);
+
+                r.render_material(&mut ctx, &objects.map[&material.id()], &material);
             }
         }
     }

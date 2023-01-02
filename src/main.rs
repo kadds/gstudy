@@ -1,13 +1,13 @@
-// #![feature(trait_alias)]
-// #![feature(concat_idents)]
-// #![feature(thread_spawn_unchecked)]
+#![feature(trait_upcasting)]
+#![feature(strict_provenance)]
 #![windows_subsystem = "windows"]
-mod backends;
+mod core;
 mod entry;
 mod event;
 mod geometry;
 mod loader;
 mod looper;
+mod main_loop;
 mod model;
 mod modules;
 mod render;

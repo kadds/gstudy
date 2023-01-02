@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use crate::core::backends::WGPUBackend;
+use crate::loader::ResourceManager;
 use crate::types::*;
 use crate::{model::Model, render::Scene};
 use winit::{
@@ -20,7 +24,7 @@ pub enum CustomEvent {
     ClearColor(Option<Color>),
 
     Loading(String),
-    Loaded(Scene),
+    Loaded(u64),
 }
 
 #[derive(Debug, Clone)]
@@ -112,8 +116,9 @@ pub enum ProcessEventResult {
 
 pub trait EventSource {
     fn window(&self) -> &winit::window::Window;
-    fn backend(&self) -> &crate::backends::WGPUBackend;
+    fn backend(&self) -> &WGPUBackend;
     fn event_proxy(&self) -> winit::event_loop::EventLoopProxy<Event>;
+    fn resource_manager(&self) -> &ResourceManager;
 }
 
 pub trait EventProcessor {

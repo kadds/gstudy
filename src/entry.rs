@@ -1,8 +1,12 @@
-use crate::backends::WGPUBackend;
+use std::sync::Arc;
+
+use crate::core::backends::WGPUBackend;
 use crate::event::EventSource;
+use crate::loader::ResourceManager;
+use crate::main_loop;
 
 pub fn real_main() {
-    use crate::{loader::Loader, looper, ui};
+    use crate::{loader::Loader, looper};
 
     #[cfg(windows)]
     unsafe {
@@ -24,14 +28,21 @@ pub fn real_main() {
     let mut looper = looper::Looper::new(window_builder);
     looper.register_processor(Box::new(looper::DefaultProcessor::new()));
 
-    let ui = ui::UI::new();
-    looper.register_processor(ui.event_processor());
+    let backend = Box::new(WGPUBackend::new(looper.window()).unwrap());
+    let loopx = main_loop::MainLoop::new(backend.gpu());
 
-    let backend = WGPUBackend::new(looper.window()).unwrap();
+    for ev in loopx.internal_processors() {
+        looper.register_processor(ev);
+    }
+
     looper.register_processor(backend.event_processor());
+    let gpu = backend.gpu();
     looper.bind_backend(backend);
 
-    let loader = Loader::new();
+    let resource_manager = Arc::new(ResourceManager::new(gpu));
+    looper.bind_resource_manager(resource_manager.clone());
+
+    let loader = Loader::new(resource_manager.clone());
     looper.register_processor(loader.event_processor());
 
     looper.run();
