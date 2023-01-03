@@ -1,4 +1,10 @@
-use std::{any::TypeId, cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use std::{
+    any::TypeId,
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::Arc,
+};
 
 use crate::{
     core::backends::wgpu_backend::{self, WGPURenderTarget, WGPURenderer},
@@ -163,6 +169,28 @@ impl ModuleRenderer for HardwareRenderer {
             }
         }
 
+        let mut cam_used = HashSet::new();
+
+        for (layer, objects) in scene.layers() {
+            let camera = match objects.camera() {
+                Some(v) => v,
+                None => continue,
+            };
+            let (_, cam) = layer_targets.get(layer).unwrap();
+
+            for (_, material) in &objects.sorted_objects {
+                let mat_renderers = self
+                    .material_renderer_factory
+                    .get_mut(&material.face_id())
+                    .unwrap();
+
+                if cam_used.insert((material.face_id(), *cam)) {
+                    let r = mat_renderers.get_mut(*cam);
+
+                    r.prepare_render(&gpu, camera);
+                }
+            }
+        }
         // render objects
         let mut renderer = WGPURenderer::new(gpu.clone());
 
@@ -210,7 +238,6 @@ impl ModuleRenderer for HardwareRenderer {
                     scene: scene,
                     encoder: &mut encoder,
                 };
-                r.prepare_render(&mut ctx);
 
                 r.render_material(&mut ctx, &objects.map[&material.id()], &material);
             }

@@ -18,7 +18,7 @@ use crate::{
     modules::hardware_renderer::WVP,
     render::{
         material::{egui::EguiMaterialFace, MaterialId},
-        Material,
+        Camera, Material,
     },
     types::Vec2f,
     util::any_as_u8_slice,
@@ -76,7 +76,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
         self.material_group.clear();
     }
 
-    fn prepare_render(&mut self, ctx: &mut super::MaterialRenderContext) {
+    fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera) {
         let label = Some("egui");
         let res = self.res.get_or_insert_with(|| {
             let (vs_source, fs_source) = include_egui_shader!("ui");
@@ -84,7 +84,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             let fs = wgpu::util::make_spirv(fs_source);
             let vs = wgpu::ShaderModuleDescriptor { label, source: vs };
             let fs = wgpu::ShaderModuleDescriptor { label, source: fs };
-            let pso = ctx.gpu.context().alloc_pso();
+            let pso = gpu.context().alloc_pso();
             let fs_target = FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8Unorm);
             let depth = wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
@@ -94,7 +94,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
                 bias: wgpu::DepthBiasState::default(),
             };
 
-            let pass = PipelineReflector::new(label, ctx.gpu.device())
+            let pass = PipelineReflector::new(label, gpu.device())
                 .add_vs(vs)
                 .add_fs(fs, fs_target)
                 .with_depth(depth)
@@ -103,45 +103,41 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
                         .with_cull_face(crate::core::ps::CullFace::None),
                 )
                 .unwrap();
-            ctx.gpu.context().inner().map_pso(pso, Some(pass));
+            gpu.context().inner().map_pso(pso, Some(pass));
 
-            (PipelineStateObject::new(pso), ctx.gpu.new_sampler(label))
+            (PipelineStateObject::new(pso), gpu.new_sampler(label))
         });
 
-        let pipeline = ctx.gpu.context().inner().get_pso(res.0.id());
+        let pipeline = gpu.context().inner().get_pso(res.0.id());
 
         let wvp = self.wvp.get_or_insert_with(|| {
-            let buffer = ctx.gpu.new_wvp_buffer::<ScreeSize>(label);
+            let buffer = gpu.new_wvp_buffer::<ScreeSize>(label);
 
-            let bind = ctx
-                .gpu
-                .device()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label,
-                    layout: &pipeline.pipeline.get_bind_group_layout(0),
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &buffer,
-                            offset: 0,
-                            size: None,
-                        }),
-                    }],
-                });
+            let bind = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
+                label,
+                layout: &pipeline.pipeline.get_bind_group_layout(0),
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                }],
+            });
 
             (buffer, bind)
         });
 
         let wvp_data = ScreeSize {
-            wh: ctx.camera.width_height(),
+            wh: camera.width_height(),
         };
-        ctx.gpu
-            .queue()
+        gpu.queue()
             .write_buffer(&wvp.0, 0, any_as_u8_slice(&wvp_data));
 
         let inner = self
             .inner
-            .get_or_insert_with(|| GpuInputMainBuffers::new(ctx.gpu, label));
+            .get_or_insert_with(|| GpuInputMainBuffers::new(gpu, label));
         inner.finish();
         inner.recall();
     }

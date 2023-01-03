@@ -19,7 +19,7 @@ use crate::{
     render::{
         material::{basic::*, MaterialId},
         scene::Object,
-        Material,
+        Camera, Material,
     },
     types::*,
     util::{any_as_u8_slice, any_as_u8_slice_array},
@@ -305,13 +305,13 @@ impl BasicMaterialHardwareRenderer {
 
 impl MaterialRenderer for BasicMaterialHardwareRenderer {
     fn new_frame(&mut self, gpu: &WGPUResource) {}
-    fn prepare_render(&mut self, ctx: &mut MaterialRenderContext) {
+    fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera) {
         let inner = self.inner.get_or_insert_with(|| {
-            let vp = ctx.gpu.new_wvp_buffer::<MVP>(Some("basic material"));
+            let vp = gpu.new_wvp_buffer::<MVP>(Some("basic material"));
 
             BasicMaterialHardwareRendererInner {
                 pipeline_pass: HashMap::new(),
-                main_buffers: GpuInputMainBuffersWithUniform::new(ctx.gpu, Some("basic material")),
+                main_buffers: GpuInputMainBuffersWithUniform::new(gpu, Some("basic material")),
                 uniform_vp: vp,
                 vp_bind_group: None,
             }
@@ -320,12 +320,9 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
         inner.main_buffers.finish();
         inner.main_buffers.recall();
 
-        let wvp_data = WVP {
-            mat: ctx.camera.vp(),
-        };
+        let wvp_data = WVP { mat: camera.vp() };
 
-        ctx.gpu
-            .queue()
+        gpu.queue()
             .write_buffer(&inner.uniform_vp, 0, any_as_u8_slice(&wvp_data));
     }
 
@@ -395,6 +392,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
                 &mut new_bind_groups,
             );
             mgr = inner.pipeline_pass.get(&material.id()).unwrap();
+        } else {
         }
 
         // copy stage buffer

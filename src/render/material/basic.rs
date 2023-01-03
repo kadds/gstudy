@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     core::ps::{BlendState, DepthDescriptor, PrimitiveStateDescriptor},
     types::Vec4f,
@@ -19,7 +21,7 @@ impl MaterialShader for BasicMaterialShader {}
 pub struct BasicMaterialFace {
     color: Vec4f,
     shader: BasicMaterialShader,
-    texture: Option<wgpu::TextureView>,
+    texture: Option<Arc<wgpu::TextureView>>,
 }
 
 impl BasicMaterialFace {
@@ -27,7 +29,7 @@ impl BasicMaterialFace {
         self.shader
     }
     pub fn texture(&self) -> Option<&wgpu::TextureView> {
-        self.texture.as_ref()
+        self.texture.as_ref().map(|v| v.as_ref())
     }
     pub fn color(&self) -> Vec4f {
         self.color
@@ -46,6 +48,7 @@ pub struct BasicMaterialFaceBuilder {
     blend: Option<BlendState>,
     has_color: bool,
     has_texture: bool,
+    texture: Option<Arc<wgpu::TextureView>>,
     color: Vec4f,
 }
 
@@ -54,6 +57,7 @@ impl BasicMaterialFaceBuilder {
         Self {
             has_color: false,
             has_texture: false,
+            texture: None,
             color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
             blend: None,
             primitive: PrimitiveStateDescriptor::default(),
@@ -71,25 +75,31 @@ impl BasicMaterialFaceBuilder {
         self.color = color;
         self
     }
+    pub fn with_texture_data(mut self, texture: Arc<wgpu::TextureView>) -> Self {
+        self.texture = Some(texture);
+        self
+    }
 
     pub fn build(mut self) -> BasicMaterialFace {
         let shader = if self.has_color {
             if self.has_texture {
                 BasicMaterialShader::ColorTexture
             } else {
+                self.texture = None;
                 BasicMaterialShader::Color
             }
         } else {
             if self.has_texture {
                 BasicMaterialShader::Texture
             } else {
+                self.texture = None;
                 BasicMaterialShader::None
             }
         };
         BasicMaterialFace {
             color: self.color,
             shader,
-            texture: None,
+            texture: self.texture,
         }
     }
 }

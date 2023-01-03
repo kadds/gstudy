@@ -19,7 +19,7 @@ pub struct MaterialRenderContext<'a, 'b> {
 pub trait MaterialRenderer: Send {
     fn new_frame(&mut self, gpu: &WGPUResource);
 
-    fn prepare_render(&mut self, ctx: &mut MaterialRenderContext);
+    fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera);
 
     fn render_material<'a, 'b>(
         &mut self,

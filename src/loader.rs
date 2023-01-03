@@ -1,3 +1,4 @@
+use wgpu::util::DeviceExt;
 use winit::event_loop::EventLoopProxy;
 
 use crate::core::backends::wgpu_backend::{WGPURenderTarget, WGPUResource};
@@ -11,8 +12,8 @@ use crate::render::material::basic::{BasicMaterialFaceBuilder, BasicMaterialShad
 use crate::render::material::MaterialBuilder;
 use crate::render::scene::{LAYER_BACKGROUND, LAYER_NORMAL, LAYER_TRANSPARENT};
 use crate::render::Material;
-use crate::types::{Vec3f, Vec4f};
-use crate::util::{any_as_u8_slice_array, any_as_x_slice_array};
+use crate::types::{Vec2f, Vec3f, Vec4f};
+use crate::util::{self, any_as_u8_slice_array, any_as_x_slice_array, TaskPool};
 use crate::{
     event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
     geometry::{BasicGeometry, Mesh, StaticGeometry},
@@ -23,7 +24,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read},
@@ -140,15 +141,23 @@ fn parse_mesh(
         let mut gmesh = Mesh::new();
         let mut color = Vec4f::new(1.0f32, 1.0f32, 1.0f32, 1.0f32);
         let indices = p.indices().unwrap();
+        match indices.dimensions() {
+            gltf::accessor::Dimensions::Scalar => {}
+            _ => {
+                anyhow::bail!("dimension for indices invalid");
+            }
+        }
         match indices.data_type() {
-            gltf::accessor::DataType::U16 => {
-                match indices.dimensions() {
-                    gltf::accessor::Dimensions::Scalar => {}
-                    _ => {
-                        anyhow::bail!("dimension for indices invalid");
-                    }
+            gltf::accessor::DataType::U8 => {
+                let buf = buf_readers[0].read_bytes(&indices);
+                let mut input = Vec::new();
+                for d in any_as_x_slice_array::<u8, _>(&buf) {
+                    input.push(*d as u32);
                 }
-                indices.view().unwrap().buffer();
+                drop(buf);
+                gmesh.add_indices(&input);
+            }
+            gltf::accessor::DataType::U16 => {
                 let buf = buf_readers[0].read_bytes(&indices);
                 let mut input = Vec::new();
                 for d in any_as_x_slice_array::<u16, _>(&buf) {
@@ -158,17 +167,11 @@ fn parse_mesh(
                 gmesh.add_indices(&input);
             }
             gltf::accessor::DataType::U32 => {
-                match indices.dimensions() {
-                    gltf::accessor::Dimensions::Scalar => {}
-                    _ => {
-                        anyhow::bail!("dimension for indices invalid");
-                    }
-                }
                 let buf = buf_readers[0].read_bytes(&indices);
                 gmesh.add_indices(any_as_x_slice_array(&buf));
             }
-            _ => {
-                anyhow::bail!("data type for indices is not supported")
+            t => {
+                anyhow::bail!("data type {:?} for indices is not supported", t)
             }
         }
 
@@ -231,6 +234,28 @@ fn parse_mesh(
                 }
                 gltf::Semantic::TexCoords(index) => {
                     kind = kind.add_texture().unwrap();
+
+                    let buf = buf_readers[0].read_bytes(&accessor);
+                    match accessor.data_type() {
+                        gltf::accessor::DataType::F32 => {}
+                        _ => {
+                            anyhow::bail!("texcoord invalid data type");
+                        }
+                    };
+                    match accessor.dimensions() {
+                        gltf::accessor::Dimensions::Vec2 => {}
+                        _ => {
+                            anyhow::bail!("texcoord should be vec2f");
+                        }
+                    };
+
+                    let f = any_as_x_slice_array(&buf);
+                    let mut data = Vec::new();
+                    for block in f.chunks(2) {
+                        data.push(Vec2f::new(block[0], block[1]));
+                    }
+
+                    gmesh.set_coord_vec2f(MeshCoordType::TexCoord, data);
                 }
                 gltf::Semantic::Joints(index) => {}
                 gltf::Semantic::Weights(index) => {}
@@ -254,6 +279,67 @@ fn parse_mesh(
     Ok(())
 }
 
+fn parse_texture(
+    texture_map: &mut Mutex<HashMap<usize, (wgpu::Texture, Arc<wgpu::TextureView>)>>,
+    path: &PathBuf,
+    gpu: &WGPUResource,
+    texture: gltf::Texture,
+) -> anyhow::Result<()> {
+    let source = texture.source().source();
+    let (data, ty) = match source {
+        gltf::image::Source::View { view, mime_type } => {
+            let buf = view.buffer();
+            let offset = view.offset();
+            todo!();
+        }
+        gltf::image::Source::Uri { uri, mime_type } => {
+            log::info!("read uri texture {} with mime {:?}", uri, mime_type);
+            let uri = urlencoding::decode(uri)?;
+            let target = path.parent().unwrap().join(uri.to_string());
+
+            let mut file = File::open(target)?;
+            let mut buf = Vec::new();
+
+            file.read_to_end(&mut buf)?;
+
+            (buf, mime_type)
+        }
+    };
+    let image = image::load_from_memory(&data)?;
+    let width = image.width();
+    let height = image.height();
+
+    let rgba = image.into_rgba8();
+    let rgba = rgba.as_raw();
+
+    let wtexture = gpu.device().create_texture_with_data(
+        gpu.queue(),
+        &wgpu::TextureDescriptor {
+            label: Some("input"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        },
+        &rgba,
+    );
+
+    let view = Arc::new(wtexture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+    let hardware_texture = (wtexture, view);
+    texture_map
+        .lock()
+        .unwrap()
+        .insert(texture.index(), hardware_texture);
+    Ok(())
+}
+
 fn parse_node(
     gscene: &mut Scene,
     node: gltf::Node,
@@ -270,7 +356,7 @@ fn parse_node(
     Ok(())
 }
 
-fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
+fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
     let path = PathBuf::from(name);
     let gltf = gltf::Gltf::open(&path)?;
     let mut buf_readers: Vec<GltfBuffer> = Vec::new();
@@ -280,7 +366,8 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
                 GltfBuffer::Cursor(std::io::Cursor::new(gltf.blob.as_ref().unwrap()))
             }
             gltf::buffer::Source::Uri(uri) => {
-                let target = path.parent().unwrap().join(uri);
+                let uri = urlencoding::decode(uri)?;
+                let target = path.parent().unwrap().join(uri.to_string());
                 log::info!("read gltf uri {}", uri);
                 GltfBuffer::File(BufReader::new(File::open(target).unwrap()))
             }
@@ -288,6 +375,16 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
     }
     let mut gscene = rm.new_scene();
     let mut map = MaterialMap::new(rm.gpu.context());
+    let mut texture_map = Mutex::new(HashMap::new());
+
+    let batch = pool.make_batch();
+
+    for texture in gltf.textures() {
+        batch.execute(|| parse_texture(&mut texture_map, &path, &rm.gpu, texture));
+    }
+    batch.wait()?;
+
+    let texture_map = texture_map.into_inner()?;
 
     for material in gltf.materials() {
         let idx = material.index().unwrap_or_default();
@@ -296,10 +393,18 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
         if material.double_sided() {
             primitive = primitive.with_cull_face(crate::core::ps::CullFace::None);
         }
+        material_builder = material_builder.with_primitive(primitive);
 
         let mut basic_material_builder = BasicMaterialFaceBuilder::default();
 
         let color = material.pbr_metallic_roughness().base_color_factor();
+        let texture = material.pbr_metallic_roughness().base_color_texture();
+        if let Some(tex) = texture {
+            let texture_index = tex.texture().index();
+            let texture_view = texture_map.get(&texture_index).unwrap();
+            basic_material_builder =
+                basic_material_builder.with_texture_data(texture_view.1.clone());
+        }
 
         basic_material_builder = basic_material_builder.with_constant_color(color.into());
 
@@ -370,12 +475,13 @@ fn load(name: &str, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
 }
 
 fn loader_main(rx: mpsc::Receiver<(String, EventLoopProxy<Event>)>, rm: Arc<ResourceManager>) {
+    let pool = util::TaskPoolBuilder::new().build();
     loop {
         let (name, proxy) = rx.recv().unwrap();
         if name.is_empty() {
             break;
         }
-        let result = load(&name, rm.clone());
+        let result = load(&name, &pool, rm.clone());
         let result = match result {
             Ok(val) => val,
             Err(err) => {

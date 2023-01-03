@@ -1393,7 +1393,7 @@ impl GpuInputMainBuffer {
 
     #[inline]
     pub fn make_sure(&mut self, gpu: &WGPUResource, bytes: u64) -> bool {
-        self.buffer.make_sure(bytes, gpu)
+        self.buffer.make_sure(bytes + self.offset, gpu)
     }
 
     pub fn copy_stage(
@@ -1476,7 +1476,9 @@ impl GpuInputUniformBuffers {
 
         let elements_for_uniform_buffer = self.size / single_bytes;
         assert!(elements_for_uniform_buffer != 0);
-        let total_buffers = (n + elements_for_uniform_buffer + 1) / elements_for_uniform_buffer;
+        let total_buffers =
+            (n + elements_for_uniform_buffer + 1) / elements_for_uniform_buffer + self.index;
+
         let mut any_changes = false;
 
         while self.buffers.len() < total_buffers as usize {
@@ -1619,7 +1621,7 @@ impl GpuInputMainBuffersWithUniform {
     ) -> bool {
         self.index.make_sure(gpu, index_bytes);
         self.vertex.make_sure(gpu, vertex_bytes);
-        let mut changed = self.uniform.make_sure(gpu, n_uniform, single_bytes);
+        let changed = self.uniform.make_sure(gpu, n_uniform, single_bytes);
         changed
     }
 
