@@ -251,11 +251,7 @@ impl BasicMaterialHardwareRenderer {
                 depth_write_enabled: !material.is_transparent(),
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState {
-                    constant: 1,
-                    slope_scale: 0.1f32,
-                    clamp: 0.1f32,
-                },
+                bias: wgpu::DepthBiasState::default(),
             };
 
             let pass = PipelineReflector::new(label, gpu.device())

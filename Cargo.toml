@@ -43,7 +43,13 @@ wasm-bindgen="0.2"
 wasm-bindgen-futures="0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.10"
+slog = "2.7.0"
+slog-stdlog = "4.1.1"
+slog-async = "2.7.0"
+slog-term = "2.9"
+slog-scope = "4.4.0"
+slog-envlogger = "2.2.0"
+
 arboard = "3.2"
 font-kit = "0.11"
 

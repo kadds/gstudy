@@ -1,9 +1,8 @@
-use std::sync::Arc;
-
 use crate::core::backends::WGPUBackend;
 use crate::event::EventSource;
 use crate::loader::ResourceManager;
 use crate::main_loop;
+use std::sync::Arc;
 
 pub fn real_main() {
     use crate::{loader::Loader, looper};

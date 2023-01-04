@@ -169,7 +169,7 @@ impl MainLoopEventProcessor {
             Arc::new(view),
             depth_view.clone(),
             Some(clear_color),
-            Some(f32::MAX),
+            Some(1f32),
             inner.gpu.surface_format(),
         );
 
