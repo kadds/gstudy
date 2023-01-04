@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    fmt::Debug,
     sync::{Arc, Mutex},
 };
 
@@ -8,6 +9,7 @@ use nalgebra::Unit;
 use winit::event::{ElementState, MouseButton};
 
 use crate::{
+    core::context::RContext,
     event::InputEvent,
     types::{Color, Mat4x4f, Point3, Quaternion, Rotation3, Vec2f, Vec3f, Vec4f},
 };
@@ -28,6 +30,7 @@ struct Inner {
     fovy: f32,
     near: f32,
     far: f32,
+    change_id: u64,
 
     attachment: RenderAttachment,
 }
@@ -37,19 +40,25 @@ pub struct RenderAttachment {
     texture: Option<(OptionalTexture, OptionalTexture)>,
     clear_color: Option<Color>,
     clear_depth: Option<f32>,
+    format: wgpu::TextureFormat,
+    id: u64,
 }
 
 impl RenderAttachment {
     pub fn new_with_color_depth(
+        id: u64,
         color_attachment: Arc<wgpu::TextureView>,
         depth_attachment: Arc<wgpu::TextureView>,
         clear_color: Option<Color>,
         clear_depth: Option<f32>,
+        format: wgpu::TextureFormat,
     ) -> Self {
         Self {
             texture: Some((Some(color_attachment), Some(depth_attachment))),
             clear_color,
             clear_depth,
+            format,
+            id,
         }
     }
     pub fn set_clear_color(&mut self, color: Option<Color>) {
@@ -71,15 +80,43 @@ impl RenderAttachment {
     pub fn clear_depth(&self) -> Option<f32> {
         self.clear_depth
     }
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.format
+    }
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
-#[derive(Debug)]
 pub struct Camera {
     inner: Mutex<Inner>,
+    id: u64,
+}
+
+impl Debug for Camera {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let d = self.inner.lock().unwrap();
+        let mut sd = f.debug_struct("Camera");
+        if d.orthographic {
+            sd.field("type", &"o")
+                .field("width", &d.ortho_size.x)
+                .field("height", &d.ortho_size.y)
+        } else {
+            sd.field("type", &"p")
+        }
+        .field("from", &d.from)
+        .field("to", &d.to)
+        .field("up", &d.up)
+        .field("fovy", &(d.fovy / std::f32::consts::PI * 180f32))
+        .field("near", &d.near)
+        .field("far", &d.far)
+        .field("id", &self.id)
+        .finish()
+    }
 }
 
 impl Camera {
-    pub fn new() -> Self {
+    pub fn new(context: &RContext) -> Self {
         Self {
             inner: Inner {
                 projection: Mat4x4f::identity(),
@@ -92,19 +129,27 @@ impl Camera {
                 near: 0.01f32,
                 far: f32::MAX,
                 fovy: 0f32,
+                change_id: 0,
 
                 attachment: RenderAttachment {
+                    id: 0,
                     texture: None,
                     clear_color: None,
                     clear_depth: None,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
                 },
             }
             .into(),
+            id: context.alloc_camera_id(),
         }
     }
-    pub fn mat_vp(&self) -> (Mat4x4f, Mat4x4f) {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn change_id(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
-        (inner.projection.clone(), inner.view.clone())
+        inner.change_id
     }
 
     pub fn vp(&self) -> Mat4x4f {
@@ -118,6 +163,7 @@ impl Camera {
             Mat4x4f::new_orthographic(rect.x, rect.z, rect.w, rect.y, near, far).into();
         inner.orthographic = true;
         inner.ortho_size = Vec2f::new(rect.z - rect.x, rect.w - rect.y);
+        inner.change_id += 1;
     }
     pub fn make_perspective(&self, aspect: f32, fovy: f32, znear: f32, zfar: f32) {
         let mut inner = self.inner.lock().unwrap();
@@ -127,6 +173,7 @@ impl Camera {
         inner.far = zfar;
         inner.orthographic = false;
         inner.ortho_size = Vec2f::zeros();
+        inner.change_id += 1;
     }
     pub fn remake_perspective(&self, aspect: f32) {
         let mut inner = self.inner.lock().unwrap();
@@ -134,6 +181,7 @@ impl Camera {
             Mat4x4f::new_perspective(aspect, inner.fovy, inner.near, inner.far).into();
         inner.orthographic = false;
         inner.ortho_size = Vec2f::zeros();
+        inner.change_id += 1;
     }
 
     pub fn is_perspective(&self) -> bool {
@@ -149,6 +197,7 @@ impl Camera {
         let from = from.into();
         let to = to.into();
         inner.view = Mat4x4f::look_at_rh(&from, &to, &up);
+        inner.change_id += 1;
     }
     pub fn from(&self) -> Vec3f {
         let inner = self.inner.lock().unwrap();
@@ -178,7 +227,7 @@ impl Camera {
     }
 
     pub fn render_attachment(&self) -> RenderAttachment {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         inner.attachment.clone()
     }
 }

@@ -2,11 +2,20 @@
 /// :
 /// c: VERTEX_COLOR
 /// t: VERTEX_TEX
+/// a: ALPHA_TET
 /// ct: VERTEX_COLOR, VERTEX_TEX
+/// ca: VERTEX_COLOR, ALPHA_TEST
+/// ta: VERTEX_TEX, ALPHA_TEST
+/// cta: VERTEX_TEX, ALPHA_TEST, VERTEX_COLOR
 
 #version 450 core
 layout (set = 0, binding = 0) uniform local { mat4x4 vp; }; // per camera update
-layout (set = 1, binding = 0) uniform const_parameter_material { vec4 const_color; }; // per material update
+layout (set = 1, binding = 0) uniform const_parameter_material {
+    vec4 const_color;
+#ifdef ALPHA_TEST
+    float alpha_test_val;
+#endif
+}; // per material update
 layout (set = 2, binding = 0) uniform per_object { mat4x4 model; }; // per object update
 
 layout (location = 0) in vec3 pos;

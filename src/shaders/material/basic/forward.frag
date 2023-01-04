@@ -2,11 +2,20 @@
 /// :
 /// c: VERTEX_COLOR
 /// t: VERTEX_TEX
+/// a: ALPHA_TET
 /// ct: VERTEX_COLOR, VERTEX_TEX
+/// ca: VERTEX_COLOR, ALPHA_TEST
+/// ta: VERTEX_TEX, ALPHA_TEST
+/// cta: VERTEX_TEX, ALPHA_TEST, VERTEX_COLOR
 
 #version 450 core
 #extension GL_ARB_separate_shader_objects : enable
-layout (set = 1, binding = 0) uniform const_parameter_material { vec4 const_color; }; // per material update
+layout (set = 1, binding = 0) uniform const_parameter_material {
+    vec4 const_color;
+#ifdef ALPHA_TEST
+    float alpha_test_val;
+#endif
+}; // per material update
 
 #ifdef VERTEX_TEX
 layout(set = 1, binding = 1) uniform sampler sampler2d; // per material update
@@ -36,4 +45,9 @@ void main() {
     out_color *= tex_c;
     #endif
 
+    #ifdef ALPHA_TEST
+    if (out_color.a < alpha_test_val) {
+        discard;
+    }
+    #endif
 }

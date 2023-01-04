@@ -109,6 +109,35 @@ pub struct BlendState {
 }
 
 impl BlendState {
+    pub fn default_append_blender() -> Self {
+        Self {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::OneMinusDstAlpha,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+        }
+    }
+    pub fn default_gltf_blender() -> Self {
+        Self {
+            color: BlendComponent {
+                src_factor: BlendFactor::SrcAlpha,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::Zero,
+                operation: BlendOperation::Add,
+            },
+        }
+    }
+
     pub fn as_key(&self) -> u64 {
         let a = self.color.as_key();
         let b = self.alpha.as_key();

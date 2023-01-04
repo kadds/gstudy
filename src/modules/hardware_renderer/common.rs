@@ -1,4 +1,14 @@
-use std::{marker::PhantomData, num::NonZeroU64};
+use std::{
+    cell::{Ref, RefCell},
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    num::NonZeroU64,
+    ops::{Not, Range},
+    rc::Rc,
+    sync::Arc,
+};
+
+use crate::core::backends::wgpu_backend::WGPUResource;
 
 pub struct UniformBinder {
     pub set: u32,
@@ -92,4 +102,187 @@ impl<T> FrameUniformBufferHolder<T> {
     pub fn recall(&mut self) {}
 
     pub fn finish(&mut self) {}
+}
+
+struct SharedBuffer {
+    buf: wgpu::Buffer,
+    cap: u32,
+    current_offset: u32,
+    used_size: u32,
+
+    used_objects: u32,
+}
+
+impl SharedBuffer {
+    pub fn rest(&self) -> u64 {
+        (self.cap - self.current_offset) as u64
+    }
+}
+
+type SharedBufferRef = Rc<RefCell<SharedBuffer>>;
+
+struct SingleMeshMergerData {
+    share_buffer: SharedBufferRef,
+    range: Range<u64>,
+}
+
+const ALIGNMENT: u64 = 8;
+
+impl SingleMeshMergerData {
+    fn create(
+        gpu: &WGPUResource,
+        label: Option<&'static str>,
+        size: u64,
+        usage: wgpu::BufferUsages,
+    ) -> SharedBufferRef {
+        let buf = gpu.device().create_buffer(&wgpu::BufferDescriptor {
+            label: label,
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | usage,
+            mapped_at_creation: false,
+        });
+
+        Rc::new(RefCell::new(SharedBuffer {
+            buf,
+            cap: size as u32,
+            current_offset: 0,
+            used_size: 0,
+            used_objects: 0,
+        }))
+    }
+
+    pub fn new_buffered(
+        gpu: &WGPUResource,
+        label: Option<&'static str>,
+        usage: wgpu::BufferUsages,
+        data: &[u8],
+        small_buffer_allocator: &mut Option<SharedBufferRef>,
+    ) -> Self {
+        let (buf, range) = if data.len() < 1024 * 4 {
+            // use small allocator
+            let recreate_sba = if let Some(v) = small_buffer_allocator {
+                let rest = v.borrow().rest();
+                rest < data.len() as u64
+            } else {
+                true
+            };
+
+            if recreate_sba {
+                let buf = Self::create(gpu, label, 1024 * 1024 * 2, usage);
+                *small_buffer_allocator = Some(buf.clone());
+            }
+            let range = {
+                let mut sba = small_buffer_allocator.as_mut().unwrap();
+                let mut sba = sba.borrow_mut();
+                let offset = sba.current_offset as u64;
+                let end = offset + data.len() as u64;
+                let alignment_end = (end + ALIGNMENT - 1) & (ALIGNMENT - 1).not();
+
+                sba.current_offset = alignment_end as u32;
+                sba.used_objects += 1;
+                sba.used_size = (alignment_end - offset) as u32;
+
+                gpu.queue().write_buffer(&sba.buf, offset, data);
+
+                offset..end
+            };
+
+            (small_buffer_allocator.as_mut().unwrap().clone(), range)
+        } else {
+            let buf = Self::create(gpu, label, data.len() as u64, usage);
+            let range = 0..(data.len() as u64);
+            {
+                let sb = buf.borrow();
+                gpu.queue().write_buffer(&sb.buf, 0, data);
+            }
+            (buf, range)
+        };
+
+        Self {
+            share_buffer: buf,
+            range,
+        }
+    }
+}
+
+pub struct StaticMeshMergerData {
+    index: SingleMeshMergerData,
+    vertex: SingleMeshMergerData,
+    version: u64,
+}
+
+impl StaticMeshMergerData {}
+
+pub struct StaticMeshMerger {
+    objects: HashMap<u64, StaticMeshMergerData>,
+    small_shared_vertex_buffer: Option<SharedBufferRef>,
+    small_shared_index_buffer: Option<SharedBufferRef>,
+    label: Option<&'static str>,
+}
+
+pub trait VertexDataGenerator {
+    fn gen(&mut self) -> &[u8];
+}
+
+impl StaticMeshMerger {
+    pub fn new(label: Option<&'static str>) -> Self {
+        Self {
+            objects: HashMap::new(),
+            small_shared_index_buffer: None,
+            small_shared_vertex_buffer: None,
+            label,
+        }
+    }
+    pub fn write_cached<V: VertexDataGenerator>(
+        &mut self,
+        gpu: &WGPUResource,
+        object_id: u64,
+        version: u64,
+        index_data: &[u8],
+        mut vdg: V,
+    ) -> (Range<u64>, Range<u64>) {
+        let need_create = self
+            .objects
+            .get(&object_id)
+            .map(|v| v.version != version)
+            .unwrap_or(true);
+
+        if need_create {
+            let vertex_data = vdg.gen();
+            let index = SingleMeshMergerData::new_buffered(
+                gpu,
+                self.label,
+                wgpu::BufferUsages::INDEX,
+                index_data,
+                &mut self.small_shared_index_buffer,
+            );
+            let vertex = SingleMeshMergerData::new_buffered(
+                gpu,
+                self.label,
+                wgpu::BufferUsages::VERTEX,
+                vertex_data,
+                &mut self.small_shared_vertex_buffer,
+            );
+            let smd = StaticMeshMergerData {
+                index,
+                vertex,
+                version,
+            };
+
+            self.objects.insert(object_id, smd);
+        }
+        let o = self.objects.get(&object_id).unwrap();
+        (o.index.range.clone(), o.vertex.range.clone())
+    }
+
+    pub fn index_buffer_slice<'b>(&'b self, id: u64, range: Range<u64>) -> wgpu::BufferSlice<'b> {
+        let p = self.objects.get(&id).unwrap();
+        let b = p.index.share_buffer.borrow();
+        unsafe { std::mem::transmute(b.buf.slice(range)) }
+    }
+    pub fn vertex_buffer_slice<'b>(&'b self, id: u64, range: Range<u64>) -> wgpu::BufferSlice<'b> {
+        let p = self.objects.get(&id).unwrap();
+        let b = p.vertex.share_buffer.borrow();
+        unsafe { std::mem::transmute(b.buf.slice(range)) }
+    }
 }

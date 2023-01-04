@@ -53,7 +53,7 @@ impl MainLoopInner {
     pub fn new(gpu: Arc<WGPUResource>) -> Self {
         let mut scene = Scene::new(gpu.context_ref());
         let ui = UI::new();
-        let ui_camera = Arc::new(Camera::new());
+        let ui_camera = Arc::new(Camera::new(gpu.context()));
         ui_camera.make_orthographic(Vec4f::new(0f32, 0f32, 1f32, 1f32), 0.1f32, 10f32);
         ui_camera.look_at(
             Vec3f::new(0f32, 0f32, 1f32),
@@ -164,19 +164,19 @@ impl MainLoopEventProcessor {
         let (_, depth_view) = inner.main_depth_texture.as_ref().unwrap();
         let clear_color = inner.ui.clear_color();
 
-        let mut attachment = RenderAttachment::new_with_color_depth(
+        let attachment = RenderAttachment::new_with_color_depth(
+            0,
             Arc::new(view),
             depth_view.clone(),
             Some(clear_color),
             Some(f32::MAX),
+            inner.gpu.surface_format(),
         );
 
         // bind textures
-        for (_, objects) in inner.scene.layers() {
+        for (layer, objects) in inner.scene.layers() {
             if let Some(c) = objects.camera() {
                 c.bind_render_attachment(attachment.clone());
-                attachment.set_depth(None);
-                attachment.set_clear_color(None);
             }
         }
 

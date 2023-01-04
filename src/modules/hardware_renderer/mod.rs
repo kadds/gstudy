@@ -9,6 +9,7 @@ use std::{
 use crate::{
     core::backends::wgpu_backend::{self, WGPURenderTarget, WGPURenderer},
     render::{
+        camera::RenderAttachment,
         material::{basic::BasicMaterialFace, egui::EguiMaterialFace},
         Camera, Material,
     },
@@ -34,7 +35,7 @@ struct WVP {
 struct SingleMaterialRenderer {
     factory: Box<dyn MaterialRendererFactory>,
 
-    renderers: HashMap<usize, Box<dyn MaterialRenderer>>,
+    renderers: HashMap<u64, Box<dyn MaterialRenderer>>, // camera -> renderere
 }
 
 impl SingleMaterialRenderer {
@@ -45,17 +46,17 @@ impl SingleMaterialRenderer {
         }
     }
 
-    pub fn make_sure(&mut self, ins: usize) {
-        if !self.renderers.contains_key(&ins) {
-            self.renderers.insert(ins, self.factory.new());
+    pub fn make_sure(&mut self, cam: u64) {
+        if !self.renderers.contains_key(&cam) {
+            self.renderers.insert(cam, self.factory.new());
         }
     }
 
-    pub fn get(&self, ins: usize) -> &dyn MaterialRenderer {
-        self.renderers.get(&ins).unwrap().as_ref()
+    pub fn get(&self, cam: u64) -> &dyn MaterialRenderer {
+        self.renderers.get(&cam).unwrap().as_ref()
     }
-    pub fn get_mut(&mut self, ins: usize) -> &mut dyn MaterialRenderer {
-        self.renderers.get_mut(&ins).unwrap().as_mut()
+    pub fn get_mut(&mut self, cam: u64) -> &mut dyn MaterialRenderer {
+        self.renderers.get_mut(&cam).unwrap().as_mut()
     }
 }
 
@@ -125,16 +126,13 @@ impl ModuleRenderer for HardwareRenderer {
                 None => continue,
             };
 
-            let ptr = camera.as_ref() as *const Camera;
-            let camera_id = ptr.addr();
-            let mut reuse = true;
+            let camera_id = camera.id();
 
-            camera_targets.entry(camera_id).or_insert_with(|| {
-                reuse = false;
-                WGPURenderTarget::new("target level")
-            });
+            camera_targets
+                .entry(camera_id)
+                .or_insert_with(|| WGPURenderTarget::new("target level"));
 
-            layer_targets.insert(*layer, (reuse, camera_id));
+            layer_targets.insert(*layer, camera_id);
         }
 
         // clean cameras last frame
@@ -156,7 +154,7 @@ impl ModuleRenderer for HardwareRenderer {
                 .material_renderer_factory
                 .get_mut(&m.face_id())
                 .unwrap();
-            let (_, camera_id) = layer_targets.get(&layer).unwrap();
+            let camera_id = layer_targets.get(&layer).unwrap();
             s.make_sure(*camera_id);
 
             s.get_mut(*camera_id).sort_key(m, &gpu)
@@ -176,7 +174,7 @@ impl ModuleRenderer for HardwareRenderer {
                 Some(v) => v,
                 None => continue,
             };
-            let (_, cam) = layer_targets.get(layer).unwrap();
+            let cam = layer_targets.get(layer).unwrap();
 
             for (_, material) in &objects.sorted_objects {
                 let mat_renderers = self
@@ -191,8 +189,10 @@ impl ModuleRenderer for HardwareRenderer {
                 }
             }
         }
+
         // render objects
         let mut renderer = WGPURenderer::new(gpu.clone());
+        let mut clear_attachment_ids = HashSet::new();
 
         for (layer, objects) in scene.layers() {
             let camera = match objects.camera() {
@@ -208,16 +208,21 @@ impl ModuleRenderer for HardwareRenderer {
                 }
             };
 
-            let (reuse, cam) = layer_targets.get(layer).unwrap();
+            let cam = layer_targets.get(layer).unwrap();
             let hardware_render_target = camera_targets.get_mut(cam).unwrap();
 
             // set render context
             let depth_target = render_attachment.depth_attachment().unwrap();
-            if !*reuse {
+            if objects.sorted_objects.is_empty() {
+                continue;
+            }
+
+            if !clear_attachment_ids.contains(&render_attachment.id()) {
                 hardware_render_target
                     .set_render_target(&color_target, render_attachment.clear_color());
                 hardware_render_target
                     .set_depth_target(&depth_target, render_attachment.clear_depth());
+                clear_attachment_ids.insert(render_attachment.id());
             } else {
                 hardware_render_target.set_render_target(&color_target, None);
                 hardware_render_target.set_depth_target(&depth_target, None);
@@ -237,6 +242,7 @@ impl ModuleRenderer for HardwareRenderer {
                     camera,
                     scene: scene,
                     encoder: &mut encoder,
+                    hint_fmt: render_attachment.format(),
                 };
 
                 r.render_material(&mut ctx, &objects.map[&material.id()], &material);

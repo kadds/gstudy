@@ -14,9 +14,10 @@ pub struct MaterialRenderContext<'a, 'b> {
     pub camera: &'a Camera,
     pub scene: &'a Scene,
     pub encoder: &'a mut PassEncoder<'b>,
+    pub hint_fmt: wgpu::TextureFormat,
 }
 
-pub trait MaterialRenderer: Send {
+pub trait MaterialRenderer {
     fn new_frame(&mut self, gpu: &WGPUResource);
 
     fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera);
@@ -31,7 +32,7 @@ pub trait MaterialRenderer: Send {
     fn sort_key(&mut self, material: &Material, gpu: &WGPUResource) -> u64;
 }
 
-pub trait MaterialRendererFactory: Send {
+pub trait MaterialRendererFactory {
     fn new(&self) -> Box<dyn MaterialRenderer>;
 }
 

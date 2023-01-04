@@ -33,6 +33,7 @@ pub struct Material {
     id: MaterialId,
     primitive: PrimitiveStateDescriptor,
     blend: Option<BlendState>,
+    alpha_test: Option<f32>,
 
     face: Box<dyn MaterialFace>, // material face
 }
@@ -43,6 +44,9 @@ impl Material {
     }
     pub fn blend(&self) -> Option<&BlendState> {
         self.blend.as_ref()
+    }
+    pub fn alpha_test(&self) -> Option<f32> {
+        self.alpha_test
     }
 
     pub fn is_transparent(&self) -> bool {
@@ -72,6 +76,7 @@ impl Material {
 pub struct MaterialBuilder {
     primitive: PrimitiveStateDescriptor,
     blend: Option<BlendState>,
+    alpha_test: Option<f32>,
     face: Option<Box<dyn MaterialFace>>,
 }
 
@@ -80,6 +85,7 @@ impl Clone for MaterialBuilder {
         Self {
             primitive: self.primitive.clone(),
             blend: self.blend.clone(),
+            alpha_test: self.alpha_test,
             face: None,
         }
     }
@@ -100,11 +106,17 @@ impl MaterialBuilder {
         self
     }
 
+    pub fn with_alpha_test(mut self, cut: f32) -> Self {
+        self.alpha_test = Some(cut);
+        self
+    }
+
     pub fn build(mut self, context: &RContext) -> Arc<Material> {
         let face = self.face.take().unwrap();
         Arc::new(Material {
             id: MaterialId::new(context.alloc_material_id()),
             primitive: self.primitive,
+            alpha_test: self.alpha_test,
             blend: self.blend,
             face,
         })

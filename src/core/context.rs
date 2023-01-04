@@ -15,6 +15,7 @@ pub struct RContext {
     last_texture_id: AtomicU64,
     last_object_id: AtomicU64,
     last_material_id: AtomicU64,
+    last_camera_id: AtomicU64,
 
     inner: Box<dyn RContextImpl>,
 }
@@ -22,10 +23,11 @@ pub struct RContext {
 impl RContext {
     pub fn new(inner: Box<dyn RContextImpl>) -> RContextRef {
         Arc::new(Self {
-            last_pso_id: AtomicU64::new(0),
-            last_texture_id: AtomicU64::new(0),
-            last_object_id: AtomicU64::new(0),
-            last_material_id: AtomicU64::new(0),
+            last_pso_id: AtomicU64::new(1),
+            last_texture_id: AtomicU64::new(1),
+            last_object_id: AtomicU64::new(1),
+            last_material_id: AtomicU64::new(1),
+            last_camera_id: AtomicU64::new(1),
             inner,
         })
     }
@@ -39,6 +41,9 @@ impl RContext {
 
     pub fn alloc_material_id(&self) -> u64 {
         self.last_material_id.fetch_add(1, Ordering::SeqCst)
+    }
+    pub fn alloc_camera_id(&self) -> u64 {
+        self.last_camera_id.fetch_add(1, Ordering::SeqCst)
     }
 
     pub fn inner(&self) -> &dyn RContextImpl {

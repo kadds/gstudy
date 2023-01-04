@@ -195,11 +195,16 @@ pub trait Geometry: Send + Sync + Debug {
     fn intersect(&self, ray: Ray) -> IntersectResult;
     fn attribute(&self, attribute: &Attribute) -> Option<Arc<dyn Any + Send + Sync>>;
     fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>);
+    fn is_static(&self) -> bool;
+    fn mesh_version(&self) -> u64;
+
+    fn transform(&self) -> &Transform;
 }
 
 #[derive(Debug)]
 pub struct StaticGeometry {
     mesh: Arc<Mesh>,
+    transform: Transform,
     attributes: HashMap<Attribute, Arc<dyn Any + Send + Sync>>,
 }
 
@@ -207,8 +212,13 @@ impl StaticGeometry {
     pub fn new(mesh: Arc<Mesh>) -> Self {
         Self {
             mesh,
+            transform: Transform::default(),
             attributes: HashMap::new(),
         }
+    }
+    pub fn with_transform(mut self, transform: Transform) -> Self {
+        self.transform = transform;
+        self
     }
 }
 
@@ -227,6 +237,18 @@ impl Geometry for StaticGeometry {
 
     fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>) {
         self.attributes.insert(attribute, value);
+    }
+
+    fn is_static(&self) -> bool {
+        true
+    }
+
+    fn transform(&self) -> &Transform {
+        &self.transform
+    }
+
+    fn mesh_version(&self) -> u64 {
+        0
     }
 }
 
@@ -250,6 +272,7 @@ where
     inner: Mutex<DirtyMesh>,
     transform: Transform,
     attributes: HashMap<Attribute, Arc<dyn Any + Send + Sync>>,
+    is_static: bool,
     g: G,
 }
 
@@ -262,6 +285,7 @@ where
             inner: Mutex::new(DirtyMesh::default()),
             transform: Transform::default(),
             attributes: HashMap::new(),
+            is_static: false,
             g,
         }
     }
@@ -273,6 +297,11 @@ where
     pub fn build_transform(mut self, transform: Transform) -> Self {
         self.transform = transform;
         self.inner.lock().unwrap().dirty_flag = true;
+        self
+    }
+
+    pub fn with_static(mut self, is_static: bool) -> Self {
+        self.is_static = is_static;
         self
     }
 }
@@ -309,6 +338,19 @@ where
     fn set_attribute(&mut self, attribute: Attribute, value: Arc<dyn Any + Send + Sync>) {
         self.attributes.insert(attribute, value);
     }
+
+    fn is_static(&self) -> bool {
+        self.is_static
+    }
+
+    fn transform(&self) -> &Transform {
+        &self.transform
+    }
+
+    fn mesh_version(&self) -> u64 {
+        let inner = self.inner.lock().unwrap();
+        inner.version
+    }
 }
 
 pub mod axis;
@@ -318,6 +360,7 @@ pub mod sphere;
 #[derive(Debug)]
 struct DirtyMesh {
     dirty_flag: bool,
+    version: u64,
     mesh: Option<Arc<Mesh>>,
 }
 
@@ -325,6 +368,7 @@ impl Default for DirtyMesh {
     fn default() -> Self {
         Self {
             dirty_flag: true,
+            version: 0,
             mesh: Default::default(),
         }
     }

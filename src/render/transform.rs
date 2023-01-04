@@ -1,13 +1,23 @@
-use std::{cell::RefCell, ops::Mul};
+use std::{cell::RefCell, fmt::Debug, ops::Mul};
 
 use crate::types::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Transform {
     mat: Mat4x4f,
     translate: Vec3f,
     scale: Vec3f,
     rotate: Quaternion,
+}
+
+impl Debug for Transform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Transform")
+            .field("translate", &self.translate)
+            .field("scale", &self.scale)
+            .field("rotate", &self.rotate.to_rotation_matrix())
+            .finish()
+    }
 }
 
 pub struct TransformBuilder {
@@ -24,8 +34,8 @@ impl TransformBuilder {
     pub fn build(self) -> Transform {
         let mut t = self.inner;
 
-        t.mat = t.rotate.to_homogeneous();
         t.mat.append_nonuniform_scaling_mut(&t.scale);
+        t.mat *= t.rotate.to_homogeneous();
         t.mat.append_translation_mut(&t.translate);
 
         t
@@ -36,7 +46,7 @@ impl TransformBuilder {
         self
     }
     pub fn scale(mut self, scale: Vec3f) -> Self {
-        self.inner.scale += scale;
+        self.inner.scale = scale.component_mul(&self.inner.scale);
         self
     }
     pub fn rotate(mut self, rotate: Quaternion) -> Self {
@@ -66,6 +76,12 @@ impl Transform {
             Vec3f::new(v4.x, v4.y, v4.z)
         })
     }
+    pub fn mat(&self) -> &Mat4x4f {
+        &self.mat
+    }
+    pub fn mul_mut(&mut self, t: &Transform) {
+        self.mat = t.mat * self.mat;
+    }
 }
 
 impl Default for Transform {
@@ -73,8 +89,23 @@ impl Default for Transform {
         Self {
             mat: Mat4x4f::identity(),
             translate: Vec3f::default(),
-            scale: Vec3f::identity(),
+            scale: Vec3f::new(1f32, 1f32, 1f32),
             rotate: Quaternion::identity(),
         }
+    }
+}
+
+impl Mul<&Transform> for &Transform {
+    type Output = Transform;
+
+    fn mul(self, rhs: &Transform) -> Self::Output {
+        let t = self.translate + rhs.translate;
+        let r = self.rotate * rhs.rotate;
+        let s = self.scale.component_mul(&rhs.scale);
+        TransformBuilder::new()
+            .translate(t)
+            .rotate(r)
+            .scale(s)
+            .build()
     }
 }

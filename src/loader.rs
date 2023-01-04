@@ -1,18 +1,20 @@
+use nalgebra::Unit;
 use wgpu::util::DeviceExt;
 use winit::event_loop::EventLoopProxy;
 
 use crate::core::backends::wgpu_backend::{WGPURenderTarget, WGPUResource};
 use crate::core::backends::WGPUBackend;
 use crate::core::context::{RContext, RContextRef};
-use crate::core::ps::PrimitiveStateDescriptor;
+use crate::core::ps::{BlendState, PrimitiveStateDescriptor};
 use crate::event::Event;
 use crate::geometry::axis::{Axis, AxisMesh};
 use crate::geometry::{Geometry, MeshCoordType};
 use crate::render::material::basic::{BasicMaterialFaceBuilder, BasicMaterialShader};
 use crate::render::material::MaterialBuilder;
-use crate::render::scene::{LAYER_BACKGROUND, LAYER_NORMAL, LAYER_TRANSPARENT};
-use crate::render::Material;
-use crate::types::{Vec2f, Vec3f, Vec4f};
+use crate::render::scene::{LAYER_ALPHA_TEST, LAYER_BACKGROUND, LAYER_NORMAL, LAYER_TRANSPARENT};
+use crate::render::transform::TransformBuilder;
+use crate::render::{Material, Transform};
+use crate::types::{BoundBox, Vec2f, Vec3f, Vec4f};
 use crate::util::{self, any_as_u8_slice_array, any_as_x_slice_array, TaskPool};
 use crate::{
     event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
@@ -24,6 +26,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
+use std::ops::Div;
 use std::path::{Path, PathBuf};
 use std::{
     fs::File,
@@ -95,8 +98,8 @@ impl MaterialInputKind {
 
 #[derive(Debug)]
 struct MaterialMap<'a> {
-    pub map: HashMap<(usize, MaterialInputKind), Arc<Material>>,
-    pub part_map: Option<HashMap<usize, (MaterialFaceBuilder, MaterialBuilder)>>,
+    pub map: HashMap<(Option<usize>, MaterialInputKind), Arc<Material>>,
+    pub part_map: Option<HashMap<Option<usize>, (MaterialFaceBuilder, MaterialBuilder)>>,
     context: Option<&'a RContext>,
 }
 
@@ -109,7 +112,7 @@ impl<'a> MaterialMap<'a> {
         }
     }
 
-    pub fn prepare_kind(&mut self, idx: usize, kind: MaterialInputKind) -> Arc<Material> {
+    pub fn prepare_kind(&mut self, idx: Option<usize>, kind: MaterialInputKind) -> Arc<Material> {
         let part_map = self.part_map.take().unwrap();
         let context = self.context.take().unwrap();
 
@@ -136,8 +139,17 @@ fn parse_mesh(
     buf_readers: &mut Vec<GltfBuffer>,
     mesh: gltf::Mesh,
     material_map: &mut MaterialMap,
-) -> anyhow::Result<()> {
+    transform: &Transform,
+) -> anyhow::Result<BoundBox> {
+    let mut bound_box = BoundBox::default();
+
     for p in mesh.primitives() {
+        let bb = p.bounding_box();
+        let mut bb = BoundBox::new(bb.min.into(), bb.max.into());
+        bb.mul_mut(transform.mat());
+
+        bound_box = &bound_box + &bb;
+
         let mut gmesh = Mesh::new();
         let mut color = Vec4f::new(1.0f32, 1.0f32, 1.0f32, 1.0f32);
         let indices = p.indices().unwrap();
@@ -204,9 +216,7 @@ fn parse_mesh(
 
                     gmesh.add_vertices(&data);
                 }
-                gltf::Semantic::Normals => {
-                    // param.has_normal = true;
-                }
+                gltf::Semantic::Normals => {}
                 gltf::Semantic::Tangents => {}
                 gltf::Semantic::Colors(index) => {
                     kind = kind.add_color().unwrap();
@@ -233,7 +243,9 @@ fn parse_mesh(
                     gmesh.set_coord_vec4f(MeshCoordType::Color, data);
                 }
                 gltf::Semantic::TexCoords(index) => {
-                    kind = kind.add_texture().unwrap();
+                    if let Some(v) = kind.add_texture() {
+                        kind = v;
+                    }
 
                     let buf = buf_readers[0].read_bytes(&accessor);
                     match accessor.data_type() {
@@ -267,16 +279,18 @@ fn parse_mesh(
             .base_color_factor()
             .into();
 
-        let idx = p.material().index().unwrap();
+        let idx = p.material().index();
 
         let material = material_map.prepare_kind(idx, kind);
         let mut g = StaticGeometry::new(Arc::new(gmesh));
         g.set_attribute(crate::geometry::Attribute::ConstantColor, Arc::new(color));
+        g = g.with_transform(transform.clone());
 
         gscene.add_object(Object::new(Box::new(g), material));
     }
+    log::info!("mesh {:?} {:?}", mesh.name(), transform);
 
-    Ok(())
+    Ok(bound_box)
 }
 
 fn parse_texture(
@@ -345,13 +359,34 @@ fn parse_node(
     node: gltf::Node,
     buf_readers: &mut Vec<GltfBuffer>,
     material_map: &mut MaterialMap,
+    transform: &Transform,
+    bound_box: &mut BoundBox,
 ) -> anyhow::Result<()> {
+    let d = node.transform().clone().decomposed();
+    let q = nalgebra::Quaternion::from(Vec4f::new(d.1[0], d.1[1], d.1[2], d.1[3]));
+    let q = Unit::new_unchecked(q);
+
+    let mut transform_node = TransformBuilder::new()
+        .translate(d.0.into())
+        .rotate(q)
+        .scale(d.2.into())
+        .build();
+    transform_node.mul_mut(transform);
+
     if let Some(mesh) = node.mesh() {
-        parse_mesh(gscene, buf_readers, mesh, material_map)?;
+        let bb = parse_mesh(gscene, buf_readers, mesh, material_map, &transform_node)?;
+        *bound_box = &*bound_box + &bb;
     }
 
     for node in node.children() {
-        parse_node(gscene, node, buf_readers, material_map)?;
+        parse_node(
+            gscene,
+            node,
+            buf_readers,
+            material_map,
+            &transform_node,
+            bound_box,
+        )?;
     }
     Ok(())
 }
@@ -386,6 +421,26 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     let texture_map = texture_map.into_inner()?;
 
+    // add default material
+    {
+        let primitive = PrimitiveStateDescriptor::default();
+        let mut material_builder = MaterialBuilder::default();
+        material_builder = material_builder.with_primitive(primitive);
+
+        let mut basic_material_builder = BasicMaterialFaceBuilder::default();
+
+        let color = Vec4f::new(1f32, 1f32, 1f32, 1f32);
+        basic_material_builder = basic_material_builder.with_constant_color(color);
+
+        map.part_map.as_mut().unwrap().insert(
+            None,
+            (
+                MaterialFaceBuilder::Basic(basic_material_builder),
+                material_builder,
+            ),
+        );
+    }
+
     for material in gltf.materials() {
         let idx = material.index().unwrap_or_default();
         let mut primitive = PrimitiveStateDescriptor::default();
@@ -406,20 +461,40 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                 basic_material_builder.with_texture_data(texture_view.1.clone());
         }
 
+        match material.alpha_mode() {
+            gltf::material::AlphaMode::Opaque => {}
+            gltf::material::AlphaMode::Mask => {
+                material_builder =
+                    material_builder.with_alpha_test(material.alpha_cutoff().unwrap_or(0.5f32));
+            }
+            gltf::material::AlphaMode::Blend => {
+                material_builder = material_builder.with_blend(BlendState::default_gltf_blender());
+            }
+        }
+
         basic_material_builder = basic_material_builder.with_constant_color(color.into());
 
         map.part_map.as_mut().unwrap().insert(
-            idx,
+            Some(idx),
             (
                 MaterialFaceBuilder::Basic(basic_material_builder),
                 material_builder,
             ),
         );
     }
+    let mut bound_box = BoundBox::default();
 
     for s in gltf.scenes() {
+        let transform = Transform::default();
         for node in s.nodes() {
-            parse_node(&mut gscene, node, &mut buf_readers, &mut map)?;
+            parse_node(
+                &mut gscene,
+                node,
+                &mut buf_readers,
+                &mut map,
+                &transform,
+                &mut bound_box,
+            )?;
         }
         log::info!(
             "model scene {} nodes {}",
@@ -428,13 +503,37 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
         );
     }
     let aspect = rm.gpu.width() as f32 / rm.gpu.height() as f32;
+    let ctx = rm.gpu.context();
+
+    let center = bound_box.center();
+    let size = bound_box.size();
+    let mut from = Vec3f::default();
+
+    from.x = center.x + bound_box.size().x / 1.5f32;
+    from.y = center.y + bound_box.size().y / 1.5f32;
+    from.z = center.z + bound_box.size().z * 3f32;
+
+    if (from.z - center.z).abs() < 0.0001f32 {
+        from.z += size.max() / 2f32;
+    }
+
+    let dist = nalgebra::distance(&from.into(), &center.into());
+
+    let mut from_max_point = from.clone();
+    // from_max_point.z = bound_box.max().z + size.max() * 4f32;
+    // if from_max_point.z > from.z {
+    from_max_point.z = from.z - bound_box.size().z / 100f32;
+    // }
+
+    let mut from_min_point = from.clone();
+    from_min_point.z = bound_box.min().z - size.max() * 100f32;
 
     let camera = match gltf.cameras().next() {
         Some(c) => {
             log::info!("scene camera {}", c.name().unwrap_or_default());
             match c.projection() {
                 gltf::camera::Projection::Orthographic(c) => {
-                    let camera = crate::render::Camera::new();
+                    let camera = crate::render::Camera::new(ctx);
                     camera.make_orthographic(
                         Vec4f::new(c.xmag(), c.ymag(), c.xmag(), c.ymag()),
                         c.znear(),
@@ -443,33 +542,40 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                     camera
                 }
                 gltf::camera::Projection::Perspective(c) => {
-                    let camera = crate::render::Camera::new();
+                    let camera = crate::render::Camera::new(ctx);
                     camera.make_perspective(
                         c.aspect_ratio().unwrap_or(aspect),
                         c.yfov(),
                         c.znear(),
-                        c.zfar().unwrap_or(1000_000f32),
+                        c.zfar().unwrap_or(1000_00f32),
                     );
                     camera
                 }
             }
         }
         None => {
-            let camera = crate::render::Camera::new();
-            camera.make_perspective(aspect, std::f32::consts::FRAC_PI_3, 0.01f32, 1000_000f32);
+            let near = nalgebra::distance(&from.into(), &from_max_point.into());
+            let far = nalgebra::distance(&from.into(), &from_min_point.into());
+
+            let camera = crate::render::Camera::new(ctx);
+            camera.make_perspective(aspect, std::f32::consts::FRAC_PI_3, near, far);
             camera
         }
     };
-    camera.look_at(
-        Vec3f::new(30f32, 15f32, 30f32).into(),
-        Vec3f::new(0f32, 0f32, 0f32).into(),
-        Vec3f::new(0f32, 1f32, 0f32),
-    );
+
+    camera.look_at(from.into(), center.into(), Vec3f::new(0f32, 1f32, 0f32));
     let camera = Arc::new(camera);
+    log::info!(
+        "bound box {:?} with camera {:?} distance {}",
+        bound_box,
+        camera,
+        dist
+    );
 
     gscene.set_layer_camera(LAYER_NORMAL, camera.clone());
-    // gscene.set_layer_camera(LAYER_BACKGROUND, camera.clone());
-    // gscene.set_layer_camera(LAYER_TRANSPARENT, camera.clone());
+    gscene.set_layer_camera(LAYER_BACKGROUND, camera.clone());
+    gscene.set_layer_camera(LAYER_ALPHA_TEST, camera.clone());
+    gscene.set_layer_camera(LAYER_TRANSPARENT, camera.clone());
 
     Ok(gscene)
 }

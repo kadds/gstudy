@@ -28,10 +28,11 @@ impl LayerObjects {
     }
 }
 
-pub const LAYER_BACKGROUND: u64 = 20000;
-pub const LAYER_NORMAL: u64 = 10000;
-pub const LAYER_TRANSPARENT: u64 = 5000;
-pub const LAYER_UI: u64 = 1000;
+pub const LAYER_BACKGROUND: u64 = 10000;
+pub const LAYER_TRANSPARENT: u64 = 20000;
+pub const LAYER_ALPHA_TEST: u64 = 30000;
+pub const LAYER_NORMAL: u64 = 4000;
+pub const LAYER_UI: u64 = 10_0000;
 
 #[derive(Debug)]
 pub struct Scene {
@@ -41,6 +42,8 @@ pub struct Scene {
 
     // reader layer -> objects
     layers: BTreeMap<u64, LayerObjects>,
+
+    drop_objects: Vec<u64>,
 }
 
 impl Scene {
@@ -49,6 +52,7 @@ impl Scene {
             context,
             objects: HashMap::new(),
             layers: BTreeMap::new(),
+            drop_objects: Vec::new(),
         }
     }
 
@@ -57,7 +61,13 @@ impl Scene {
     }
 
     pub fn add_object(&mut self, object: Object) -> u64 {
-        self.add_object_with(object, LAYER_NORMAL)
+        if object.is_alpha_test() {
+            self.add_object_with(object, LAYER_ALPHA_TEST)
+        } else if object.is_blend() {
+            self.add_object_with(object, LAYER_TRANSPARENT)
+        } else {
+            self.add_object_with(object, LAYER_NORMAL)
+        }
     }
 
     pub fn add_ui(&mut self, object: Object) -> u64 {
@@ -101,7 +111,7 @@ impl Scene {
     }
 
     pub fn layers(&self) -> impl Iterator<Item = (&u64, &LayerObjects)> {
-        self.layers.iter().rev()
+        self.layers.iter()
     }
 
     pub fn layer(&self, layer: u64) -> &LayerObjects {
@@ -109,7 +119,7 @@ impl Scene {
     }
 
     pub fn sort_all<S: FnMut(u64, &Material) -> u64>(&mut self, mut sorter: S) {
-        for (level, objects) in self.layers.iter_mut().rev() {
+        for (level, objects) in self.layers.iter_mut() {
             if !objects.dirty {
                 continue;
             }
@@ -172,6 +182,14 @@ impl Scene {
             v.dirty = true;
         }
     }
+
+    pub fn drop_objects(&self) -> &[u64] {
+        &self.drop_objects
+    }
+}
+
+pub trait ObjectDrop: std::fmt::Debug {
+    fn drop(&self, id: u64);
 }
 
 #[derive(Debug)]
@@ -192,6 +210,14 @@ impl Object {
 
     pub fn material(&self) -> &Material {
         self.material.as_ref()
+    }
+
+    pub fn is_alpha_test(&self) -> bool {
+        self.material.alpha_test().is_some()
+    }
+
+    pub fn is_blend(&self) -> bool {
+        self.material.blend().is_some()
     }
 
     pub fn geometry(&self) -> &dyn Geometry {

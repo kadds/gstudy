@@ -13,7 +13,7 @@ use crate::{
         backends::wgpu_backend::{
             FsTarget, GpuInputMainBuffers, GpuMainBuffer, PipelineReflector, WGPUResource,
         },
-        ps::{PipelineStateObject, PrimitiveStateDescriptor},
+        ps::{BlendState, PipelineStateObject, PrimitiveStateDescriptor},
     },
     modules::hardware_renderer::WVP,
     render::{
@@ -85,7 +85,11 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             let vs = wgpu::ShaderModuleDescriptor { label, source: vs };
             let fs = wgpu::ShaderModuleDescriptor { label, source: fs };
             let pso = gpu.context().alloc_pso();
-            let fs_target = FsTarget::new_blend_alpha_add_mix(wgpu::TextureFormat::Rgba8Unorm);
+            let fs_target = FsTarget::new_with_blend(
+                camera.render_attachment().format(),
+                &BlendState::default_append_blender(),
+            );
+
             let depth = wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,

@@ -10,7 +10,7 @@ pub struct RenderParameter<'a> {
     pub scene: &'a mut Scene,
 }
 
-pub trait ModuleRenderer: Send {
+pub trait ModuleRenderer {
     fn render(&mut self, parameter: RenderParameter);
     fn stop(&mut self);
 }

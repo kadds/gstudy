@@ -73,7 +73,7 @@ impl WGPUResource {
         inner.width = width;
         inner.height = height;
     }
-    pub fn format(&self) -> TextureFormat {
+    pub fn surface_format(&self) -> TextureFormat {
         self.instance.format
     }
     pub fn context(&self) -> &RContext {
@@ -229,6 +229,23 @@ impl WGPUResource {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0f32,
+            lod_max_clamp: f32::MAX,
+            compare: None,
+            anisotropy_clamp: None,
+            border_color: None,
+        })
+    }
+
+    pub fn new_sampler_linear(&self, label: Option<&'static str>) -> wgpu::Sampler {
+        self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
             lod_min_clamp: 0f32,
             lod_max_clamp: f32::MAX,
             compare: None,
@@ -770,21 +787,10 @@ impl FsTarget {
         Self::new_single(state)
     }
 
-    pub fn new_blend_alpha_add_mix(fmt: TextureFormat) -> Self {
+    pub fn new_with_blend(fmt: TextureFormat, blend: &crate::core::ps::BlendState) -> Self {
         let state = ColorTargetState {
             format: fmt,
-            blend: Some(BlendState {
-                color: BlendComponent {
-                    src_factor: BlendFactor::One,
-                    dst_factor: BlendFactor::OneMinusSrcAlpha,
-                    operation: BlendOperation::Add,
-                },
-                alpha: BlendComponent {
-                    src_factor: BlendFactor::OneMinusDstAlpha,
-                    dst_factor: BlendFactor::One,
-                    operation: BlendOperation::Add,
-                },
-            }),
+            blend: Some(blend.into()),
             write_mask: ColorWrites::all(),
         };
         Self::new_single(state)
@@ -963,10 +969,10 @@ impl<'a> PipelineReflector<'a> {
                                 }
                                 if let Some(is_sampled) = img.is_sampled {
                                     if is_sampled {
-                                        break TextureSampleType::Float { filterable: false };
+                                        break TextureSampleType::Float { filterable: true };
                                     }
                                 }
-                                break TextureSampleType::Float { filterable: false };
+                                break TextureSampleType::Float { filterable: true };
                             };
                             let view_dimension = image_to_wgpu_dimension(img.dim, img.is_array);
                             Some(BindGroupLayoutEntry {
@@ -984,7 +990,7 @@ impl<'a> PipelineReflector<'a> {
                             let view_dimension =
                                 image_to_wgpu_dimension(sample.dim, sample.is_array);
                             let multisampled = sample.is_multisampled;
-                            let sample_type = TextureSampleType::Float { filterable: false };
+                            let sample_type = TextureSampleType::Float { filterable: true };
 
                             Some(BindGroupLayoutEntry {
                                 binding,
@@ -1005,7 +1011,7 @@ impl<'a> PipelineReflector<'a> {
                         binding,
                         visibility: visibility,
                         count: None,
-                        ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     }),
                     spirq::DescriptorType::InputAttachment(_) => todo!(),
                     spirq::DescriptorType::AccelStruct() => todo!(),
@@ -1254,6 +1260,57 @@ impl From<PrimitiveStateDescriptor> for PrimitiveState {
     }
 }
 
+impl From<&crate::core::ps::BlendFactor> for BlendFactor {
+    fn from(value: &crate::core::ps::BlendFactor) -> Self {
+        match value {
+            crate::core::ps::BlendFactor::Zero => Self::Zero,
+            crate::core::ps::BlendFactor::One => Self::One,
+            crate::core::ps::BlendFactor::Src => Self::Src,
+            crate::core::ps::BlendFactor::OneMinusSrc => Self::OneMinusSrc,
+            crate::core::ps::BlendFactor::SrcAlpha => Self::SrcAlpha,
+            crate::core::ps::BlendFactor::OneMinusSrcAlpha => Self::OneMinusSrcAlpha,
+            crate::core::ps::BlendFactor::Dst => Self::Dst,
+            crate::core::ps::BlendFactor::OneMinusDst => Self::OneMinusDst,
+            crate::core::ps::BlendFactor::DstAlpha => Self::DstAlpha,
+            crate::core::ps::BlendFactor::OneMinusDstAlpha => Self::OneMinusDstAlpha,
+            crate::core::ps::BlendFactor::SrcAlphaSaturated => Self::SrcAlphaSaturated,
+            crate::core::ps::BlendFactor::Constant => Self::Constant,
+            crate::core::ps::BlendFactor::OneMinusConstant => Self::OneMinusConstant,
+        }
+    }
+}
+
+impl From<&crate::core::ps::BlendOperation> for BlendOperation {
+    fn from(value: &crate::core::ps::BlendOperation) -> Self {
+        match value {
+            crate::core::ps::BlendOperation::Add => Self::Add,
+            crate::core::ps::BlendOperation::Subtract => Self::Subtract,
+            crate::core::ps::BlendOperation::ReverseSubtract => Self::ReverseSubtract,
+            crate::core::ps::BlendOperation::Min => Self::Min,
+            crate::core::ps::BlendOperation::Max => Self::Max,
+        }
+    }
+}
+
+impl From<&crate::core::ps::BlendComponent> for BlendComponent {
+    fn from(value: &crate::core::ps::BlendComponent) -> Self {
+        Self {
+            src_factor: (&value.src_factor).into(),
+            dst_factor: (&value.dst_factor).into(),
+            operation: (&value.operation).into(),
+        }
+    }
+}
+
+impl From<&crate::core::ps::BlendState> for BlendState {
+    fn from(value: &crate::core::ps::BlendState) -> Self {
+        Self {
+            color: (&value.color).into(),
+            alpha: (&value.alpha).into(),
+        }
+    }
+}
+
 pub struct SharedBuffers {
     buffers: Vec<wgpu::Buffer>,
     buf_size: u32,
@@ -1477,7 +1534,7 @@ impl GpuInputUniformBuffers {
         let elements_for_uniform_buffer = self.size / single_bytes;
         assert!(elements_for_uniform_buffer != 0);
         let total_buffers =
-            (n + elements_for_uniform_buffer + 1) / elements_for_uniform_buffer + self.index;
+            (n + elements_for_uniform_buffer + 1) / elements_for_uniform_buffer + (self.index + 1);
 
         let mut any_changes = false;
 
@@ -1602,7 +1659,7 @@ pub struct BufferPosition {
 
 impl GpuInputMainBuffersWithUniform {
     pub fn new(gpu: &WGPUResource, label: Option<&'static str>) -> Self {
-        let mut uniform = GpuInputUniformBuffers::new(gpu, label);
+        let uniform = GpuInputUniformBuffers::new(gpu, label);
 
         Self {
             index: GpuInputMainBuffer::new(gpu, label, wgpu::BufferUsages::INDEX),
