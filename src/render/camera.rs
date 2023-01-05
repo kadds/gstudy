@@ -287,6 +287,17 @@ impl CameraController for TrackballCameraController {
                 let right = self.camera.right();
                 let unit_up = Unit::new_unchecked(up.normalize());
                 let unit_right = Unit::new_unchecked(right.normalize());
+                let dist = nalgebra::distance(&from.into(), &to.into());
+
+                let delta_theta_y = delta.y * 0.1 * dt * std::f32::consts::PI;
+
+                let theta = f32::asin((from.y - to.y) / dist);
+                if theta >= (std::f32::consts::FRAC_PI_2 - delta_theta_y) && delta.y > 0f32 {
+                    return;
+                }
+                if theta <= (-std::f32::consts::FRAC_PI_2 - delta_theta_y) && delta.y < 0f32 {
+                    return;
+                }
 
                 let q = Quaternion::from_axis_angle(
                     &unit_up,
@@ -294,7 +305,7 @@ impl CameraController for TrackballCameraController {
                 );
                 let q2 = Quaternion::from_axis_angle(
                     &unit_right,
-                    delta.y * 0.1 * dt * std::f32::consts::PI,
+                    delta_theta_y,
                 );
                 let q = q * q2;
 
