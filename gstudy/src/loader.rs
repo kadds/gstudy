@@ -290,7 +290,7 @@ fn parse_mesh(
 }
 
 fn parse_texture(
-    texture_map: &mut Mutex<HashMap<usize, core::texture::Texture>>,
+    texture_map: &mut Mutex<HashMap<usize, core::ds::Texture>>,
     path: &PathBuf,
     gpu: &WGPUResource,
     texture: gltf::Texture,

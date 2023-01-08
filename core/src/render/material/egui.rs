@@ -12,8 +12,9 @@ use crate::{
     backends::wgpu_backend::{
         FsTarget, GpuInputMainBuffers, GpuMainBuffer, PipelineReflector, WGPUResource,
     },
+    ds::PipelineStateObject,
     material::{egui::EguiMaterialFace, Material, MaterialId},
-    ps::{BlendState, PipelineStateObject, PrimitiveStateDescriptor},
+    ps::{BlendState, PrimitiveStateDescriptor},
     scene::Camera,
     types::Vec2f,
     util::any_as_u8_slice,
@@ -71,9 +72,8 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             let fs = wgpu::util::make_spirv(fs_source);
             let vs = wgpu::ShaderModuleDescriptor { label, source: vs };
             let fs = wgpu::ShaderModuleDescriptor { label, source: fs };
-            let pso = gpu.context().alloc_pso();
             let fs_target = FsTarget::new_with_blend(
-                camera.render_attachment().format(),
+                camera.render_attachment_format(),
                 &BlendState::default_append_blender(),
             );
 
@@ -93,19 +93,19 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
                     PrimitiveStateDescriptor::default().with_cull_face(crate::ps::CullFace::None),
                 )
                 .unwrap();
-            gpu.context().inner().map_pso(pso, Some(pass));
+            let pso = gpu.context().register_pso(pass);
 
-            (PipelineStateObject::new(pso), gpu.new_sampler(label))
+            (pso, gpu.new_sampler(label))
         });
 
-        let pipeline = gpu.context().inner().get_pso(res.0.id());
+        let res = gpu.context().get_resource(res.0.id());
 
         let wvp = self.wvp.get_or_insert_with(|| {
             let buffer = gpu.new_wvp_buffer::<ScreeSize>(label);
 
             let bind = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
                 label,
-                layout: &pipeline.pipeline.get_bind_group_layout(0),
+                layout: &res.pso_ref().pipeline.get_bind_group_layout(0),
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -143,7 +143,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
         let res = self.res.as_ref().unwrap();
         let wvp = self.wvp.as_ref().unwrap();
 
-        let pipeline = ctx.gpu.context().inner().get_pso(res.0.id());
+        let pipe_res = ctx.gpu.context().get_resource(res.0.id());
 
         let g = self.material_group.entry(material.id()).or_insert_with(|| {
             let group = ctx
@@ -151,7 +151,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
                 .device()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label,
-                    layout: &pipeline.pipeline.get_bind_group_layout(1),
+                    layout: &pipe_res.pso_ref().pipeline.get_bind_group_layout(1),
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -200,7 +200,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
 
         // draw
         let mut pass = ctx.encoder.new_pass();
-        pass.set_pipeline(&pipeline.pipeline);
+        pass.set_pipeline(&pipe_res.pso_ref().pipeline);
 
         pass.set_bind_group(0, &wvp.1, &[0]);
         pass.set_bind_group(1, g, &[]);

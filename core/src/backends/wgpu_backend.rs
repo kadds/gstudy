@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    context::{RContext, RContextImpl, RContextRef},
+    context::{RContext, RContextRef},
     event::{Event, EventProcessor, EventSource, ProcessEventResult},
     types::{Rectu, Size},
 };
@@ -33,19 +33,20 @@ struct WGPUInstance {
 }
 
 pub struct WindowSurfaceFrame {
-    texture: crate::texture::Texture,
-    s: Option<wgpu::SurfaceTexture>,
+    texture: Option<crate::ds::Texture>,
+    s: Option<Arc<wgpu::SurfaceTexture>>,
 }
 
 impl WindowSurfaceFrame {
-    pub fn texture(&self) -> crate::texture::Texture {
-        self.texture.clone()
+    pub fn texture(&self) -> crate::ds::Texture {
+        self.texture.as_ref().unwrap().clone()
     }
 }
 
 impl Drop for WindowSurfaceFrame {
     fn drop(&mut self) {
-        self.s.take().unwrap().present();
+        drop(self.texture.take().unwrap());
+        Arc::try_unwrap(self.s.take().unwrap()).unwrap().present();
     }
 }
 
@@ -79,7 +80,13 @@ impl WGPUResource {
     }
     pub fn current_frame_texture(&self) -> anyhow::Result<WindowSurfaceFrame> {
         let cp = self.surface().get_current_texture()?;
-        todo!()
+        let c = Arc::new(cp);
+        let texture = self.context.register_surface_texture(c.clone());
+
+        Ok(WindowSurfaceFrame {
+            texture: Some(texture),
+            s: Some(c),
+        })
     }
 
     pub(crate) fn width(&self) -> u32 {
@@ -127,8 +134,8 @@ impl WGPUResource {
 }
 
 impl WGPUResource {
-    pub fn from_rgba_texture(&self, data: &[u8], size: Size) -> crate::texture::Texture {
-        let wtexture = self.device().create_texture_with_data(
+    pub fn from_rgba_texture(&self, data: &[u8], size: Size) -> crate::ds::Texture {
+        let texture = self.device().create_texture_with_data(
             self.queue(),
             &wgpu::TextureDescriptor {
                 label: Some("input"),
@@ -146,14 +153,10 @@ impl WGPUResource {
             data,
         );
 
-        todo!()
+        self.context().register_texture(texture)
     }
 
-    pub fn new_depth_texture(
-        &self,
-        label: Option<&'static str>,
-        size: Size,
-    ) -> crate::texture::Texture {
+    pub fn new_depth_texture(&self, label: Option<&'static str>, size: Size) -> crate::ds::Texture {
         let device = self.device();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
@@ -170,8 +173,8 @@ impl WGPUResource {
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
         });
-        // texture
-        todo!()
+
+        self.context().register_texture(texture)
     }
 }
 
@@ -276,8 +279,6 @@ impl WGPUResource {
         texture
     }
 
-    // pub(crate) fn new_depth_texture(&self, label: Option<&'static str>, size: Size) -> wgpu::Texture {
-    // }
     pub(crate) fn new_sampler(&self, label: Option<&'static str>) -> wgpu::Sampler {
         self.device.create_sampler(&wgpu::SamplerDescriptor {
             label,
@@ -330,42 +331,6 @@ pub struct WGPUBackend {
 pub struct WGPUEventProcessor {
     inner: Arc<WGPUResource>,
     format: TextureFormat,
-}
-
-#[derive(Debug)]
-struct WGPUContextInner {}
-
-#[derive(Debug)]
-pub struct WGPUContext {
-    inner: parking_lot::RwLock<WGPUContextInner>,
-    pso_map: DashMap<u64, Arc<PipelinePass>>,
-}
-
-impl WGPUContext {
-    pub fn new() -> Self {
-        Self {
-            inner: parking_lot::RwLock::new(WGPUContextInner {}),
-            pso_map: DashMap::new(),
-        }
-    }
-}
-
-impl RContextImpl for WGPUContext {
-    fn map_pso(&self, pso: u64, value: Option<PipelinePass>) {
-        // let mut inner = self.inner.write();
-        match value {
-            Some(value) => {
-                self.pso_map.insert(pso, Arc::new(value));
-            }
-            None => {
-                self.pso_map.remove(&pso);
-            }
-        }
-    }
-
-    fn get_pso(&self, pso: u64) -> Arc<PipelinePass> {
-        self.pso_map.get(&pso).unwrap().clone()
-    }
 }
 
 impl WGPUBackend {
@@ -452,7 +417,7 @@ impl WGPUBackend {
 
         Ok(WGPUBackend {
             inner: WGPUResource {
-                context: RContext::new(Box::new(WGPUContext::new())),
+                context: RContext::new(),
                 instance: Arc::new(WGPUInstance {
                     instance,
                     surface,

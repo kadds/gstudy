@@ -8,8 +8,8 @@ use nalgebra::Unit;
 
 use crate::{
     context::RContext,
+    ds::Texture,
     event::{self, InputEvent},
-    texture::Texture,
     types::{Color, Mat4x4f, Point3, Quaternion, Rotation3, Vec2f, Vec3f, Vec4f},
 };
 
@@ -29,7 +29,7 @@ struct Inner {
     far: f32,
     change_id: u64,
 
-    attachment: RenderAttachment,
+    attachment: Option<RenderAttachment>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,13 +128,7 @@ impl Camera {
                 fovy: 0f32,
                 change_id: 0,
 
-                attachment: RenderAttachment {
-                    id: 0,
-                    texture: None,
-                    clear_color: None,
-                    clear_depth: None,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                },
+                attachment: None,
             }
             .into(),
             id: context.alloc_camera_id(),
@@ -220,12 +214,17 @@ impl Camera {
 
     pub fn bind_render_attachment(&self, attachment: RenderAttachment) {
         let mut inner = self.inner.lock().unwrap();
-        inner.attachment = attachment;
+        inner.attachment = Some(attachment);
     }
 
-    pub fn render_attachment(&self) -> RenderAttachment {
+    pub fn take_render_attachment(&self) -> Option<RenderAttachment> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.attachment.take()
+    }
+
+    pub fn render_attachment_format(&self) -> wgpu::TextureFormat {
         let inner = self.inner.lock().unwrap();
-        inner.attachment.clone()
+        inner.attachment.as_ref().unwrap().format()
     }
 }
 

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
+    ds::Texture,
     ps::{BlendState, DepthDescriptor, PrimitiveStateDescriptor},
-    texture::Texture,
     types::Vec4f,
 };
 

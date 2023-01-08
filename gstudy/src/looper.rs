@@ -1,5 +1,6 @@
 use core::backends::wgpu_backend::WGPUResource;
 use core::backends::WGPUBackend;
+use core::ds::Texture;
 use core::event::{
     CustomEvent, Event, EventProcessor, EventSender, EventSource, InputEvent, ProcessEventResult,
     Theme,
@@ -10,7 +11,6 @@ use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, RenderAttachment, TrackballCameraController};
 use core::scene::{Camera, Object, Scene, LAYER_NORMAL, LAYER_UI};
-use core::texture::Texture;
 use core::types::{Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
 use std::borrow::Borrow;

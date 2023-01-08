@@ -186,7 +186,7 @@ impl ModuleRenderer for HardwareRenderer {
 
         // render objects
         let mut renderer = WGPURenderer::new(gpu.clone());
-        let mut clear_attachment_ids = HashSet::new();
+        let mut clear_attachment_ids = HashMap::new();
 
         for (layer, objects) in scene.layers() {
             let camera = match objects.camera() {
@@ -194,37 +194,50 @@ impl ModuleRenderer for HardwareRenderer {
                 None => continue,
             };
 
-            let render_attachment = camera.render_attachment();
-            let color_target = match render_attachment.color_attachment() {
-                Some(v) => v,
-                None => {
-                    return;
-                }
-            };
-
             let cam = layer_targets.get(layer).unwrap();
             let hardware_render_target = camera_targets.get_mut(cam).unwrap();
 
-            // set render context
-            let depth_target = render_attachment.depth_attachment().unwrap();
-            if objects.sorted_objects.is_empty() {
-                continue;
-            }
+            let render_attachment = camera.take_render_attachment();
+            let format = match render_attachment {
+                Some(attachment) => {
+                    let color_target = match attachment.color_attachment() {
+                        Some(v) => v,
+                        None => {
+                            return;
+                        }
+                    };
 
-            if !clear_attachment_ids.contains(&render_attachment.id()) {
-                hardware_render_target.set_render_target(
-                    color_target.internal_view(),
-                    render_attachment.clear_color(),
-                );
-                hardware_render_target.set_depth_target(
-                    depth_target.internal_view(),
-                    render_attachment.clear_depth(),
-                );
-                clear_attachment_ids.insert(render_attachment.id());
-            } else {
-                hardware_render_target.set_render_target(color_target.internal_view(), None);
-                hardware_render_target.set_depth_target(depth_target.internal_view(), None);
-            }
+                    // set render context
+                    let depth_target = attachment.depth_attachment().unwrap();
+                    if objects.sorted_objects.is_empty() {
+                        continue;
+                    }
+
+                    hardware_render_target
+                        .set_render_target(color_target.internal_view(), attachment.clear_color());
+                    hardware_render_target
+                        .set_depth_target(depth_target.internal_view(), attachment.clear_depth());
+                    let format = attachment.format();
+                    clear_attachment_ids.insert(camera.id(), attachment);
+                    format
+                }
+                None => {
+                    let attachment = clear_attachment_ids.get(&camera.id());
+                    if let Some(attachment) = attachment {
+                        hardware_render_target.set_render_target(
+                            attachment.color_attachment().unwrap().internal_view(),
+                            None,
+                        );
+                        hardware_render_target.set_depth_target(
+                            attachment.depth_attachment().unwrap().internal_view(),
+                            None,
+                        );
+                        attachment.format()
+                    } else {
+                        wgpu::TextureFormat::Bc1RgbaUnorm
+                    }
+                }
+            };
 
             let mut encoder = renderer.begin(hardware_render_target).unwrap();
 
@@ -240,7 +253,7 @@ impl ModuleRenderer for HardwareRenderer {
                     camera,
                     scene: scene,
                     encoder: &mut encoder,
-                    hint_fmt: render_attachment.format(),
+                    hint_fmt: format,
                 };
 
                 r.render_material(&mut ctx, &objects.map[&material.id()], &material);

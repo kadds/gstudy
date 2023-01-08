@@ -287,19 +287,6 @@ impl PrimitiveStateDescriptor {
         self.polygon_mode
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-pub struct PipelineStateObject(u64);
-
-impl PipelineStateObject {
-    pub fn id(&self) -> u64 {
-        self.0
-    }
-    pub fn new(id: u64) -> Self {
-        Self(id)
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct PipelineStateBuilder {
     blend: Option<BlendState>,

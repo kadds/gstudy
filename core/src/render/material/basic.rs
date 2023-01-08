@@ -9,9 +9,9 @@ use crate::{
         PipelineReflector, WGPUResource,
     },
     context::RContext,
+    ds::PipelineStateObject,
     geometry::{Attribute, Mesh, MeshCoordType},
     material::{basic::*, Material, MaterialId},
-    ps::PipelineStateObject,
     render::{
         common::{StaticMeshMerger, VertexDataGenerator},
         WVP,
@@ -248,8 +248,6 @@ impl BasicMaterialHardwareRenderer {
                 .build(primitive.clone())
                 .unwrap();
 
-            let pso = PipelineStateObject::new(gpu.context().alloc_pso());
-
             let buf = if let Some(alpha) = material.alpha_test() {
                 let buf = gpu.new_wvp_buffer::<ConstParameterWithAlpha>(label);
                 let constp = ConstParameterWithAlpha {
@@ -307,7 +305,7 @@ impl BasicMaterialHardwareRenderer {
                 entries: &entries,
             });
 
-            gpu.context().inner().map_pso(pso.id(), Some(pass));
+            let pso = gpu.context().register_pso(pass);
 
             MaterialGpuResource {
                 pso,
@@ -317,12 +315,12 @@ impl BasicMaterialHardwareRenderer {
             }
         });
 
-        let pass = gpu.context().inner().get_pso(pipe.pso.id());
+        let res = gpu.context().get_resource(pipe.pso.id());
 
         if inner.vp_bind_group.is_none() {
             let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("basic material"),
-                layout: &pass.bind_group_layouts[0],
+                layout: &res.pso_ref().bind_group_layouts[0],
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -404,7 +402,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
 
         let inner = self.inner.as_mut().unwrap();
         let mut mgr = inner.pipeline_pass.get(&material.id()).unwrap();
-        let pipeline = ctx.gpu.context().inner().get_pso(mgr.pso.id());
+        let pipe_res = gpu.context().get_resource(mgr.pso.id());
 
         // prepare dynamic buffer
         let mut total_bytes = (0, 0);
@@ -433,7 +431,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
             for buffer in buffers {
                 let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
                     label,
-                    layout: &pipeline.bind_group_layouts[2],
+                    layout: &pipe_res.pso_ref().bind_group_layouts[2],
                     entries: &[wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -491,7 +489,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
 
         // draw
         let mut pass = ctx.encoder.new_pass();
-        pass.set_pipeline(&pipeline.pipeline);
+        pass.set_pipeline(&pipe_res.pso_ref().pipeline);
         pass.set_bind_group(0, inner.vp_bind_group.as_ref().unwrap(), &[0]);
         pass.set_bind_group(1, &mgr.bind_group, &[0]);
 
