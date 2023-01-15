@@ -8,12 +8,11 @@ use nalgebra::Unit;
 
 use crate::{
     context::RContext,
-    ds::Texture,
     event::{self, InputEvent},
     types::{Color, Mat4x4f, Point3, Quaternion, Rotation3, Vec2f, Vec3f, Vec4f},
 };
 
-pub type OptionalTexture = Option<Texture>;
+// pub type OptionalTexture = Option<Texture>;
 
 #[derive(Debug)]
 struct Inner {
@@ -28,62 +27,61 @@ struct Inner {
     near: f32,
     far: f32,
     change_id: u64,
-
-    attachment: Option<RenderAttachment>,
+    // attachment: Option<RenderAttachment>,
 }
 
-#[derive(Debug, Clone)]
-pub struct RenderAttachment {
-    texture: Option<(OptionalTexture, OptionalTexture)>,
-    clear_color: Option<Color>,
-    clear_depth: Option<f32>,
-    format: wgpu::TextureFormat,
-    id: u64,
-}
+// #[derive(Debug, Clone)]
+// pub struct RenderAttachment {
+//     texture: Option<(OptionalTexture, OptionalTexture)>,
+//     clear_color: Option<Color>,
+//     clear_depth: Option<f32>,
+//     format: wgpu::TextureFormat,
+//     id: u64,
+// }
 
-impl RenderAttachment {
-    pub fn new_with_color_depth(
-        id: u64,
-        color_attachment: Texture,
-        depth_attachment: Texture,
-        clear_color: Option<Color>,
-        clear_depth: Option<f32>,
-        format: wgpu::TextureFormat,
-    ) -> Self {
-        Self {
-            texture: Some((Some(color_attachment), Some(depth_attachment))),
-            clear_color,
-            clear_depth,
-            format,
-            id,
-        }
-    }
-    pub fn set_clear_color(&mut self, color: Option<Color>) {
-        self.clear_color = color;
-    }
-    pub fn set_depth(&mut self, depth: Option<f32>) {
-        self.clear_depth = depth;
-    }
+// impl RenderAttachment {
+//     pub fn new_with_color_depth(
+//         id: u64,
+//         color_attachment: Texture,
+//         depth_attachment: Texture,
+//         clear_color: Option<Color>,
+//         clear_depth: Option<f32>,
+//         format: wgpu::TextureFormat,
+//     ) -> Self {
+//         Self {
+//             texture: Some((Some(color_attachment), Some(depth_attachment))),
+//             clear_color,
+//             clear_depth,
+//             format,
+//             id,
+//         }
+//     }
+//     pub fn set_clear_color(&mut self, color: Option<Color>) {
+//         self.clear_color = color;
+//     }
+//     pub fn set_depth(&mut self, depth: Option<f32>) {
+//         self.clear_depth = depth;
+//     }
 
-    pub fn color_attachment(&self) -> Option<&Texture> {
-        self.texture.as_ref()?.0.as_ref().map(|v| v)
-    }
-    pub fn depth_attachment(&self) -> Option<&Texture> {
-        self.texture.as_ref()?.1.as_ref().map(|v| v)
-    }
-    pub fn clear_color(&self) -> Option<Color> {
-        self.clear_color
-    }
-    pub fn clear_depth(&self) -> Option<f32> {
-        self.clear_depth
-    }
-    pub fn format(&self) -> wgpu::TextureFormat {
-        self.format
-    }
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-}
+//     pub fn color_attachment(&self) -> Option<&Texture> {
+//         self.texture.as_ref()?.0.as_ref().map(|v| v)
+//     }
+//     pub fn depth_attachment(&self) -> Option<&Texture> {
+//         self.texture.as_ref()?.1.as_ref().map(|v| v)
+//     }
+//     pub fn clear_color(&self) -> Option<Color> {
+//         self.clear_color
+//     }
+//     pub fn clear_depth(&self) -> Option<f32> {
+//         self.clear_depth
+//     }
+//     pub fn format(&self) -> wgpu::TextureFormat {
+//         self.format
+//     }
+//     pub fn id(&self) -> u64 {
+//         self.id
+//     }
+// }
 
 pub struct Camera {
     inner: Mutex<Inner>,
@@ -127,8 +125,7 @@ impl Camera {
                 far: f32::MAX,
                 fovy: 0f32,
                 change_id: 0,
-
-                attachment: None,
+                // attachment: None,
             }
             .into(),
             id: context.alloc_camera_id(),
@@ -212,20 +209,21 @@ impl Camera {
         inner.ortho_size
     }
 
-    pub fn bind_render_attachment(&self, attachment: RenderAttachment) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.attachment = Some(attachment);
-    }
+    //     pub fn bind_render_attachment(&self, attachment: RenderAttachment) {
+    //         let mut inner = self.inner.lock().unwrap();
+    //         inner.attachment = Some(attachment);
+    //     }
 
-    pub fn take_render_attachment(&self) -> Option<RenderAttachment> {
-        let mut inner = self.inner.lock().unwrap();
-        inner.attachment.take()
-    }
+    //     pub fn take_render_attachment(&self) -> Option<RenderAttachment> {
+    //         let mut inner = self.inner.lock().unwrap();
+    //         inner.attachment.take()
+    //     }
 
-    pub fn render_attachment_format(&self) -> wgpu::TextureFormat {
-        let inner = self.inner.lock().unwrap();
-        inner.attachment.as_ref().unwrap().format()
-    }
+    //     pub fn render_attachment_format(&self) -> wgpu::TextureFormat {
+    //         let inner = self.inner.lock().unwrap();
+    //         inner.attachment.as_ref().unwrap().format()
+    //     }
+    // }
 }
 
 pub trait CameraController {

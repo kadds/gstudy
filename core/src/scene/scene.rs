@@ -76,8 +76,8 @@ impl Scene {
         self.ui_camera = Some(camera);
     }
 
-    pub fn ui_camera(&self) -> &Camera {
-        self.ui_camera.as_ref().unwrap()
+    pub fn ui_camera(&self) -> Option<&Camera> {
+        self.ui_camera.as_ref().map(|v| v.as_ref())
     }
 
     pub fn object_size(&self) -> usize {

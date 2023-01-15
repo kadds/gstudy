@@ -1,6 +1,6 @@
 use core::backends::wgpu_backend::WGPUResource;
 use core::backends::WGPUBackend;
-use core::ds::Texture;
+use core::context::ResourceRef;
 use core::event::{
     CustomEvent, Event, EventProcessor, EventSender, EventSource, InputEvent, ProcessEventResult,
     Theme,
@@ -11,7 +11,7 @@ use core::graph::rdg::{RenderGraph, RenderGraphBuilder};
 use core::material::egui::EguiMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
-use core::scene::camera::{CameraController, RenderAttachment, TrackballCameraController};
+use core::scene::camera::{CameraController, TrackballCameraController};
 use core::scene::{Camera, Object, Scene, LAYER_NORMAL, LAYER_UI};
 use core::types::{Color, Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
@@ -36,12 +36,14 @@ type WEvent<'a> = winit::event::Event<'a, Event>;
 struct LooperInner {
     renderer: HardwareRenderer,
     scene: Scene,
+    last_ui_id: Option<u64>,
+
     gpu: Arc<WGPUResource>,
 
     ui_camera: Arc<Camera>,
     ui: UI,
 
-    main_depth_texture: Option<Texture>,
+    main_depth_texture: Option<ResourceRef>,
 
     ui_textures: Option<UITextures>,
     ui_mesh: UIMesh,
@@ -79,6 +81,7 @@ impl LooperInner {
             scene,
             ui_camera,
             ui,
+            last_ui_id: None,
             main_depth_texture: None,
             size: Size::new(1u32, 1u32),
             ui_materials: Some(HashMap::new()),
@@ -98,7 +101,7 @@ impl LooperInner {
     }
 
     fn build_ui_objects(&mut self) {
-        self.scene.clear_layer_objects(LAYER_UI);
+        // self.scene.clear_layer_objects(LAYER_UI);
 
         let mut ui_materials = self.ui_materials.take().unwrap();
 
@@ -109,13 +112,9 @@ impl LooperInner {
 
         for (mesh, texture_id) in meshes {
             let material = ui_materials.entry(texture_id).or_insert_with(|| {
-                let view = ui_textures.get_view(texture_id);
+                let t = ui_textures.get(texture_id);
                 MaterialBuilder::default()
-                    .with_face(
-                        EguiMaterialFaceBuilder::default()
-                            .with_texture(view)
-                            .build(),
-                    )
+                    .with_face(EguiMaterialFaceBuilder::default().with_texture(t).build())
                     .build(self.gpu.context())
             });
 
@@ -124,7 +123,7 @@ impl LooperInner {
                 material.clone(),
             );
 
-            self.scene.add_ui(object);
+            // self.scene.add_ui(object);
         }
 
         self.ui_textures = Some(ui_textures);
@@ -162,16 +161,11 @@ impl LooperInner {
             self.g = Some(graph_builder.compile());
         }
 
-        let ds = self
-            .gpu
-            .context()
-            .register_surface_texture(surface_frame.surface_texture());
-
         self.g
             .as_mut()
             .unwrap()
             .registry()
-            .import_underlying(RT_COLOR_RESOURCE_ID, ds);
+            .import_underlying(RT_COLOR_RESOURCE_ID, surface_frame.texture());
 
         let p = RenderParameter {
             gpu: self.gpu.clone(),

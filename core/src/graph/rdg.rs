@@ -20,6 +20,8 @@ use std::{
 
 use petgraph::stable_graph::NodeIndex;
 
+use crate::context::ResourceRef;
+use crate::graph::rdg::pass::ClearPassBuilder;
 use crate::{
     backends::wgpu_backend::WGPUResource,
     types::{Color, Size, Vec3f, Vec3u},
@@ -41,24 +43,21 @@ pub trait GraphContext {}
 
 pub struct ResourceRegistry {
     map: HashMap<ResourceId, Resource>,
-    single_map: HashMap<ResourceId, crate::ds::DynamicResource>,
+    single_map: HashMap<ResourceId, ResourceRef>,
 }
 
 impl ResourceRegistry {
-    pub fn import_underlying(&mut self, id: ResourceId, underlying: crate::ds::DynamicResource) {
+    pub fn import_underlying(&mut self, id: ResourceId, underlying: ResourceRef) {
         self.single_map.insert(id, underlying);
     }
 
-    pub fn get(&self, id: ResourceId) -> crate::ds::DynamicResource {
+    pub fn get(&self, id: ResourceId) -> ResourceRef {
         self.single_map.get(&id).cloned().unwrap()
     }
     pub fn get_desc(&self, id: ResourceId) -> &Resource {
         self.map.get(&id).unwrap()
     }
-    pub fn get_desc_and_underlying(
-        &self,
-        mut id: ResourceId,
-    ) -> (&Resource, crate::ds::DynamicResource) {
+    pub fn get_desc_and_underlying(&self, mut id: ResourceId) -> (&Resource, ResourceRef) {
         let mut desc = self.map.get(&id).unwrap();
         if let ResourceType::AliasResource(from, to) = desc.ty {
             id = to;
@@ -95,18 +94,18 @@ impl RenderGraph {
                 self.registry.single_map.insert(*res_id, underlying);
             }
         }
+        {
+            for index in &self.passes {
+                let node = self.g.node_weight(*index).unwrap();
+                pre_f(&self, node);
 
-        let mut encoder = backend.begin_thread();
-
-        for index in &self.passes {
-            let node = self.g.node_weight(*index).unwrap();
-            pre_f(&self, node);
-
-            if let Node::Pass(pass) = node {
-                pass.execute(&self.registry, &mut encoder);
+                if let Node::Pass(pass) = node {
+                    pass.execute(&self.registry, &backend);
+                }
+                post_f(node);
             }
-            post_f(node);
         }
+        drop(backend);
 
         self.registry.single_map.clear();
     }
@@ -298,46 +297,43 @@ impl RenderGraphBuilder {
         let mut pass_nodes = Vec::new();
         std::mem::swap(&mut pass_nodes, &mut self.pass_nodes);
 
-        // pre process
-        for node in &mut pass_nodes {
-            match node {
-                Node::Pass(pass) => {
-                    pass.connect_external(&mut self, present_color, present_depth);
-                    let (inputs, outputs) = pass.inputs_outputs();
-                    let mut rts = (None, None);
-                    for item in outputs.textures.iter() {
-                        let res = self.resource_map.get(&item.0).unwrap();
-                        match res.ty {
-                            ResourceType::AliasResource(from, to) => {
-                                if to == present_color {
-                                    rts.0 = Some(from);
-                                } else if to == present_depth {
-                                    rts.1 = Some(from);
+        loop {
+            // pre process
+            for node in &mut pass_nodes {
+                match node {
+                    Node::Pass(pass) => {
+                        pass.connect_external(&mut self, present_color, present_depth);
+                        let (inputs, outputs) = pass.inputs_outputs();
+                        let mut rts = (None, None);
+                        for item in outputs.textures.iter() {
+                            let res = self.resource_map.get(&item.0).unwrap();
+                            match res.ty {
+                                ResourceType::AliasResource(from, to) => {
+                                    if to == present_color {
+                                        rts.0 = Some(from);
+                                    } else if to == present_depth {
+                                        rts.1 = Some(from);
+                                    }
                                 }
-                            }
-                            _ => (),
-                        };
+                                _ => (),
+                            };
+                        }
+                        if rts.0.is_some() || rts.1.is_some() {
+                            back_rt_alias.push(rts);
+                        }
                     }
-                    if rts.0.is_some() || rts.1.is_some() {
-                        back_rt_alias.push(rts);
-                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
 
-        if back_rt_alias.is_empty() {
-            log::warn!("no present node linked");
-            let g = RenderGraph {
-                name: self.name,
-                g,
-                passes: Vec::new(),
-                registry: ResourceRegistry {
-                    map: self.resource_map,
-                    single_map: HashMap::new(),
-                },
-            };
-            return g;
+            if back_rt_alias.is_empty() {
+                log::warn!("no present node linked, add default");
+                pass_nodes.push(Node::Pass(Box::new(
+                    ClearPassBuilder::new("default clear pass").build(),
+                )));
+                continue;
+            }
+            break;
         }
 
         let (last_color, last_depth) = back_rt_alias.last().unwrap();
@@ -434,8 +430,6 @@ pub struct PassParameter {
 
 pub enum Node {
     Pass(Box<dyn DynPass>),
-    // ExecutePass(ExecutePass),
-    // CopyPass(CopyPass),
     Present(PresentNode),
     Resource(ResourceId),
 }

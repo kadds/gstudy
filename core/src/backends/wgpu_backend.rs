@@ -6,8 +6,9 @@ use std::{
 };
 
 use crate::{
-    context::{RContext, RContextRef},
+    context::{RContext, RContextRef, ResourceRef},
     event::{Event, EventProcessor, EventSource, ProcessEventResult},
+    ps::{DepthDescriptor, DepthStencilDescriptor},
     types::{Rectu, Size},
 };
 use anyhow::{anyhow, Result};
@@ -32,13 +33,14 @@ struct WGPUInstance {
     format: TextureFormat,
 }
 
-pub struct WindowSurfaceFrame {
-    texture: Option<crate::ds::Texture>,
+pub struct WindowSurfaceFrame<'a> {
+    texture: Option<ResourceRef>,
     s: Option<Arc<wgpu::SurfaceTexture>>,
+    gpu: &'a WGPUResource,
 }
 
-impl WindowSurfaceFrame {
-    pub fn texture(&self) -> crate::ds::Texture {
+impl<'a> WindowSurfaceFrame<'a> {
+    pub fn texture(&self) -> ResourceRef {
         self.texture.as_ref().unwrap().clone()
     }
     pub fn surface_texture(&self) -> Arc<wgpu::SurfaceTexture> {
@@ -46,9 +48,11 @@ impl WindowSurfaceFrame {
     }
 }
 
-impl Drop for WindowSurfaceFrame {
+impl<'a> Drop for WindowSurfaceFrame<'a> {
     fn drop(&mut self) {
-        drop(self.texture.take().unwrap());
+        let t = self.texture.take().unwrap();
+        self.gpu.context.deregister(t);
+
         Arc::try_unwrap(self.s.take().unwrap()).unwrap().present();
     }
 }
@@ -89,6 +93,7 @@ impl WGPUResource {
         Ok(WindowSurfaceFrame {
             texture: Some(texture),
             s: Some(c),
+            gpu: &self,
         })
     }
 
@@ -137,7 +142,7 @@ impl WGPUResource {
 }
 
 impl WGPUResource {
-    pub fn from_rgba_texture(&self, data: &[u8], size: Size) -> crate::ds::Texture {
+    pub fn from_rgba_texture(&self, data: &[u8], size: Size) -> ResourceRef {
         let texture = self.device().create_texture_with_data(
             self.queue(),
             &wgpu::TextureDescriptor {
@@ -159,7 +164,7 @@ impl WGPUResource {
         self.context().register_texture(texture)
     }
 
-    pub fn new_depth_texture(&self, label: Option<&'static str>, size: Size) -> crate::ds::Texture {
+    pub fn new_depth_texture(&self, label: Option<&'static str>, size: Size) -> ResourceRef {
         let device = self.device();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
@@ -320,6 +325,19 @@ impl WGPUResource {
         self.device.create_buffer(&BufferDescriptor {
             label,
             size: std::mem::size_of::<T>() as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    pub(crate) fn new_uniform_buffer(
+        &self,
+        label: Option<&'static str>,
+        size: u64,
+    ) -> wgpu::Buffer {
+        self.device.create_buffer(&BufferDescriptor {
+            label,
+            size,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
@@ -488,9 +506,24 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
     }
 }
 
-#[derive(Debug)]
+impl<'a, 'b> std::fmt::Debug for WGPURenderTargetInner<'a, 'b> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WGPURenderTargetInner")
+            .field("color_attachments", &self.color_attachments)
+            .field("depth_attachment", &self.depth_attachment)
+            .finish()
+    }
+}
+
 pub struct WGPURenderTarget {
     inner: std::ptr::NonNull<u8>,
+}
+
+impl std::fmt::Debug for WGPURenderTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let inner = self.get();
+        inner.fmt(f)
+    }
 }
 
 unsafe impl core::marker::Send for WGPURenderTarget {}
@@ -499,8 +532,6 @@ impl WGPURenderTarget {
     pub fn new(label: &'static str) -> Self {
         let inner = Box::new(WGPURenderTargetInner::new(label));
         let ptr = Box::into_raw(inner);
-        let tail_inner = Box::new(WGPURenderTargetInner::new(label));
-        let tail_ptr = Box::into_raw(tail_inner);
         Self {
             inner: std::ptr::NonNull::new(ptr as *mut u8).unwrap(),
         }
@@ -510,7 +541,7 @@ impl WGPURenderTarget {
     }
 
     pub fn desc<'a, 'b>(&self) -> &RenderPassDescriptor<'a, 'b> {
-        unsafe { self.get().desc() }
+        self.get().desc()
     }
 
     fn map_ops(color: Option<crate::types::Color>) -> Operations<Color> {
@@ -528,7 +559,12 @@ impl WGPURenderTarget {
         }
     }
 
-    pub fn set_depth_target(&mut self, view: &TextureView, clear: Option<f32>) {
+    pub fn set_depth_target(
+        &mut self,
+        view: &TextureView,
+        clear: Option<f32>,
+        clear_stencil: Option<u32>,
+    ) {
         let inner = self.get();
         let ops = Operations {
             load: match clear {
@@ -537,10 +573,17 @@ impl WGPURenderTarget {
             },
             store: true,
         };
+        let ops_stencil = Operations {
+            load: match clear_stencil {
+                Some(v) => LoadOp::Clear(v),
+                None => LoadOp::Load,
+            },
+            store: true,
+        };
         inner.depth_attachment = Some(RenderPassDepthStencilAttachment {
             view,
             depth_ops: Some(ops),
-            stencil_ops: None,
+            stencil_ops: Some(ops_stencil),
         });
     }
 
@@ -582,7 +625,11 @@ impl WGPURenderTarget {
 }
 
 impl Drop for WGPURenderTarget {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        unsafe {
+            let _ = Box::from_raw(self.inner.as_mut());
+        }
+    }
 }
 
 impl WGPURenderer {
@@ -600,17 +647,6 @@ impl WGPURenderer {
     }
     pub fn resource(&self) -> Arc<WGPUResource> {
         self.inner.clone()
-    }
-    pub fn remake_encoder(&mut self) {
-        self.command_buffers
-            .push(self.encoder.take().unwrap().finish());
-        let encoder = self
-            .inner
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("wgpu encoder"),
-            });
-        self.encoder = Some(encoder);
     }
 
     pub fn encoder(&self) -> &wgpu::CommandEncoder {
@@ -706,21 +742,15 @@ impl Position {
     }
 }
 
-#[derive(Debug)]
-pub struct PipelinePass {
-    pub pipeline: RenderPipeline,
-    pub bind_group_layouts: Vec<BindGroupLayout>,
-}
-
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct PipelineReflector<'a> {
     device: &'a Device,
     label: Option<&'static str>,
-    vs: Option<ShaderModule>,
-    fs: Option<ShaderModule>,
+    vs: Option<&'a ShaderModule>,
+    fs: Option<&'a ShaderModule>,
     fs_target: Option<FsTarget>,
-    cs: Option<ShaderModule>,
+    cs: Option<&'a ShaderModule>,
     vertex_attrs: BTreeMap<Position, VertexFormat>,
     bind_group_layout_entries: BTreeMap<Position, BindGroupLayoutEntry>,
     depth: Option<DepthStencilState>,
@@ -1009,9 +1039,25 @@ impl<'a> PipelineReflector<'a> {
         Ok(())
     }
 
-    pub fn add_vs(mut self, vs: ShaderModuleDescriptor) -> Self {
-        let vs_ref = make_reflection(&vs);
-        self.vs = Some(self.device.create_shader_module(vs));
+    // pub fn add_vs(mut self, vs: ShaderModuleDescriptor) -> Self {
+    //     let vs_ref = make_reflection(&vs);
+    //     self.vs = Some(self.device.create_shader_module(vs));
+    //     let entry = ReflectConfig::new()
+    //         .spv(vs_ref)
+    //         .ref_all_rscs(false)
+    //         .reflect()
+    //         .unwrap();
+    //     self.build_vertex_input(&entry[0]);
+
+    //     if let Err(err) = self.build_bind_group_layout(&entry[0], ShaderType::Vertex) {
+    //         self.err = Some(err);
+    //     }
+    //     self
+    // }
+
+    pub fn add_vs2(mut self, vs: &'a ShaderModule, vss: &[u8]) -> Self {
+        let vs_ref: SpirvBinary = vss.into();
+        self.vs = Some(vs);
         let entry = ReflectConfig::new()
             .spv(vs_ref)
             .ref_all_rscs(false)
@@ -1025,9 +1071,23 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
-    pub fn add_fs(mut self, fs: ShaderModuleDescriptor) -> Self {
-        let fs_ref = make_reflection(&fs);
-        self.fs = Some(self.device.create_shader_module(fs));
+    // pub fn add_fs(mut self, fs: ShaderModuleDescriptor) -> Self {
+    //     let fs_ref = make_reflection(&fs);
+    //     self.fs = Some(self.device.create_shader_module(fs));
+    //     let entry = ReflectConfig::new()
+    //         .spv(fs_ref)
+    //         .ref_all_rscs(false)
+    //         .reflect()
+    //         .unwrap();
+    //     if let Err(err) = self.build_bind_group_layout(&entry[0], ShaderType::Fragment) {
+    //         self.err = Some(err);
+    //     }
+    //     self
+    // }
+
+    pub fn add_fs2(mut self, fs: &'a ShaderModule, fss: &[u8]) -> Self {
+        let fs_ref: SpirvBinary = fss.into();
+        self.fs = Some(fs);
         let entry = ReflectConfig::new()
             .spv(fs_ref)
             .ref_all_rscs(false)
@@ -1044,8 +1104,8 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
-    pub fn with_depth(mut self, depth: DepthStencilState) -> Self {
-        self.depth = Some(depth);
+    pub fn with_depth(mut self, depth: &DepthStencilDescriptor) -> Self {
+        self.depth = Some(depth.into());
         self
     }
 
@@ -1054,7 +1114,7 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
-    pub fn build(self) -> anyhow::Result<PipelinePass> {
+    pub fn build(self) -> anyhow::Result<wgpu::RenderPipeline> {
         if let Some(err) = self.err {
             return Err(err);
         }
@@ -1170,30 +1230,7 @@ impl<'a> PipelineReflector<'a> {
 
         let pipeline = self.device.create_render_pipeline(&pipeline_desc);
 
-        Ok(PipelinePass {
-            pipeline,
-            bind_group_layouts: layouts,
-        })
-    }
-
-    pub fn depth_with_format(format: TextureFormat) -> DepthStencilState {
-        let stencil = StencilState {
-            front: StencilFaceState::IGNORE,
-            back: StencilFaceState::IGNORE,
-            write_mask: 0,
-            read_mask: 0,
-        };
-        DepthStencilState {
-            format,
-            depth_write_enabled: true,
-            depth_compare: CompareFunction::LessEqual,
-            stencil,
-            bias: DepthBiasState {
-                constant: 0,
-                slope_scale: 0.0f32,
-                clamp: 0.0,
-            },
-        }
+        Ok(pipeline)
     }
 }
 
@@ -1290,6 +1327,33 @@ impl From<&crate::ps::BlendState> for BlendState {
         Self {
             color: (&value.color).into(),
             alpha: (&value.alpha).into(),
+        }
+    }
+}
+
+impl From<&crate::ps::CompareFunction> for CompareFunction {
+    fn from(value: &crate::ps::CompareFunction) -> Self {
+        match value {
+            crate::ps::CompareFunction::Never => Self::Never,
+            crate::ps::CompareFunction::Less => Self::Less,
+            crate::ps::CompareFunction::Equal => Self::Equal,
+            crate::ps::CompareFunction::LessEqual => Self::LessEqual,
+            crate::ps::CompareFunction::Greater => Self::Greater,
+            crate::ps::CompareFunction::NotEqual => Self::NotEqual,
+            crate::ps::CompareFunction::GreaterEqual => Self::GreaterEqual,
+            crate::ps::CompareFunction::Always => Self::Always,
+        }
+    }
+}
+
+impl From<&crate::ps::DepthStencilDescriptor> for DepthStencilState {
+    fn from(value: &crate::ps::DepthStencilDescriptor) -> Self {
+        Self {
+            format: value.depth.format,
+            depth_write_enabled: value.depth.depth_write_enabled,
+            depth_compare: (&value.depth.compare).into(),
+            stencil: StencilState::default(),
+            bias: DepthBiasState::default(),
         }
     }
 }

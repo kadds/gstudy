@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    ds::Texture,
+    context::ResourceRef,
     ps::{BlendState, DepthDescriptor, PrimitiveStateDescriptor},
     types::Vec4f,
 };
@@ -22,14 +22,14 @@ impl MaterialShader for BasicMaterialShader {}
 pub struct BasicMaterialFace {
     color: Vec4f,
     shader: BasicMaterialShader,
-    texture: Option<Texture>,
+    texture: Option<ResourceRef>,
 }
 
 impl BasicMaterialFace {
     pub fn shader_ex(&self) -> BasicMaterialShader {
         self.shader
     }
-    pub fn texture(&self) -> Option<&Texture> {
+    pub fn texture(&self) -> Option<&ResourceRef> {
         self.texture.as_ref().map(|v| v)
     }
     pub fn color(&self) -> Vec4f {
@@ -49,7 +49,7 @@ pub struct BasicMaterialFaceBuilder {
     blend: Option<BlendState>,
     has_color: bool,
     has_texture: bool,
-    texture: Option<Texture>,
+    texture: Option<ResourceRef>,
     color: Vec4f,
 }
 
@@ -76,7 +76,7 @@ impl BasicMaterialFaceBuilder {
         self.color = color;
         self
     }
-    pub fn with_texture_data(mut self, texture: Texture) -> Self {
+    pub fn with_texture_data(mut self, texture: ResourceRef) -> Self {
         self.texture = Some(texture);
         self
     }

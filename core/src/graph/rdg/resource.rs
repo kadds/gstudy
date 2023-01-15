@@ -3,7 +3,7 @@ use crate::types::{Color, Vec3u};
 #[derive(Debug)]
 pub enum ClearValue {
     Color(Color),
-    Depth((f32, u8)),
+    Depth((f32, u32)),
 }
 
 impl ClearValue {
@@ -11,6 +11,12 @@ impl ClearValue {
         match self {
             ClearValue::Color(_) => todo!(),
             ClearValue::Depth((d, s)) => *d,
+        }
+    }
+    pub fn stencil(&self) -> u32 {
+        match self {
+            ClearValue::Color(_) => todo!(),
+            ClearValue::Depth((d, s)) => *s,
         }
     }
     pub fn color(&self) -> Color {

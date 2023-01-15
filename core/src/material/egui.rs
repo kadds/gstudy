@@ -1,13 +1,15 @@
+use crate::context::ResourceRef;
+
 use super::MaterialFace;
 
 #[derive(Debug)]
 pub struct EguiMaterialFace {
-    texture: Option<wgpu::TextureView>,
+    texture: Option<ResourceRef>,
 }
 
 impl EguiMaterialFace {
-    pub fn texture(&self) -> &wgpu::TextureView {
-        self.texture.as_ref().unwrap()
+    pub fn texture(&self) -> ResourceRef {
+        self.texture.as_ref().unwrap().clone()
     }
 }
 
@@ -19,11 +21,11 @@ impl MaterialFace for EguiMaterialFace {
 
 #[derive(Debug, Default)]
 pub struct EguiMaterialFaceBuilder {
-    texture: Option<wgpu::TextureView>,
+    texture: Option<ResourceRef>,
 }
 
 impl EguiMaterialFaceBuilder {
-    pub fn with_texture(mut self, texture: wgpu::TextureView) -> Self {
+    pub fn with_texture(mut self, texture: ResourceRef) -> Self {
         self.texture = Some(texture);
         self
     }

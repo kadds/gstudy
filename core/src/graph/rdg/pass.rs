@@ -2,11 +2,11 @@ use std::{
     any::{Any, Provider, TypeId},
     fmt::Debug,
     marker::PhantomData,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use super::{
-    backend::GraphEncoder,
+    backend::{GraphBackend, GraphEncoder},
     resource::{ClearValue, RT_COLOR_RESOURCE_ID, RT_DEPTH_RESOURCE_ID},
     PassParameter, RenderGraph, RenderGraphBuilder, ResourceId, ResourceOp, ResourceRegistry,
 };
@@ -30,7 +30,12 @@ impl PassRenderTargets {
 }
 
 pub trait RenderPassExecutor {
-    fn execute(&self, registry: &ResourceRegistry, pass: &mut wgpu::RenderPass);
+    fn execute<'a>(
+        &'a mut self,
+        registry: &ResourceRegistry,
+        backend: &GraphBackend,
+        pass: &mut wgpu::RenderPass<'a>,
+    );
 }
 
 pub trait DynPass: Debug {
@@ -41,11 +46,11 @@ pub trait DynPass: Debug {
         present_color: ResourceId,
         present_depth: ResourceId,
     );
-    fn execute(&self, registry: &ResourceRegistry, encoder: &mut GraphEncoder);
+    fn execute(&self, registry: &ResourceRegistry, backend: &GraphBackend);
 }
 
 pub struct RenderPass {
-    pub inner: Arc<dyn RenderPassExecutor>,
+    inner: Arc<Mutex<dyn RenderPassExecutor>>,
     pub name: String,
     pub shader_name: String,
     pub inputs: PassParameter,
@@ -98,9 +103,11 @@ impl DynPass for RenderPass {
         }
     }
 
-    fn execute(&self, registry: &ResourceRegistry, encoder: &mut GraphEncoder) {
+    fn execute(&self, registry: &ResourceRegistry, backend: &GraphBackend) {
+        let mut c = self.inner.lock().unwrap();
+        let mut encoder = backend.begin_thread();
         let mut pass_encoder = encoder.new_pass(&self.name, &self.render_targets, registry);
-        self.inner.execute(&registry, &mut pass_encoder);
+        c.execute(&registry, backend, &mut pass_encoder);
     }
 }
 
@@ -110,7 +117,7 @@ pub struct RenderPassBuilder {
     inputs: PassParameter,
     outputs: PassParameter,
 
-    inner: Option<Arc<dyn RenderPassExecutor>>,
+    inner: Option<Arc<Mutex<dyn RenderPassExecutor>>>,
 
     render_targets: PassRenderTargets,
     bind_default: bool,
@@ -156,7 +163,7 @@ impl RenderPassBuilder {
         self.shader_name = shader_name.into();
     }
 
-    pub fn async_execute(&mut self, exec: Arc<dyn RenderPassExecutor>) {
+    pub fn async_execute(&mut self, exec: Arc<Mutex<dyn RenderPassExecutor>>) {
         self.inner = Some(exec);
     }
 
@@ -178,6 +185,79 @@ impl RenderPassBuilder {
             outputs: self.outputs,
             render_targets: self.render_targets,
             bind_default: self.bind_default,
+        }
+    }
+}
+
+pub struct ClearPass {
+    name: String,
+    inputs: PassParameter,
+    outputs: PassParameter,
+    render_targets: PassRenderTargets,
+}
+
+impl DynPass for ClearPass {
+    fn inputs_outputs(&self) -> (&PassParameter, &PassParameter) {
+        (&self.inputs, &self.outputs)
+    }
+
+    fn connect_external(
+        &mut self,
+        b: &mut RenderGraphBuilder,
+        present_color: ResourceId,
+        present_depth: ResourceId,
+    ) {
+        let color = b.alias_texture(present_color);
+        let depth = b.alias_texture(present_depth);
+        let color_output = b.alias_texture(present_color);
+        let depth_output = b.alias_texture(present_depth);
+
+        let targets = PassRenderTargets::new(color, depth);
+        self.inputs
+            .textures
+            .push((color, ResourceOp::RenderTargetTextureRead));
+        self.inputs
+            .textures
+            .push((depth, ResourceOp::RenderTargetTextureRead));
+
+        self.outputs
+            .textures
+            .push((color_output, ResourceOp::RenderTargetTextureWrite));
+        self.outputs
+            .textures
+            .push((depth_output, ResourceOp::RenderTargetTextureWrite));
+        self.render_targets = targets;
+    }
+
+    fn execute(&self, registry: &ResourceRegistry, backend: &GraphBackend) {
+        let mut encoder = backend.begin_thread();
+        let t = encoder.new_pass("clear pass", &self.render_targets, registry);
+    }
+}
+
+impl Debug for ClearPass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderPass")
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct ClearPassBuilder {
+    name: String,
+}
+
+impl ClearPassBuilder {
+    pub fn new<S: Into<String>>(name: S) -> Self {
+        Self { name: name.into() }
+    }
+    pub fn build(mut self) -> ClearPass {
+        ClearPass {
+            name: self.name,
+            inputs: PassParameter::default(),
+            outputs: PassParameter::default(),
+            render_targets: PassRenderTargets::default(),
         }
     }
 }

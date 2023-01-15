@@ -2,7 +2,7 @@ use nalgebra::Unit;
 
 use core::backends::wgpu_backend::{WGPURenderTarget, WGPUResource};
 use core::backends::WGPUBackend;
-use core::context::{RContext, RContextRef};
+use core::context::{RContext, RContextRef, ResourceRef};
 use core::event::{Event, EventSender};
 use core::ps::{BlendState, PrimitiveStateDescriptor};
 // use crate::geometry::axis::{Axis, AxisMesh};
@@ -290,7 +290,7 @@ fn parse_mesh(
 }
 
 fn parse_texture(
-    texture_map: &mut Mutex<HashMap<usize, core::ds::Texture>>,
+    texture_map: &mut Mutex<HashMap<usize, ResourceRef>>,
     path: &PathBuf,
     gpu: &WGPUResource,
     texture: gltf::Texture,

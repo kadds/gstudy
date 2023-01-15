@@ -206,16 +206,21 @@ impl Default for StencilOperation {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct StencilDescriptor {}
+
 #[derive(Debug)]
 pub struct DepthDescriptor {
-    depth_read_enabled: bool,
-    depth_write_enabled: bool,
-    compare: CompareFunction,
+    pub format: wgpu::TextureFormat,
+    pub depth_read_enabled: bool,
+    pub depth_write_enabled: bool,
+    pub compare: CompareFunction,
 }
 
 impl Default for DepthDescriptor {
     fn default() -> Self {
         Self {
+            format: wgpu::TextureFormat::Depth32Float,
             depth_write_enabled: true,
             depth_read_enabled: true,
             compare: CompareFunction::Always,
@@ -226,6 +231,23 @@ impl Default for DepthDescriptor {
 impl DepthDescriptor {
     pub fn with_compare(mut self, compare: CompareFunction) -> Self {
         self.compare = compare;
+        self
+    }
+    pub fn with_format(mut self, format: wgpu::TextureFormat) -> Self {
+        self.format = format;
+        self
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct DepthStencilDescriptor {
+    pub depth: DepthDescriptor,
+    pub stencil: StencilDescriptor,
+}
+
+impl DepthStencilDescriptor {
+    pub fn with_depth(mut self, depth: DepthDescriptor) -> Self {
+        self.depth = depth;
         self
     }
 }
@@ -286,13 +308,4 @@ impl PrimitiveStateDescriptor {
     pub fn polygon(&self) -> PolygonMode {
         self.polygon_mode
     }
-}
-#[derive(Debug, Default)]
-pub struct PipelineStateBuilder {
-    blend: Option<BlendState>,
-    depth: DepthDescriptor,
-    primitive: PrimitiveStateDescriptor,
-    topology: Topology,
-    cull: CullFace,
-    polygon: PolygonMode,
 }

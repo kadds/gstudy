@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
+    context::ResourceRef,
     event::{self, *},
     geometry::{load_default_transformer, Mesh},
     types::{Color, Rectu, Size, Vec4f},
@@ -379,8 +380,8 @@ impl EventProcessor for UIEventProcessor {
 
 #[derive(Default)]
 pub struct UITextures {
-    textures: HashMap<egui::TextureId, (wgpu::Texture, wgpu::TextureView)>,
-    user_textures: HashMap<egui::TextureId, wgpu::TextureView>,
+    textures: HashMap<egui::TextureId, ResourceRef>,
+    user_textures: HashMap<egui::TextureId, ResourceRef>,
 }
 
 impl UITextures {
@@ -407,30 +408,30 @@ impl UITextures {
                 Some("ui texture"),
                 Size::new(size[0] as u32, size[1] as u32),
             );
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            self.textures.insert(id, (texture, view));
+            let res = gpu.context().register_texture(texture);
+            self.textures.insert(id, res);
         }
 
-        let texture = &self.textures.get(&id).unwrap().0;
+        let texture = self.textures.get(&id).unwrap();
 
         match &data.image {
             egui::epaint::ImageData::Color(c) => {
-                gpu.copy_texture(texture, 4, rect, any_as_u8_slice_array(&c.pixels));
+                gpu.copy_texture(
+                    texture.texture_ref(),
+                    4,
+                    rect,
+                    any_as_u8_slice_array(&c.pixels),
+                );
             }
             egui::epaint::ImageData::Font(f) => {
                 let data: Vec<egui::Color32> = f.srgba_pixels(None).collect();
-                gpu.copy_texture(texture, 4, rect, any_as_u8_slice_array(&data));
+                gpu.copy_texture(texture.texture_ref(), 4, rect, any_as_u8_slice_array(&data));
             }
         }
     }
 
-    pub fn get_view(&self, texture_id: egui::TextureId) -> wgpu::TextureView {
-        self.textures
-            .get(&texture_id)
-            .as_ref()
-            .unwrap()
-            .0
-            .create_view(&wgpu::TextureViewDescriptor::default())
+    pub fn get(&self, texture_id: egui::TextureId) -> ResourceRef {
+        self.textures.get(&texture_id).unwrap().clone()
     }
 }
 
@@ -466,20 +467,20 @@ impl UIMesh {
         let mut ret = vec![];
         for mesh in meshes {
             let mut clip = if mesh.clip_rect.is_finite() {
-                Vec4f::new(
-                    mesh.clip_rect.left() * ppi,
-                    mesh.clip_rect.top() * ppi,
-                    mesh.clip_rect.right() * ppi,
-                    mesh.clip_rect.bottom() * ppi,
+                Rectu::new(
+                    (mesh.clip_rect.left() * ppi) as u32,
+                    (mesh.clip_rect.top() * ppi) as u32,
+                    (mesh.clip_rect.right() * ppi) as u32,
+                    (mesh.clip_rect.bottom() * ppi) as u32,
                 )
             } else {
-                Vec4f::new(0f32, 0f32, 0f32, 0f32)
+                Rectu::new(0, 0, 0, 0)
             };
 
-            clip.x = clip.x.max(0f32);
-            clip.y = clip.y.max(0f32);
-            clip.z = clip.z.min(size.x as f32);
-            clip.w = clip.w.min(size.y as f32);
+            clip.x = clip.x.max(0);
+            clip.y = clip.y.max(0);
+            clip.z = clip.z.min(size.x - clip.x);
+            clip.w = clip.w.min(size.y - clip.y);
 
             let mut gmesh = Mesh::new();
             gmesh.set_clip(clip);

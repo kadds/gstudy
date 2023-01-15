@@ -50,7 +50,7 @@ pub fn load_default_transformer() -> MeshTransformer {
 pub struct Mesh {
     pub vertices: Vec<Vec3f>,
     pub indices: Vec<u32>,
-    pub clip: Option<Vec4f>,
+    pub clip: Option<Rectu>,
 
     pub mesh_coord: HashMap<MeshCoordType, MeshCoordValue>,
 
@@ -75,7 +75,7 @@ impl Mesh {
         }
     }
 
-    pub fn set_clip(&mut self, clip: Vec4f) {
+    pub fn set_clip(&mut self, clip: Rectu) {
         self.clip = Some(clip);
     }
 
@@ -83,7 +83,7 @@ impl Mesh {
         self.clip = None;
     }
 
-    pub fn clip(&self) -> Option<Vec4f> {
+    pub fn clip(&self) -> Option<Rectu> {
         self.clip
     }
 
