@@ -101,7 +101,7 @@ impl LooperInner {
     }
 
     fn build_ui_objects(&mut self) {
-        // self.scene.clear_layer_objects(LAYER_UI);
+        self.scene.clear_layer_objects(LAYER_UI);
 
         let mut ui_materials = self.ui_materials.take().unwrap();
 
@@ -123,7 +123,7 @@ impl LooperInner {
                 material.clone(),
             );
 
-            // self.scene.add_ui(object);
+            self.scene.add_ui(object);
         }
 
         self.ui_textures = Some(ui_textures);

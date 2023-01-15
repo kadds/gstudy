@@ -294,13 +294,23 @@ impl EventProcessor for UIEventProcessor {
                 }
                 InputEvent::CursorMoved { logical, physical } => {
                     let mut inner = self.inner.lock().unwrap();
-                    inner
-                        .input
-                        .events
-                        .push(egui::Event::PointerMoved(egui::Pos2::new(
-                            logical.x as f32,
-                            logical.y as f32,
-                        )));
+                    let replace = if let Some(v) = inner.input.events.last() {
+                        match v {
+                            egui::Event::PointerMoved(_) => true,
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+                    let ev = egui::Event::PointerMoved(egui::Pos2::new(
+                        logical.x as f32,
+                        logical.y as f32,
+                    ));
+                    if replace {
+                        *inner.input.events.last_mut().unwrap() = ev;
+                    } else {
+                        inner.input.events.push(ev)
+                    }
                     inner.cursor_position = (logical.x as f32, logical.y as f32);
                 }
                 InputEvent::ReceivedCharacter(c) => {
