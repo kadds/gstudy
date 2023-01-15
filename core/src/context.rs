@@ -98,14 +98,15 @@ impl RContext {
             .insert(id, (AtomicU64::new(1), Resource::Pso(pso)));
         PipelineStateObject::from_id(id, self.static_self())
     }
-    pub(crate) fn register_texture(&self, texture: wgpu::Texture) -> Texture {
+    pub fn register_texture(&self, texture: wgpu::Texture) -> Texture {
         let id = self.last_res_id.fetch_add(1, Ordering::SeqCst);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.res_map
             .insert(id, (AtomicU64::new(1), Resource::Texture((texture, view))));
         Texture::from_id(id, self.static_self())
     }
-    pub(crate) fn register_surface_texture(&self, texture: Arc<wgpu::SurfaceTexture>) -> Texture {
+
+    pub fn register_surface_texture(&self, texture: Arc<wgpu::SurfaceTexture>) -> Texture {
         let id = self.last_res_id.fetch_add(1, Ordering::SeqCst);
         let view = texture
             .texture

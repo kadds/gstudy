@@ -13,7 +13,7 @@ impl DynamicResource {
     pub fn from_id(id: u64, context: &'static RContext) -> Self {
         Self { id, context }
     }
-    pub(crate) fn id(&self) -> u64 {
+    pub fn id(&self) -> u64 {
         self.id
     }
 }

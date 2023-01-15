@@ -6,7 +6,7 @@ use crate::{
 use std::{
     any::{Any, TypeId},
     collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use super::Camera;
@@ -15,21 +15,8 @@ use super::Camera;
 pub struct LayerObjects {
     pub map: HashMap<MaterialId, smallvec::SmallVec<[u64; 2]>>, // material id -> objects
     dirty: bool,
-    target_camera: Option<Arc<Camera>>,
 
     pub sorted_objects: BTreeMap<u64, Arc<Material>>, // sort key -> material id
-}
-
-impl LayerObjects {
-    pub fn camera(&self) -> Option<&Camera> {
-        match &self.target_camera {
-            Some(v) => Some(v.as_ref()),
-            None => None,
-        }
-    }
-    pub fn camera_ref(&self) -> Option<Arc<Camera>> {
-        self.target_camera.clone()
-    }
 }
 
 pub const LAYER_BACKGROUND: u64 = 10000;
@@ -48,6 +35,11 @@ pub struct Scene {
     layers: BTreeMap<u64, LayerObjects>,
 
     drop_objects: Vec<u64>,
+
+    cameras: Vec<Arc<Camera>>,
+    ui_camera: Option<Arc<Camera>>,
+
+    change: AtomicBool,
 }
 
 impl Scene {
@@ -57,7 +49,35 @@ impl Scene {
             objects: HashMap::new(),
             layers: BTreeMap::new(),
             drop_objects: Vec::new(),
+
+            cameras: Vec::new(),
+            ui_camera: None,
+            change: AtomicBool::new(false),
         }
+    }
+
+    pub fn set_main_camera(&mut self, camera: Arc<Camera>) {
+        if self.cameras.is_empty() {
+            self.cameras.push(camera);
+        } else {
+            self.cameras[0] = camera;
+        }
+    }
+
+    pub fn main_camera(&self) -> Option<&Camera> {
+        self.cameras.get(0).map(|v| v.as_ref())
+    }
+
+    pub fn main_camera_ref(&self) -> Arc<Camera> {
+        self.cameras[0].clone()
+    }
+
+    pub fn set_ui_camera(&mut self, camera: Arc<Camera>) {
+        self.ui_camera = Some(camera);
+    }
+
+    pub fn ui_camera(&self) -> &Camera {
+        self.ui_camera.as_ref().unwrap()
     }
 
     pub fn object_size(&self) -> usize {
@@ -92,6 +112,8 @@ impl Scene {
 
         self.objects.insert(id, object);
 
+        self.change.store(true, atomic::Ordering::SeqCst);
+
         id
     }
 
@@ -118,6 +140,11 @@ impl Scene {
         self.layers.iter()
     }
 
+    pub fn change(&self) -> bool {
+        let change = self.change.load(atomic::Ordering::SeqCst);
+        change
+    }
+
     pub fn layer(&self, layer: u64) -> &LayerObjects {
         self.layers.get(&layer).as_ref().unwrap()
     }
@@ -129,9 +156,6 @@ impl Scene {
             }
 
             objects.sorted_objects.clear();
-            if objects.camera().is_none() {
-                continue;
-            }
 
             for (mat_id, id) in &objects.map {
                 let first = id.iter().next().unwrap();
@@ -147,21 +171,8 @@ impl Scene {
         }
     }
 
-    pub fn update(&self, delta: f64) {}
-
-    pub fn set_layer_camera(&mut self, layer: u64, camera: Arc<Camera>) {
-        self.layers
-            .entry(layer)
-            .and_modify(|v| {
-                v.target_camera = Some(camera.clone());
-                v.dirty = true;
-            })
-            .or_insert_with(|| {
-                let mut objs = LayerObjects::default();
-                objs.target_camera = Some(camera);
-                objs.dirty = true;
-                objs
-            });
+    pub fn update(&self, delta: f64) {
+        self.change.store(false, atomic::Ordering::SeqCst)
     }
 
     pub fn clear_objects(&mut self) {
@@ -170,6 +181,7 @@ impl Scene {
             layer.map.clear();
             layer.dirty = true;
         }
+        self.change.store(true, atomic::Ordering::SeqCst);
         self.objects.clear();
     }
 
@@ -181,6 +193,7 @@ impl Scene {
                     self.objects.remove(&obj);
                 }
             }
+            self.change.store(true, atomic::Ordering::SeqCst);
             v.map.clear();
             v.sorted_objects.clear();
             v.dirty = true;

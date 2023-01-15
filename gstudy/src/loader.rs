@@ -547,10 +547,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
         dist
     );
 
-    gscene.set_layer_camera(LAYER_NORMAL, camera.clone());
-    gscene.set_layer_camera(LAYER_BACKGROUND, camera.clone());
-    gscene.set_layer_camera(LAYER_ALPHA_TEST, camera.clone());
-    gscene.set_layer_camera(LAYER_TRANSPARENT, camera.clone());
+    gscene.set_main_camera(camera);
 
     Ok(gscene)
 }

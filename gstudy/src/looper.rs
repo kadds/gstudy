@@ -6,12 +6,14 @@ use core::event::{
     Theme,
 };
 use core::geometry::StaticGeometry;
+use core::graph::rdg::resource::RT_COLOR_RESOURCE_ID;
+use core::graph::rdg::{RenderGraph, RenderGraphBuilder};
 use core::material::egui::EguiMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, RenderAttachment, TrackballCameraController};
 use core::scene::{Camera, Object, Scene, LAYER_NORMAL, LAYER_UI};
-use core::types::{Size, Vec2f, Vec3f, Vec4f};
+use core::types::{Color, Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -52,6 +54,7 @@ struct LooperInner {
 
     window: Arc<Window>,
     resource_manager: Arc<ResourceManager>,
+    g: Option<RenderGraph>,
 }
 
 impl LooperInner {
@@ -65,7 +68,7 @@ impl LooperInner {
             Vec3f::zeros(),
             Vec3f::new(0f32, 1f32, 0f32),
         );
-        scene.set_layer_camera(LAYER_UI, ui_camera.clone());
+        scene.set_ui_camera(ui_camera.clone());
 
         let ui_mesh = UIMesh::new();
         let ui_textures = UITextures::default();
@@ -85,6 +88,7 @@ impl LooperInner {
             last_delta: 0f32,
             window,
             resource_manager: rm,
+            g: None,
         }
     }
 
@@ -141,25 +145,38 @@ impl LooperInner {
         let depth_texture = self.main_depth_texture.as_ref().unwrap();
         let clear_color = self.ui.clear_color();
 
-        let attachment = RenderAttachment::new_with_color_depth(
-            0,
-            surface_frame.texture(),
-            depth_texture.clone(),
-            Some(clear_color),
-            Some(1f32),
-            self.gpu.surface_format(),
-        );
-
-        // bind textures
-        for (layer, objects) in self.scene.layers() {
-            if let Some(c) = objects.camera() {
-                c.bind_render_attachment(attachment.clone());
-            }
+        if self.scene.change() {
+            self.g = None;
         }
+
+        if self.g.is_none() {
+            // build graph
+            let mut graph_builder = RenderGraphBuilder::new("main graph");
+            self.renderer
+                .setup(&mut graph_builder, self.gpu.clone(), &mut self.scene);
+            graph_builder.set_present_target(
+                self.size,
+                self.gpu.surface_format(),
+                Some(clear_color),
+            );
+            self.g = Some(graph_builder.compile());
+        }
+
+        let ds = self
+            .gpu
+            .context()
+            .register_surface_texture(surface_frame.surface_texture());
+
+        self.g
+            .as_mut()
+            .unwrap()
+            .registry()
+            .import_underlying(RT_COLOR_RESOURCE_ID, ds);
 
         let p = RenderParameter {
             gpu: self.gpu.clone(),
             scene: &mut self.scene,
+            g: self.g.as_mut().unwrap(),
         };
 
         self.renderer.render(p);
@@ -250,16 +267,13 @@ impl EventProcessor for DefaultProcessor {
                     Vec3f::new(0f32, 1f32, 0f32),
                 );
                 let aspect = physical.x as f32 / physical.y as f32;
-                for (_, layer) in inner.scene.layers() {
-                    match layer.camera() {
-                        Some(camera) => {
-                            if camera.is_perspective() {
-                                camera.remake_perspective(aspect);
-                            }
-                        }
-                        None => {}
-                    };
+                let camera = inner.scene.main_camera();
+                if let Some(camera) = camera {
+                    if camera.is_perspective() {
+                        camera.remake_perspective(aspect);
+                    }
                 }
+                inner.g = None;
             }
             core::event::Event::CustomEvent(ev) => match ev {
                 core::event::CustomEvent::Loaded(scene) => {
@@ -267,9 +281,9 @@ impl EventProcessor for DefaultProcessor {
                     let mut inner = self.inner.borrow_mut();
                     inner.scene = scene;
                     let cam = inner.ui_camera.clone();
-                    inner.scene.set_layer_camera(LAYER_UI, cam);
+                    inner.scene.set_ui_camera(cam);
                     // get camera
-                    let camera = inner.scene.layer(LAYER_NORMAL).camera_ref().unwrap();
+                    let camera = inner.scene.main_camera_ref();
                     inner.controller = Some(Box::new(TrackballCameraController::new(camera)));
                 }
                 _ => (),

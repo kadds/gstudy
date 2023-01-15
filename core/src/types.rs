@@ -11,6 +11,9 @@ pub type Vec4<T> = Vector4<T>;
 pub type Vec2f = Vec2<f32>;
 pub type Vec3f = Vec3<f32>;
 pub type Vec4f = Vec4<f32>;
+
+pub type Vec3u = Vec3<u32>;
+
 pub type Point2<T> = nalgebra::Point2<T>;
 pub type Point3<T> = nalgebra::Point3<T>;
 pub type Point4<T> = nalgebra::Point4<T>;
@@ -22,6 +25,15 @@ pub type Quaternion = nalgebra::UnitQuaternion<f32>;
 pub type Rotation3 = nalgebra::geometry::Rotation3<f32>;
 pub type Translation3 = nalgebra::geometry::Translation3<f32>;
 pub type Transform3 = nalgebra::geometry::Transform3<f32>;
+
+// impl Color {
+//     pub fn white() -> Self {
+//         Self::new(1f32, 1f32, 1f32, 1f32)
+//     }
+//     pub fn black() -> Self {
+//         Self::new(0f32, 0f32, 0f32, 1f32)
+//     }
+// }
 
 #[inline]
 fn to_round_u8(res: &Vec4f, idx: usize) -> u8 {

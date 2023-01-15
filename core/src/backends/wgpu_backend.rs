@@ -41,6 +41,9 @@ impl WindowSurfaceFrame {
     pub fn texture(&self) -> crate::ds::Texture {
         self.texture.as_ref().unwrap().clone()
     }
+    pub fn surface_texture(&self) -> Arc<wgpu::SurfaceTexture> {
+        self.s.as_ref().unwrap().clone()
+    }
 }
 
 impl Drop for WindowSurfaceFrame {
@@ -451,13 +454,12 @@ struct WGPUFrame {
 
 #[derive(Debug)]
 pub struct WGPURenderer {
-    inner: Arc<WGPUResource>,
+    pub(crate) inner: Arc<WGPUResource>,
     encoder: Option<CommandEncoder>,
     command_buffers: Vec<CommandBuffer>,
-    first_call: bool,
 }
 
-struct WGPURenderTargetInner<'a, 'b> {
+pub struct WGPURenderTargetInner<'a, 'b> {
     color_attachments: Vec<RenderPassColorAttachment<'a>>,
     depth_attachment: Option<RenderPassDepthStencilAttachment<'a>>,
     render_pass_desc: RenderPassDescriptor<'a, 'b>,
@@ -489,8 +491,6 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
 #[derive(Debug)]
 pub struct WGPURenderTarget {
     inner: std::ptr::NonNull<u8>,
-    tail_inner: std::ptr::NonNull<u8>,
-    offset: u32,
 }
 
 unsafe impl core::marker::Send for WGPURenderTarget {}
@@ -503,27 +503,14 @@ impl WGPURenderTarget {
         let tail_ptr = Box::into_raw(tail_inner);
         Self {
             inner: std::ptr::NonNull::new(ptr as *mut u8).unwrap(),
-            tail_inner: std::ptr::NonNull::new(tail_ptr as *mut u8).unwrap(),
-            offset: 0,
         }
     }
-    fn get_mut<'a, 'b>(&mut self) -> &mut WGPURenderTargetInner<'a, 'b> {
+    fn get<'a, 'b>(&self) -> &mut WGPURenderTargetInner<'a, 'b> {
         unsafe { std::mem::transmute(self.inner.as_ptr()) }
     }
-    fn get_tail_mut<'a, 'b>(&mut self) -> &mut WGPURenderTargetInner<'a, 'b> {
-        unsafe { std::mem::transmute(self.tail_inner.as_ptr()) }
-    }
-    pub fn reset(&mut self) {
-        self.offset = 0;
-    }
 
-    pub fn desc<'a, 'b>(&mut self) -> &RenderPassDescriptor<'a, 'b> {
-        self.offset += 1;
-        if self.offset == 1 {
-            unsafe { self.get_mut().desc() }
-        } else {
-            unsafe { self.get_tail_mut().desc() }
-        }
+    pub fn desc<'a, 'b>(&self) -> &RenderPassDescriptor<'a, 'b> {
+        unsafe { self.get().desc() }
     }
 
     fn map_ops(color: Option<crate::types::Color>) -> Operations<Color> {
@@ -542,7 +529,7 @@ impl WGPURenderTarget {
     }
 
     pub fn set_depth_target(&mut self, view: &TextureView, clear: Option<f32>) {
-        let inner = self.get_mut();
+        let inner = self.get();
         let ops = Operations {
             load: match clear {
                 Some(v) => LoadOp::Clear(v),
@@ -555,15 +542,6 @@ impl WGPURenderTarget {
             depth_ops: Some(ops),
             stencil_ops: None,
         });
-        let tail_inner = self.get_tail_mut();
-        tail_inner.depth_attachment = Some(RenderPassDepthStencilAttachment {
-            view,
-            depth_ops: Some(Operations {
-                load: LoadOp::Load,
-                store: true,
-            }),
-            stencil_ops: None,
-        })
     }
 
     pub fn set_render_target(
@@ -571,7 +549,7 @@ impl WGPURenderTarget {
         texture_view: &TextureView,
         color: Option<crate::types::Color>,
     ) {
-        let inner = self.get_mut();
+        let inner = self.get();
         let ops = Self::map_ops(color);
         if inner.color_attachments.len() == 0 {
             inner.color_attachments.push(RenderPassColorAttachment {
@@ -586,50 +564,25 @@ impl WGPURenderTarget {
                 ops,
             }
         }
-        let default_ops = Operations {
-            load: LoadOp::Load,
-            store: true,
-        };
-        let tail_inner = self.get_tail_mut();
-        if tail_inner.color_attachments.len() == 0 {
-            tail_inner
-                .color_attachments
-                .push(RenderPassColorAttachment {
-                    view: texture_view,
-                    resolve_target: None,
-                    ops: default_ops,
-                })
-        } else {
-            tail_inner.color_attachments[0] = RenderPassColorAttachment {
-                view: texture_view,
-                resolve_target: None,
-                ops: default_ops,
-            }
-        }
+    }
+
+    pub fn add_render_target(
+        &mut self,
+        texture_view: &TextureView,
+        color: Option<crate::types::Color>,
+    ) {
+        let inner = self.get();
+        let ops = Self::map_ops(color);
+        inner.color_attachments.push(RenderPassColorAttachment {
+            view: texture_view,
+            resolve_target: None,
+            ops,
+        })
     }
 }
 
 impl Drop for WGPURenderTarget {
     fn drop(&mut self) {}
-}
-
-#[derive(Debug)]
-pub struct PassEncoder<'a> {
-    renderer: &'a mut WGPURenderer,
-    render_target: &'a mut WGPURenderTarget,
-}
-
-impl<'a> PassEncoder<'a> {
-    pub fn new_pass<'b>(&'b mut self) -> RenderPass<'b> {
-        let encoder = self.renderer.encoder.as_mut().unwrap();
-        encoder.begin_render_pass(self.render_target.desc())
-    }
-    pub fn encoder(&self) -> &wgpu::CommandEncoder {
-        self.renderer.encoder()
-    }
-    pub fn encoder_mut(&mut self) -> &mut wgpu::CommandEncoder {
-        self.renderer.encoder_mut()
-    }
 }
 
 impl WGPURenderer {
@@ -643,7 +596,6 @@ impl WGPURenderer {
             inner: gpu,
             encoder: Some(encoder),
             command_buffers: Vec::new(),
-            first_call: true,
         }
     }
     pub fn resource(&self) -> Arc<WGPUResource> {
@@ -670,19 +622,9 @@ impl WGPURenderer {
 }
 
 impl WGPURenderer {
-    pub fn begin<'a>(
-        &'a mut self,
-        render_target: &'a mut WGPURenderTarget,
-    ) -> Option<PassEncoder<'a>> {
-        if self.first_call {
-            render_target.reset();
-            self.first_call = false;
-        }
-
-        Some(PassEncoder {
-            renderer: self,
-            render_target,
-        })
+    pub fn new_pass<'b>(&'b mut self, target: &'b WGPURenderTarget) -> RenderPass<'b> {
+        let encoder = self.encoder.as_mut().unwrap();
+        encoder.begin_render_pass(target.desc())
     }
 }
 
@@ -776,12 +718,14 @@ pub struct PipelineReflector<'a> {
     device: &'a Device,
     label: Option<&'static str>,
     vs: Option<ShaderModule>,
-    fs: Option<(ShaderModule, FsTarget)>,
+    fs: Option<ShaderModule>,
+    fs_target: Option<FsTarget>,
     cs: Option<ShaderModule>,
     vertex_attrs: BTreeMap<Position, VertexFormat>,
     bind_group_layout_entries: BTreeMap<Position, BindGroupLayoutEntry>,
     depth: Option<DepthStencilState>,
     err: Option<anyhow::Error>,
+    primitive: PrimitiveStateDescriptor,
 }
 
 fn make_reflection(shader: &ShaderModuleDescriptor) -> SpirvBinary {
@@ -922,11 +866,13 @@ impl<'a> PipelineReflector<'a> {
             device,
             vs: None,
             fs: None,
+            fs_target: None,
             cs: None,
             vertex_attrs: BTreeMap::new(),
             bind_group_layout_entries: BTreeMap::new(),
             depth: None,
             err: None,
+            primitive: PrimitiveStateDescriptor::default(),
         }
     }
 
@@ -1079,9 +1025,9 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
-    pub fn add_fs(mut self, fs: ShaderModuleDescriptor, fs_target: FsTarget) -> Self {
+    pub fn add_fs(mut self, fs: ShaderModuleDescriptor) -> Self {
         let fs_ref = make_reflection(&fs);
-        self.fs = Some((self.device.create_shader_module(fs), fs_target));
+        self.fs = Some(self.device.create_shader_module(fs));
         let entry = ReflectConfig::new()
             .spv(fs_ref)
             .ref_all_rscs(false)
@@ -1093,12 +1039,22 @@ impl<'a> PipelineReflector<'a> {
         self
     }
 
+    pub fn add_fs_target(mut self, fs_target: FsTarget) -> Self {
+        self.fs_target = Some(fs_target);
+        self
+    }
+
     pub fn with_depth(mut self, depth: DepthStencilState) -> Self {
         self.depth = Some(depth);
         self
     }
 
-    pub fn build(self, primitive: PrimitiveStateDescriptor) -> anyhow::Result<PipelinePass> {
+    pub fn with_primitive(mut self, primitive: PrimitiveStateDescriptor) -> Self {
+        self.primitive = primitive;
+        self
+    }
+
+    pub fn build(self) -> anyhow::Result<PipelinePass> {
         if let Some(err) = self.err {
             return Err(err);
         }
@@ -1185,7 +1141,7 @@ impl<'a> PipelineReflector<'a> {
         if self.depth.is_some() {
             log::info!("{:?} init with depth", label);
         }
-        let primitive = primitive.into();
+        let primitive = self.primitive.into();
 
         let mut pipeline_desc = RenderPipelineDescriptor {
             label,
@@ -1204,9 +1160,9 @@ impl<'a> PipelineReflector<'a> {
 
         if let Some(fs) = &self.fs {
             pipeline_desc.fragment = Some(FragmentState {
-                module: &fs.0,
+                module: &fs,
                 entry_point: "main",
-                targets: &fs.1.states,
+                targets: &self.fs_target.as_ref().unwrap().states,
             })
         }
 

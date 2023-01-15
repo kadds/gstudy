@@ -352,6 +352,7 @@ impl<'a> VertexDataGenerator for LazyVertexDataGenerator<'a> {
 }
 
 impl MaterialRenderer for BasicMaterialHardwareRenderer {
+
     fn new_frame(&mut self, gpu: &WGPUResource) {}
     fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera) {
         let inner = self.inner.get_or_insert_with(|| {
@@ -539,6 +540,9 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
         let shader_id = material.face().shader_id();
 
         (material.id().id() as u64) | (shader_id << 48)
+    }
+
+    fn setup(&mut self, g: &mut crate::graph::rdg::RenderGraphBuilder) {
     }
 }
 
