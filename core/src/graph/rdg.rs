@@ -105,6 +105,9 @@ impl RenderGraph {
                 post_f(node);
             }
         }
+        for (id, res) in &self.registry.single_map {
+            backend.remove_resource(res.clone())
+        }
         drop(backend);
 
         self.registry.single_map.clear();

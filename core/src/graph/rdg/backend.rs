@@ -142,6 +142,10 @@ impl GraphBackend {
         }
     }
 
+    pub fn remove_resource(&self, res: ResourceRef) {
+        self.gpu.context().deregister(res);
+    }
+
     pub fn begin_thread(&self) -> GraphEncoder {
         let w = self
             .gpu
