@@ -272,7 +272,6 @@ impl EventProcessor for DefaultProcessor {
             core::event::Event::CustomEvent(ev) => match ev {
                 core::event::CustomEvent::Loaded(scene) => {
                     let scene = inner.resource_manager.take(*scene);
-                    let mut inner = self.inner.borrow_mut();
                     inner.scene = scene;
                     let cam = inner.ui_camera.clone();
                     inner.scene.set_ui_camera(cam);

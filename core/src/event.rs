@@ -63,13 +63,13 @@ pub enum MouseButton {
 
 impl MouseButton {
     pub fn is_left(&self) -> bool {
-        if let Left = self {
+        if let MouseButton::Left = self {
             return true;
         }
         false
     }
     pub fn is_right(&self) -> bool {
-        if let Right = self {
+        if let MouseButton::Right = self {
             return true;
         }
         false

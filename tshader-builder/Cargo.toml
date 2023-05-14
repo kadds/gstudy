@@ -1,0 +1,22 @@
+[package]
+name = "tshader-builder"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+bincode = "2.0.0-rc.2"
+toml = "0.7"
+serde = "1.0"
+serde_derive = "1.0"
+tshader = {path = "../tshader"}
+naga = "0.11"
+nom = "7"
+unicode-ident = "1"
+strum = { version = "0.24", features = ["derive", "phf"] }
+phf = { version = "0.11", features = ["macros"] }
+petgraph = "0.6.2"
+lazy_static = "1.4.0"
+rand = "0.8.5"

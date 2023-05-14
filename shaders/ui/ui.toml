@@ -1,0 +1,4 @@
+[pass-0]
+source = "ui.wgsl"
+camera = "d2_screen"
+

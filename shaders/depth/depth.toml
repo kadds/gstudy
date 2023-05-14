@@ -1,0 +1,10 @@
+[pass-0]
+name = "depth"
+source = "depth.wgsl"
+binding = ["pre_camera"]
+camera = "d3"
+
+[pass-0.variants.unit]
+
+[pass-0.variants]
+excludes = []

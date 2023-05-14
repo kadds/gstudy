@@ -5,6 +5,7 @@ use crate::scene::Transform;
 mod sg;
 
 pub type NodeId = u64;
+type Graph<P> = petgraph::graph::DiGraph<Node<P>, (), u32>;
 
 pub struct SceneGraph<P> {
     root: NodeId,

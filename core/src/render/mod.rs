@@ -396,7 +396,7 @@ impl ModuleRenderer for HardwareRenderer {
         let mut encoder = backend.begin_thread();
 
         for (layer, objects) in scene.layers() {
-            let global_uniform = if *layer <= LAYER_UI {
+            let global_uniform = if *layer >= LAYER_UI {
                 &inner.ui.buffer
             } else {
                 &inner.main.buffer

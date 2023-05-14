@@ -1,0 +1,13 @@
+[package]
+name = "tshader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bincode = "2.0.0-rc.2"
+anyhow = "1.0.57"
+wgpu-types = "0.14"
+num_enum = "0.5.7"
+lru = "0.10.0"
