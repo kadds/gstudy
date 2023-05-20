@@ -3,15 +3,14 @@ name = "basic-forward"
 source = "forward.wgsl"
 binding = ["pre_camera"]
 camera = "d3"
-
-[pass-0.variants.unit]
-t = "TEXTURE_COLOR"
-n = "NORMAL_TEX"
-p = "HEIGHT_TEX"
-e = "EMISSION_TEX"
-c = "VERTEX_COLOR"
-a = "ALPHA_TEST"
+shaders = ["vs", "fs"]
 
 [pass-0.variants]
 excludes = []
-exclusives = ["tc"]
+exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"]
+unit = ["TEXTURE_COLOR", "NORMAL_TEX", "HEIGHT_TEX", "EMISSION_TEX", "VERTEX_COLOR", "ALPHA_TEST"]
+
+[tech]
+author="kadds"
+name="basic_forward"
+

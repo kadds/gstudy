@@ -10,6 +10,7 @@ use crate::{
     backends::wgpu_backend::{self, WGPURenderTarget, WGPURenderer, WGPUResource},
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
     material::{basic::BasicMaterialFace, egui::EguiMaterialFace, MaterialFace, MaterialId},
+    ps::{DepthDescriptor, PrimitiveStateDescriptor},
     scene::{Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
     util::any_as_u8_slice,
@@ -17,7 +18,7 @@ use crate::{
 
 use self::material::{
     egui::{EguiMaterialHardwareRenderer, EguiMaterialRendererFactory},
-    HardwareMaterialShaderCache, MaterialRendererFactory, MaterialResourceId,
+    MaterialRendererFactory, MaterialResourceId,
 };
 use self::material::{MaterialRenderContext, MaterialRenderer};
 
@@ -70,7 +71,7 @@ struct DrawCommands {
     constant_buffer_size: u16,
     clips: Vec<Rectu>,
     bind_group_count: u8,
-    pipelines: Vec<Arc<wgpu::RenderPipeline>>,
+    pipelines: Vec<Arc<Pipeline>>,
     global_bind_group: u32,
 }
 
@@ -126,7 +127,7 @@ impl<'a> DrawCommandBuilder<'a> {
         self
     }
 
-    pub fn with_pipeline(mut self, pipeline: Arc<wgpu::RenderPipeline>) -> Self {
+    pub fn with_pipeline(mut self, pipeline: Arc<Pipeline>) -> Self {
         let offset = self.inner.pipelines.len() as u32;
         self.inner.pipelines.push(pipeline);
         self.command.as_mut().unwrap().pipeline = offset;
@@ -186,7 +187,7 @@ impl DrawCommands {
         }
     }
 
-    fn push_cached_pipeline(&mut self, pipeline: Arc<wgpu::RenderPipeline>) -> u32 {
+    fn push_cached_pipeline(&mut self, pipeline: Arc<Pipeline>) -> u32 {
         let offset = self.pipelines.len() as u32;
         self.pipelines.push(pipeline);
         offset
@@ -208,7 +209,7 @@ impl DrawCommands {
         }
     }
 
-    fn get_pipeline(&self, command: &DrawCommand) -> &wgpu::RenderPipeline {
+    fn get_pipeline(&self, command: &DrawCommand) -> &Pipeline {
         &self.pipelines[command.pipeline as usize]
     }
 
@@ -264,14 +265,14 @@ impl GlobalUniform {
 }
 
 struct HardwareRendererInner {
-    main: GlobalUniform,
-    ui: GlobalUniform,
+    main_camera: GlobalUniform,
+    ui_camera: GlobalUniform,
 }
 
 pub struct HardwareRenderer {
     material_renderer_factory: HashMap<TypeId, Box<dyn MaterialRendererFactory>>,
     material_renderers: HashMap<PassIdent, Arc<Mutex<dyn MaterialRenderer>>>,
-    cache: HardwareMaterialShaderCache,
+    shader_loader: tshader::Loader,
     inner: Option<HardwareRendererInner>,
 }
 
@@ -285,11 +286,12 @@ impl HardwareRenderer {
             TypeId::of::<EguiMaterialFace>(),
             Box::new(EguiMaterialRendererFactory::default()),
         );
+        let shader_loader = tshader::Loader::new("./shaders/desc.toml".into()).unwrap();
 
         Self {
             material_renderer_factory,
             material_renderers,
-            cache: HardwareMaterialShaderCache::default(),
+            shader_loader,
             inner: None,
         }
     }
@@ -324,7 +326,10 @@ impl ModuleRenderer for HardwareRenderer {
                 &bind_layout,
                 std::mem::size_of::<GlobalUniform2d>() as u32,
             );
-            HardwareRendererInner { main, ui }
+            HardwareRendererInner {
+                main_camera: main,
+                ui_camera: ui,
+            }
         });
 
         self.material_renderers.clear();
@@ -347,8 +352,10 @@ impl ModuleRenderer for HardwareRenderer {
                             .material_renderer_factory
                             .get(&last_material_id)
                             .unwrap();
-                        self.material_renderers
-                            .insert(ident, f.setup(ident, &mats, &gpu, g, &mut self.cache));
+                        self.material_renderers.insert(
+                            ident,
+                            f.setup(ident, &mats, &gpu, g, &mut self.shader_loader),
+                        );
                     }
                     // new material face
                     last_material_id = id;
@@ -362,8 +369,10 @@ impl ModuleRenderer for HardwareRenderer {
                     .material_renderer_factory
                     .get(&last_material_id)
                     .unwrap();
-                self.material_renderers
-                    .insert(ident, f.setup(ident, &mats, &gpu, g, &mut self.cache));
+                self.material_renderers.insert(
+                    ident,
+                    f.setup(ident, &mats, &gpu, g, &mut self.shader_loader),
+                );
             }
         }
     }
@@ -379,7 +388,7 @@ impl ModuleRenderer for HardwareRenderer {
             let data = GlobalUniform3d { mat: vp };
             p.gpu
                 .queue()
-                .write_buffer(&inner.main.buffer, 0, any_as_u8_slice(&data));
+                .write_buffer(&inner.main_camera.buffer, 0, any_as_u8_slice(&data));
         }
         if let Some(camera) = scene.ui_camera() {
             let size = camera.width_height();
@@ -387,7 +396,7 @@ impl ModuleRenderer for HardwareRenderer {
             let data = GlobalUniform2d { size };
             p.gpu
                 .queue()
-                .write_buffer(&inner.ui.buffer, 0, any_as_u8_slice(&data));
+                .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
         }
 
         let g = p.g;
@@ -396,10 +405,10 @@ impl ModuleRenderer for HardwareRenderer {
         let mut encoder = backend.begin_thread();
 
         for (layer, objects) in scene.layers() {
-            let global_uniform = if *layer >= LAYER_UI {
-                &inner.ui.buffer
+            let camera_uniform = if *layer >= LAYER_UI {
+                &inner.ui_camera.buffer
             } else {
-                &inner.main.buffer
+                &inner.main_camera.buffer
             };
 
             for (skey, mat) in &objects.sorted_objects {
@@ -411,8 +420,7 @@ impl ModuleRenderer for HardwareRenderer {
                 let mut ctx = MaterialRenderContext {
                     gpu: p.gpu.as_ref(),
                     scene: &scene,
-                    cache: &self.cache,
-                    global_uniform: global_uniform,
+                    camera_uniform,
                 };
                 let r = self.material_renderers.get(&ident).unwrap();
                 let mut r = r.lock().unwrap();
@@ -425,4 +433,288 @@ impl ModuleRenderer for HardwareRenderer {
     }
 
     fn stop(&mut self) {}
+}
+
+#[derive(Debug)]
+enum Pipeline {
+    Render(wgpu::RenderPipeline),
+    Compute(wgpu::ComputePipeline),
+}
+
+impl Pipeline {
+    pub fn render(&self) -> &wgpu::RenderPipeline {
+        match self {
+            Pipeline::Render(r) => r,
+            _ => panic!("unsupported pipeline type"),
+        }
+    }
+    pub fn get_bind_group_layout(&self, index: u32) -> wgpu::BindGroupLayout {
+        match self {
+            Pipeline::Render(r) => r.get_bind_group_layout(index),
+            Pipeline::Compute(c) => c.get_bind_group_layout(index),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PipelinePassResource {
+    inner: Arc<Vec<tshader::Pass>>,
+    pass: Vec<Arc<Pipeline>>,
+}
+
+struct ColorTargetBuilder {
+    target: wgpu::ColorTargetState,
+}
+
+impl ColorTargetBuilder {
+    pub fn new(format: wgpu::TextureFormat) -> Self {
+        Self {
+            target: wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::all(),
+            },
+        }
+    }
+
+    pub fn build(self) -> wgpu::ColorTargetState {
+        self.target
+    }
+
+    pub fn set_append_blender(mut self) -> Self {
+        self.target.blend = Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::OneMinusDstAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        });
+        self
+    }
+
+    pub fn set_default_blender(mut self) -> Self {
+        self.target.blend = Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::Zero,
+                operation: wgpu::BlendOperation::Add,
+            },
+        });
+        self
+    }
+}
+
+pub struct RenderDescriptorObject {
+    depth: Option<wgpu::DepthStencilState>,
+    primitive: wgpu::PrimitiveState,
+    multi_sample: wgpu::MultisampleState,
+    color_targets: Vec<Option<wgpu::ColorTargetState>>,
+}
+
+impl RenderDescriptorObject {
+    pub fn new() -> Self {
+        Self {
+            depth: None,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            multi_sample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            color_targets: vec![],
+        }
+    }
+
+    pub fn add_target(mut self, target: wgpu::ColorTargetState) -> Self {
+        self.color_targets.push(Some(target));
+        self
+    }
+
+    pub fn add_empty_target(mut self) -> Self {
+        self.color_targets.push(None);
+        self
+    }
+
+    pub fn set_depth<F: FnOnce(&mut wgpu::DepthStencilState)>(
+        mut self,
+        format: wgpu::TextureFormat,
+        f: F,
+    ) -> Self {
+        let mut depth = wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Always,
+            stencil: wgpu::StencilState {
+                front: wgpu::StencilFaceState::default(),
+                back: wgpu::StencilFaceState::default(),
+                read_mask: 0x0,
+                write_mask: 0x0,
+            },
+            bias: wgpu::DepthBiasState::default(),
+        };
+        f(&mut depth);
+        self.depth = Some(depth);
+        self
+    }
+
+    pub fn set_primitive<F: FnOnce(&mut wgpu::PrimitiveState)>(mut self, f: F) -> Self {
+        f(&mut self.primitive);
+        self
+    }
+}
+
+fn resolve_single_pass(
+    gpu: &WGPUResource,
+    pass: &tshader::Pass,
+    ins: &RenderDescriptorObject,
+) -> Pipeline {
+    let mut layouts = Vec::new();
+
+    {
+        let mut layout_entries = Vec::new();
+        let mut current = (u32::MAX, u32::MAX);
+        for (pos, entry) in &pass.bind_layout {
+            if current.0 != pos.group {
+                if !layout_entries.is_empty() {
+                    let layout =
+                        gpu.device()
+                            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                                label: Some(&pass.name),
+                                entries: &layout_entries,
+                            });
+                    layouts.push(layout);
+                    layout_entries.clear();
+                }
+            }
+            current = (pos.group, pos.binding);
+            layout_entries.push(entry.clone());
+        }
+        if !layout_entries.is_empty() {
+            let layout = gpu
+                .device()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some(&pass.name),
+                    entries: &layout_entries,
+                });
+            layouts.push(layout);
+        }
+    }
+
+    let mut ref_layouts = Vec::new();
+    for layout in &layouts {
+        ref_layouts.push(layout);
+    }
+    let pipeline_layout = gpu
+        .device()
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&pass.name),
+            bind_group_layouts: &ref_layouts,
+            push_constant_ranges: &[],
+        });
+
+    if let Some(cs) = &pass.cs {
+        let desc = wgpu::ComputePipelineDescriptor {
+            label: Some(&pass.name),
+            layout: Some(&pipeline_layout),
+            module: &cs.device_module,
+            entry_point: "cs_main",
+        };
+        let pipeline = gpu.device().create_compute_pipeline(&desc);
+        Pipeline::Compute(pipeline)
+    } else {
+        // build vertex buffer layout firstly
+        let mut vertex_buffer_layouts = Vec::new();
+        let mut vertex_attrs = Vec::new();
+        {
+            let mut ranges_size = Vec::new();
+            let mut current = (0, 0);
+            let mut offset = 0;
+
+            for (pos, format) in &pass.input_layout {
+                if current.0 != pos.group {
+                    if current.1 < vertex_attrs.len() {
+                        ranges_size.push((current.1..vertex_attrs.len(), offset));
+                    }
+                    offset = 0;
+                    current = (pos.group, vertex_attrs.len());
+                }
+                vertex_attrs.push(wgpu::VertexAttribute {
+                    format: format.clone(),
+                    offset,
+                    shader_location: pos.binding,
+                });
+                offset += format.size();
+            }
+            if current.1 < vertex_attrs.len() {
+                ranges_size.push((current.1..vertex_attrs.len(), offset));
+            }
+            for (range, size) in ranges_size {
+                vertex_buffer_layouts.push(wgpu::VertexBufferLayout {
+                    array_stride: size as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attrs[range],
+                });
+            }
+        }
+
+        let mut desc = wgpu::RenderPipelineDescriptor {
+            label: Some(&pass.name),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &pass.vs.as_ref().unwrap().device_module,
+                entry_point: "vs_main",
+                buffers: &vertex_buffer_layouts,
+            },
+            primitive: ins.primitive,
+            depth_stencil: ins.depth.clone(),
+            multisample: ins.multi_sample,
+            fragment: None,
+            multiview: None,
+        };
+        if let Some(fs) = &pass.fs {
+            desc.fragment = Some(wgpu::FragmentState {
+                module: &fs.device_module,
+                entry_point: "fs_main",
+                targets: &ins.color_targets,
+            })
+        }
+        let pipeline = gpu.device().create_render_pipeline(&desc);
+        Pipeline::Render(pipeline)
+    }
+}
+
+pub fn resolve_pipeline(
+    gpu: &WGPUResource,
+    template: Arc<Vec<tshader::Pass>>,
+    ins: RenderDescriptorObject,
+) -> PipelinePassResource {
+    let mut desc = PipelinePassResource {
+        inner: template.clone(),
+        pass: vec![],
+    };
+
+    for pass in template.iter() {
+        let pipeline = resolve_single_pass(gpu, &pass, &ins);
+        desc.pass.push(Arc::new(pipeline));
+    }
+
+    desc
 }

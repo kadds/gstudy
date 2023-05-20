@@ -148,35 +148,6 @@ fn zip_basic_input(face: &BasicMaterialFace, mesh: &Mesh) -> Vec<u8> {
     ret
 }
 
-macro_rules! include_basic_shader {
-    ($name: tt) => {
-        (
-            include_bytes!(concat!("../../compile_shaders/basic/", $name, ".vert")),
-            include_bytes!(concat!("../../compile_shaders/basic/", $name, ".frag")),
-        )
-    };
-}
-
-pub fn forward_shader_source(
-    shader: BasicMaterialShader,
-    alpha_test: Option<f32>,
-) -> (&'static [u8], &'static [u8]) {
-    if alpha_test.is_none() {
-        match shader {
-            BasicMaterialShader::None => include_basic_shader!("forward"),
-            BasicMaterialShader::Color => include_basic_shader!("forward_c"),
-            BasicMaterialShader::Texture => include_basic_shader!("forward_t"),
-            BasicMaterialShader::ColorTexture => include_basic_shader!("forward_ct"),
-        }
-    } else {
-        match shader {
-            BasicMaterialShader::None => include_basic_shader!("forward_a"),
-            BasicMaterialShader::Color => include_basic_shader!("forward_ca"),
-            BasicMaterialShader::Texture => include_basic_shader!("forward_ta"),
-            BasicMaterialShader::ColorTexture => include_basic_shader!("forward_cta"),
-        }
-    }
-}
 
 struct MaterialGpuResource {
     pso: PipelineStateObject,

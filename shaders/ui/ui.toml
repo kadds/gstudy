@@ -1,4 +1,11 @@
-[pass-0]
+[tech]
+author="kadds"
+
+[[pass]]
+index = 0
 source = "ui.wgsl"
-camera = "d2_screen"
+camera = "D2ScreenSize"
+shaders=["vs", "fs"]
+binding=[]
+
 

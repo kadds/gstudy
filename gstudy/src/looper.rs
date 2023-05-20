@@ -36,7 +36,7 @@ type WEvent<'a> = winit::event::Event<'a, Event>;
 struct LooperInner {
     renderer: HardwareRenderer,
     scene: Scene,
-    last_ui_id: Option<u64>,
+    last_ui_id: u64,
 
     gpu: Arc<WGPUResource>,
 
@@ -81,7 +81,7 @@ impl LooperInner {
             scene,
             ui_camera,
             ui,
-            last_ui_id: None,
+            last_ui_id: u64::MAX,
             main_depth_texture: None,
             size: Size::new(1u32, 1u32),
             ui_materials: Some(HashMap::new()),
@@ -101,6 +101,12 @@ impl LooperInner {
     }
 
     fn build_ui_objects(&mut self) {
+        if let Some(obj) = self.scene.get_object_mut(self.last_ui_id) {
+
+        } else {
+
+        }
+
         self.scene.clear_layer_objects(LAYER_UI);
 
         let mut ui_materials = self.ui_materials.take().unwrap();

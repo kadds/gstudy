@@ -90,6 +90,7 @@ impl WGPUResource {
         let c = Arc::new(cp);
         let texture = self.context.register_surface_texture(c.clone());
 
+
         Ok(WindowSurfaceFrame {
             texture: Some(texture),
             s: Some(c),

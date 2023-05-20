@@ -1,0 +1,4 @@
+[map]
+basic_forward = "./basic/forward.toml"
+depth = "./depth/depth.toml"
+egui = "./ui/ui.toml"

@@ -136,6 +136,10 @@ impl Scene {
         self.objects.get(&id)
     }
 
+    pub fn get_object_mut(&mut self, id: u64) -> Option<&mut Object> {
+        self.objects.get_mut(&id)
+    }
+
     pub fn layers(&self) -> impl Iterator<Item = (&u64, &LayerObjects)> {
         self.layers.iter()
     }

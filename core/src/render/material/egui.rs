@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt, StagingBelt},
-    BindGroupDescriptor,
 };
 
 use crate::{
@@ -15,28 +14,16 @@ use crate::{
         ResourceRegistry,
     },
     material::{egui::EguiMaterialFace, Material, MaterialId},
-    ps::{
-        BlendState, CompareFunction, CullFace, DepthDescriptor, DepthStencilDescriptor,
-        PrimitiveStateDescriptor,
+    render::{
+        resolve_pipeline, ColorTargetBuilder, DrawCommand, DrawCommandBuilder, DrawCommands,
+        PassIdent, Pipeline, PipelinePassResource, RenderDescriptorObject,
     },
-    render::{DrawCommand, DrawCommandBuilder, DrawCommands, PassIdent},
     scene::Camera,
     types::Vec2f,
     util::any_as_u8_slice,
 };
 
-use super::{
-    HardwareMaterialShaderCache, MaterialRenderContext, MaterialRenderer, MaterialRendererFactory,
-};
-
-macro_rules! include_egui_shader {
-    ($name: tt) => {
-        (
-            include_bytes!(concat!("../../compile_shaders/ui/", $name, ".vert")),
-            include_bytes!(concat!("../../compile_shaders/ui/", $name, ".frag")),
-        )
-    };
-}
+use super::{MaterialRenderContext, MaterialRenderer, MaterialRendererFactory};
 
 struct ScreeSize {
     wh: Vec2f,
@@ -46,6 +33,8 @@ struct EguiMaterialHardwareRendererInner {
     main_buffers: GpuInputMainBuffers,
     sampler: wgpu::Sampler,
     commands: DrawCommands,
+    pipeline: PipelinePassResource,
+    tech: Arc<tshader::ShaderTech>,
 }
 
 pub struct EguiMaterialHardwareRenderer {
@@ -68,7 +57,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         let inner = &mut self.inner;
         let mut last_pipeline = u32::MAX;
         let commands = inner.commands.commands();
-        pass.set_bind_group(0, inner.commands.get_global_bind_group().unwrap(), &[0]);
+        pass.set_bind_group(0, inner.commands.get_global_bind_group().unwrap(), &[]);
 
         for command in commands {
             if let Some(clip) = inner.commands.get_clip(&command) {
@@ -76,7 +65,9 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
             }
             if last_pipeline != command.pipeline {
                 last_pipeline = command.pipeline;
-                pass.set_pipeline(inner.commands.get_pipeline(&command));
+                if let Pipeline::Render(pipeline) = inner.commands.get_pipeline(&command) {
+                    pass.set_pipeline(pipeline);
+                }
             }
 
             let mut bind_group_iter = inner.commands.get_bind_groups(&command);
@@ -120,7 +111,6 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
                 total_bytes.1 + vertices.len(),
             );
         }
-        let pipeline = ctx.cache.get("ui/ui", 0);
 
         // global bind group
         let global_bg = ctx
@@ -128,11 +118,11 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("egui"),
-                layout: &pipeline.pass[0].get_bind_group_layout(0),
+                layout: &inner.pipeline.pass[0].get_bind_group_layout(0),
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: ctx.global_uniform,
+                        buffer: ctx.camera_uniform,
                         offset: 0,
                         size: None,
                     }),
@@ -145,7 +135,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("egui"),
-                layout: &pipeline.pass[0].get_bind_group_layout(1),
+                layout: &inner.pipeline.pass[0].get_bind_group_layout(1),
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -166,7 +156,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             .make_sure(ctx.gpu, total_bytes.0 as u64, total_bytes.1 as u64);
         let pipeline_offset = inner
             .commands
-            .push_cached_pipeline(pipeline.pass[0].clone());
+            .push_cached_pipeline(inner.pipeline.pass[0].clone());
 
         // copy staging buffer
         for id in objects {
@@ -205,16 +195,38 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         material: &[&Material],
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
-        cache: &mut HardwareMaterialShaderCache,
+        shader_loader: &tshader::Loader,
     ) -> Arc<Mutex<dyn MaterialRenderer>> {
         let egui_texture = g.import_texture();
         let label = Some("egui");
+        let tech = shader_loader.load_tech("egui").unwrap();
+        let template = tech.register_variant(gpu.device(), &[]).unwrap();
+        let depth_format = wgpu::TextureFormat::Depth32Float;
+
+        let pipeline = resolve_pipeline(
+            gpu,
+            template,
+            RenderDescriptorObject::new()
+                .set_depth(depth_format, |depth: &mut _| {
+                    depth.depth_compare = wgpu::CompareFunction::LessEqual;
+                })
+                .set_primitive(|primitive: &mut _| {
+                    primitive.cull_mode = None;
+                })
+                .add_target(
+                    ColorTargetBuilder::new(gpu.surface_format())
+                        .set_append_blender()
+                        .build(),
+                ),
+        );
 
         let r = Arc::new(Mutex::new(EguiMaterialHardwareRenderer {
             inner: EguiMaterialHardwareRendererInner {
                 main_buffers: GpuInputMainBuffers::new(gpu, label),
                 sampler: gpu.new_sampler(label),
                 commands: DrawCommands::new(0, 1),
+                tech,
+                pipeline,
             },
         }));
 
@@ -225,17 +237,6 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
 
         g.add_render_pass(pass.build());
 
-        cache.resolve("ui/ui", 0, gpu, |b| {
-            let fs_target = FsTarget::new_with_blend(
-                gpu.surface_format(),
-                &BlendState::default_append_blender(),
-            );
-            b.add_fs_target(fs_target)
-                .with_depth(&DepthStencilDescriptor::default().with_depth(
-                    DepthDescriptor::default().with_compare(CompareFunction::LessEqual),
-                ))
-                .with_primitive(PrimitiveStateDescriptor::default().with_cull_face(CullFace::None))
-        });
         r
     }
 
