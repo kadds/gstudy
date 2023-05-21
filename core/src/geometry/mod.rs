@@ -1,7 +1,7 @@
 use crate::{scene::Transform, types::*, util::any_as_u8_slice_array};
 use std::{
     any::Any,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     sync::{Arc, Mutex},
 };
@@ -16,24 +16,37 @@ pub struct IntersectResult {
 }
 
 #[repr(u8)]
-#[derive(Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Eq, Ord, PartialEq, PartialOrd, Clone, Copy)]
 pub enum MeshCoordType {
-    Pos,
+    Pos2,
     Color,
     TexCoord,
     TexNormal,
     TexBump,
     TexCube,
+    ColorUint,
 }
 
-#[derive(Debug)]
-pub enum MeshCoordValue {
-    Pos(Vec<Vec2f>),
-    Color(Vec<Vec4f>),
-    TexCoord(Vec<Vec2f>),
-    TexNormal(Vec<Vec2f>),
-    TexBump(Vec<Vec2f>),
-    TexCube(Vec<Vec2f>),
+// #[derive(Debug)]
+// pub enum MeshCoordValue {
+//     Color(Vec<Vec4f>),
+//     TexCoord(Vec<Vec2f>),
+//     Pos2(Vec<Vec2f>),
+//     ColorUint(Vecuint32),
+// }
+
+impl MeshCoordType {
+    pub fn size_alignment(&self) -> (u64, u64) {
+        match self {
+            MeshCoordType::Pos2 => (8, 8),
+            MeshCoordType::Color => (16, 16),
+            MeshCoordType::TexCoord => (8, 8),
+            MeshCoordType::TexNormal => (8, 8),
+            MeshCoordType::TexBump => (8, 8),
+            MeshCoordType::TexCube => (8, 8),
+            MeshCoordType::ColorUint => (4, 4),
+        }
+    }
 }
 
 pub type MeshTransformer = Box<dyn FnMut(Vec<u8>, &Transform) -> Vec<u8> + Send + Sync>;
@@ -46,15 +59,25 @@ pub fn load_default_transformer() -> MeshTransformer {
     Box::new(default_transformer)
 }
 
+struct BytesOffset {
+    offset: u32,
+    len: u32,
+}
+
 #[derive(Default)]
 pub struct Mesh {
     pub vertices: Vec<Vec3f>,
     pub indices: Vec<u32>,
     pub clip: Option<Rectu>,
 
-    pub mesh_coord: HashMap<MeshCoordType, MeshCoordValue>,
+    mesh_coord: BTreeMap<MeshCoordType, BytesOffset>,
 
-    pub mesh_mixed: Option<(Vec<u8>, MeshTransformer)>,
+    pub row_strip_size: u32,
+    pub row_data_size: u32,
+
+    pub coord_props: Vec<u8>,
+    pub vertex_count: u32,
+    pub has_position: bool,
 }
 
 impl std::fmt::Debug for Mesh {
@@ -63,66 +86,75 @@ impl std::fmt::Debug for Mesh {
             .field("vertices", &self.vertices)
             .field("indices", &self.indices)
             .field("clip", &self.clip)
-            .field("mesh_coord", &self.mesh_coord)
             .finish()
     }
 }
 
 impl Mesh {
-    pub fn new() -> Self {
-        Self {
-            ..Default::default()
+    pub fn new(has_position: bool, props: &[MeshCoordType]) -> Self {
+        let mut mesh_coord = BTreeMap::new();
+        let mut offset = 0;
+        let mut max_alignment = 0;
+
+        for prop in props {
+            let (size, alignment) = prop.size_alignment();
+            let rest = offset % alignment;
+            if rest < size {
+                if rest != 0 {
+                    offset += alignment - rest;
+                }
+            }
+            max_alignment = max_alignment.max(alignment);
+            mesh_coord.insert(
+                *prop,
+                BytesOffset {
+                    offset: offset as u32,
+                    len: size as u32,
+                },
+            );
+            offset += size;
         }
-    }
+        if max_alignment == 0 {
+            Self {
+                row_data_size: 0,
+                row_strip_size: 0,
+                mesh_coord,
+                has_position,
+                ..Default::default()
+            }
+        } else {
+            let row_data_size = offset as u32;
 
-    pub fn set_clip(&mut self, clip: Rectu) {
-        self.clip = Some(clip);
-    }
+            let rest = offset % max_alignment;
+            if rest != 0 {
+                offset += max_alignment - rest;
+            }
+            let row_strip_size = offset as u32;
 
-    pub fn clear_clip(&mut self) {
-        self.clip = None;
+            Self {
+                row_data_size,
+                row_strip_size,
+                mesh_coord,
+                has_position,
+                ..Default::default()
+            }
+        }
     }
 
     pub fn clip(&self) -> Option<Rectu> {
         self.clip
     }
 
-    #[inline]
-    pub fn add_vertex(&mut self, vertex: Vec3f) {
-        self.vertices.push(vertex);
-    }
-
-    #[inline]
-    pub fn add_vertices(&mut self, vertices: &[Vec3f]) {
-        self.vertices.extend(vertices);
-    }
-
-    pub fn add_triangle(&mut self, v0: Vec3f, v1: Vec3f, v2: Vec3f) {
-        self.vertices.push(v0);
-        self.vertices.push(v1);
-        self.vertices.push(v2);
-    }
-
-    #[inline]
-    pub fn add_index(&mut self, index: u32) {
-        self.indices.push(index)
-    }
-
-    pub fn add_indices(&mut self, indices: &[u32]) {
-        self.indices.extend(indices)
-    }
-
-    pub fn set_mixed_mesh(&mut self, data: &[u8], transformer: MeshTransformer) {
-        self.mesh_mixed = Some((data.into(), transformer));
-        self.vertices.clear();
-    }
-
-    pub fn mixed_mesh(&self) -> &[u8] {
-        self.mesh_mixed.as_ref().map(|v| &v.0).unwrap()
-    }
-
     pub fn indices(&self) -> &[u8] {
         any_as_u8_slice_array(&self.indices)
+    }
+
+    pub fn vertices(&self) -> &[u8] {
+        any_as_u8_slice_array(&self.vertices)
+    }
+
+    pub fn vertices_props(&self) -> &[u8] {
+        &self.coord_props
     }
 
     pub fn index_count(&self) -> u32 {
@@ -136,56 +168,125 @@ impl Mesh {
         let vertices = transform.apply_batch(tmp.into_iter()).collect();
         self.vertices = vertices;
     }
+}
 
-    pub fn coord(&self, ty: MeshCoordType) -> Option<&MeshCoordValue> {
-        self.mesh_coord.get(&ty)
+pub struct MeshDataBuilder {
+    mesh: Mesh,
+    props_write_map: HashMap<MeshCoordType, u64>,
+    max_count: u64,
+    max_props_count: u64,
+}
+
+impl MeshDataBuilder {
+    pub fn add_vertex_position(&mut self, vertex: Vec3f, prop: &[u8]) {
+        self.mesh.vertices.push(vertex);
+        self.add_vertex(prop)
     }
 
-    pub fn coord_vec4f(&self, ty: MeshCoordType) -> Option<&Vec<Vec4f>> {
-        match self.mesh_coord.get(&ty)? {
-            MeshCoordValue::Color(v) => Some(v),
-            _ => None,
+    pub fn add_indices(&mut self, indices: &[u32]) {
+        self.mesh.indices.extend(indices)
+    }
+
+    pub fn add_vertex(&mut self, prop: &[u8]) {
+        assert_eq!(self.mesh.row_data_size, prop.len() as u32);
+
+        self.mesh.coord_props.extend_from_slice(prop);
+        let empty: [u64; 4] = [0, 0, 0, 0];
+        let slice = any_as_u8_slice_array(&empty);
+
+        self.mesh.coord_props.extend_from_slice(
+            &slice[..(self.mesh.row_strip_size - self.mesh.row_data_size) as usize],
+        );
+        self.max_count += 1;
+    }
+
+    pub fn add_position(&mut self, pos: &[Vec3f]) {
+        self.mesh.vertices.extend_from_slice(pos);
+        self.max_count += pos.len() as u64;
+    }
+
+    pub fn add_vertices_prop(&mut self, prop_name: MeshCoordType, prop: &[u8], strip: u32) {
+        let write_count = prop.len() as u64 / prop_name.size_alignment().0 as u64;
+        let prev_write_count = *self.props_write_map.get(&prop_name).unwrap();
+
+        let result_count = write_count + prev_write_count;
+        let result_max = self.max_props_count.max(result_count);
+
+        let target_size = (result_max * self.mesh.row_strip_size as u64) as usize;
+        if self.mesh.coord_props.len() < target_size {
+            self.mesh.coord_props.resize(target_size, 0);
+        }
+
+        let o = self.mesh.mesh_coord.get(&prop_name).unwrap();
+
+        let mut prop_offset = 0;
+        let mut beg_offset =
+            prev_write_count as usize * self.mesh.row_strip_size as usize + o.offset as usize;
+
+        while prop_offset < prop.len() {
+            let end = strip as usize + prop_offset;
+            let src_slice = &prop[prop_offset..end];
+            let end_offset = beg_offset + o.len as usize;
+            let dst_slice = &mut self.mesh.coord_props[beg_offset..end_offset];
+
+            dst_slice.copy_from_slice(src_slice);
+
+            beg_offset += self.mesh.row_strip_size as usize;
+            prop_offset += strip as usize;
+        }
+        *self.props_write_map.get_mut(&prop_name).unwrap() = result_count;
+
+        self.max_props_count = result_max;
+    }
+
+    pub fn set_raw_props(&mut self, data: &[u8]) {
+        self.mesh.coord_props.extend_from_slice(data)
+    }
+
+    pub fn set_clip(&mut self, clip: Rectu) {
+        self.mesh.clip = Some(clip);
+    }
+
+    pub fn build(mut self) -> Mesh {
+        if self.mesh.has_position {
+            assert_eq!(self.max_count, self.max_props_count);
+        }
+        self.mesh
+    }
+}
+
+pub struct MeshBuilder {
+    props: Vec<MeshCoordType>,
+    no_position: bool,
+}
+
+impl MeshBuilder {
+    pub fn new() -> Self {
+        Self {
+            props: Vec::new(),
+            no_position: false,
         }
     }
 
-    pub fn coord_vec2f(&self, ty: MeshCoordType) -> Option<&Vec<Vec2f>> {
-        match self.mesh_coord.get(&ty)? {
-            MeshCoordValue::Pos(v) => Some(v),
-            MeshCoordValue::TexCoord(v) => Some(v),
-            MeshCoordValue::TexNormal(v) => Some(v),
-            MeshCoordValue::TexBump(v) => Some(v),
-            MeshCoordValue::TexCube(v) => Some(v),
-            _ => None,
-        }
+    pub fn set_no_position(&mut self) {
+        self.no_position = true;
     }
 
-    pub fn set_coord_vec4f(&mut self, ty: MeshCoordType, data: Vec<Vec4f>) {
-        match ty {
-            MeshCoordType::Color => {
-                self.mesh_coord.insert(ty, MeshCoordValue::Color(data));
-            }
-            _ => (),
-        }
+    pub fn add_props(&mut self, props: MeshCoordType) {
+        self.props.push(props);
     }
 
-    pub fn set_coord_vec2f(&mut self, ty: MeshCoordType, data: Vec<Vec2f>) {
-        match ty {
-            MeshCoordType::Pos => {
-                self.mesh_coord.insert(ty, MeshCoordValue::Pos(data));
-            }
-            MeshCoordType::TexCoord => {
-                self.mesh_coord.insert(ty, MeshCoordValue::TexCoord(data));
-            }
-            MeshCoordType::TexNormal => {
-                self.mesh_coord.insert(ty, MeshCoordValue::TexNormal(data));
-            }
-            MeshCoordType::TexBump => {
-                self.mesh_coord.insert(ty, MeshCoordValue::TexBump(data));
-            }
-            MeshCoordType::TexCube => {
-                self.mesh_coord.insert(ty, MeshCoordValue::TexCube(data));
-            }
-            _ => (),
+    pub fn finish_props(&mut self) -> MeshDataBuilder {
+        let mut props_write_map = HashMap::new();
+        for prop in &self.props {
+            props_write_map.insert(*prop, 0);
+        }
+
+        MeshDataBuilder {
+            mesh: Mesh::new(!self.no_position, &self.props),
+            props_write_map,
+            max_count: 0,
+            max_props_count: 0,
         }
     }
 }

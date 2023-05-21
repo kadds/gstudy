@@ -8,19 +8,23 @@ use std::{
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
-    material::{egui::EguiMaterialFace, MaterialFace},
+    material::{basic::BasicMaterialFace, egui::EguiMaterialFace, MaterialFace},
     render::material::SetupResource,
     scene::{Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
     util::any_as_u8_slice,
 };
 
-use self::material::{
-    egui::EguiMaterialRendererFactory,
-    MaterialRendererFactory,
-    // basic::BasicMaterialRendererFactory,
-};
 use self::material::{MaterialRenderContext, MaterialRenderer};
+use self::{
+    common::BufferAccessor,
+    material::{
+        basic::BasicMaterialRendererFactory,
+        // basic::BasicMaterialRendererFactory,
+        egui::EguiMaterialRendererFactory,
+        MaterialRendererFactory,
+    },
+};
 
 pub struct RenderParameter<'a> {
     pub gpu: Arc<WGPUResource>,
@@ -77,24 +81,12 @@ struct DrawCommands {
 
 struct DrawCommandBuilder<'a> {
     inner: &'a mut DrawCommands,
-    command: Option<DrawCommand>,
+    command: DrawCommand,
 }
 
 impl<'a> DrawCommandBuilder<'a> {
-    pub fn draw_index(&mut self, index: Range<u64>, vertex: Range<u64>, draw_count: u32) {
-        self.command = Some(DrawCommand {
-            vertex,
-            index,
-            draw_count,
-            bind_groups: u32::MAX,
-            pipeline: u32::MAX,
-            push_constant_offset: u32::MAX,
-            clip_offset: u32::MAX,
-        })
-    }
-
     fn command_mut(&mut self) -> &mut DrawCommand {
-        self.command.as_mut().unwrap()
+        &mut self.command
     }
 
     pub fn with_clip(mut self, clip: Rectu) -> Self {
@@ -149,7 +141,7 @@ impl<'a> DrawCommandBuilder<'a> {
     }
 
     pub fn build(self) {
-        self.inner.commands.push(self.command.unwrap());
+        self.inner.commands.push(self.command);
     }
 }
 
@@ -169,10 +161,28 @@ impl DrawCommands {
         }
     }
 
-    pub fn new_command<'a>(&'a mut self) -> DrawCommandBuilder<'a> {
+    pub fn new_index_draw_command<'a>(
+        &'a mut self,
+        id: u64,
+        index: Range<u64>,
+        vertex: Range<u64>,
+        vertex_props: Range<u64>,
+        draw_count: u32,
+    ) -> DrawCommandBuilder<'a> {
+        let command = DrawCommand {
+            id,
+            vertex,
+            vertex_props,
+            index,
+            draw_count,
+            bind_groups: u32::MAX,
+            pipeline: u32::MAX,
+            push_constant_offset: u32::MAX,
+            clip_offset: u32::MAX,
+        };
         DrawCommandBuilder {
             inner: self,
-            command: None,
+            command,
         }
     }
 
@@ -222,10 +232,12 @@ impl DrawCommands {
         }
     }
 
-    pub fn draw<'a>(
+    pub fn draw<'a, B: BufferAccessor<'a>, U: BufferAccessor<'a>, G: BufferAccessor<'a>>(
         &'a mut self,
         pass: &mut wgpu::RenderPass<'a>,
-        buffers: &'a GpuInputMainBuffers,
+        index_buffer: B,
+        vertex_buffer: U,
+        vertex_props_buffer: G,
     ) {
         pass.set_bind_group(0, self.get_global_bind_group().unwrap(), &[]);
 
@@ -249,10 +261,35 @@ impl DrawCommands {
             pass.set_bind_group(1, g, &[]);
 
             pass.set_index_buffer(
-                buffers.index_buffer_slice(command.index.clone()),
+                index_buffer
+                    .buffer_slice(command.id, command.index.clone())
+                    .unwrap(),
                 wgpu::IndexFormat::Uint32,
             );
-            pass.set_vertex_buffer(0, buffers.vertex_buffer_slice(command.vertex.clone()));
+            if !command.vertex.is_empty() {
+                pass.set_vertex_buffer(
+                    0,
+                    vertex_buffer
+                        .buffer_slice(command.id, command.vertex.clone())
+                        .unwrap(),
+                );
+                if !command.vertex_props.is_empty() {
+                    pass.set_vertex_buffer(
+                        1,
+                        vertex_props_buffer
+                            .buffer_slice(command.id, command.vertex_props.clone())
+                            .unwrap(),
+                    );
+                }
+            } else {
+                pass.set_vertex_buffer(
+                    0,
+                    vertex_props_buffer
+                        .buffer_slice(command.id, command.vertex_props.clone())
+                        .unwrap(),
+                );
+            }
+
             pass.draw_indexed(0..command.draw_count, 0, 0..1);
         }
     }
@@ -268,8 +305,11 @@ impl DrawCommands {
 }
 
 struct DrawCommand {
+    id: u64,
     vertex: Range<u64>,
+    vertex_props: Range<u64>,
     index: Range<u64>,
+
     draw_count: u32,
     bind_groups: u32,
     pipeline: u32,
@@ -312,10 +352,10 @@ impl HardwareRenderer {
             Box::new(EguiMaterialRendererFactory::default()),
         );
 
-        // material_renderer_factory.insert(
-        //     TypeId::of::<BasicMaterialFace>(),
-        //     Box::new(BasicMaterialRendererFactory::default()),
-        // );
+        material_renderer_factory.insert(
+            TypeId::of::<BasicMaterialFace>(),
+            Box::new(BasicMaterialRendererFactory::default()),
+        );
         let shader_loader = tshader::Loader::new("./shaders/desc.toml".into()).unwrap();
 
         Self {
@@ -459,7 +499,7 @@ impl ModuleRenderer for HardwareRenderer {
                 let mut ctx = MaterialRenderContext {
                     gpu: p.gpu.as_ref(),
                     scene: &scene,
-                    camera_uniform,
+                    main_camera: camera_uniform,
                 };
                 let r = self.material_renderers.get(&ident).unwrap();
                 let mut r = r.lock().unwrap();
@@ -676,7 +716,7 @@ fn resolve_single_pass(
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&pass.name),
             bind_group_layouts: &ref_layouts,
-            push_constant_ranges: &[],
+            push_constant_ranges: &pass.constants,
         });
 
     if let Some(cs) = &pass.cs {

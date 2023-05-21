@@ -1,25 +1,25 @@
-use std::{any::Any, collections::HashMap, num::NonZeroU64, sync::{Mutex, Arc}};
-
-use nalgebra::Matrix4;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
-
-use crate::{
-    backends::wgpu_backend::{
-        FsTarget, GpuInputMainBuffers, GpuInputMainBuffersWithUniform, GpuInputUniformBuffers,
-        PipelineReflector, WGPUResource,
-    },
-    context::RContext,
-    geometry::{Attribute, Mesh, MeshCoordType},
-    material::{basic::*, Material, MaterialId},
-    render::{
-        common::{StaticMeshMerger, VertexDataGenerator}, RenderDescriptorObject, ColorTargetBuilder, resolve_pipeline, PipelinePassResource, DrawCommands,
-    },
-    scene::{Camera},
-    types::*,
-    util::{any_as_u8_slice, any_as_u8_slice_array}, graph::rdg::RenderPassBuilder,
+use std::{
+    num::NonZeroU64,
+    sync::{Arc, Mutex},
 };
 
-use super::{BufferCache, MaterialRenderContext, MaterialRenderer, MaterialRendererFactory};
+use nalgebra::Matrix4;
+
+use crate::{
+    backends::wgpu_backend::{GpuInputMainBuffers, GpuInputMainBuffersWithProps, WGPUResource},
+    geometry::Mesh,
+    graph::rdg::{pass::RenderPassExecutor, RenderPassBuilder},
+    material::{basic::*, Material, MaterialId},
+    render::{
+        common::{FramedCache, StaticMeshMerger},
+        resolve_pipeline, ColorTargetBuilder, DrawCommands, PipelinePassResource,
+        RenderDescriptorObject,
+    },
+    types::*,
+    util::{any_as_u8_slice, any_as_u8_slice_array},
+};
+
+use super::{MaterialRenderContext, MaterialRenderer, MaterialRendererFactory, SetupResource};
 
 #[repr(C)]
 struct MVP {
@@ -85,69 +85,96 @@ struct Model {
 //     ret
 // }
 
-
-struct MaterialGpuResource {
+pub struct MaterialGpuResource {
     buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    global_bind_group: Arc<wgpu::BindGroup>,
+
+    bind_group: Arc<wgpu::BindGroup>,
     template: Arc<Vec<tshader::Pass>>,
     pipeline: PipelinePassResource,
     sampler: Option<wgpu::Sampler>,
 }
 
 struct BasicMaterialHardwareRendererInner {
-    material_pipelines: HashMap<MaterialId, MaterialGpuResource>,
+    material_pipelines_cache: FramedCache<MaterialId, MaterialGpuResource>,
 
     // uniform_vp: wgpu::Buffer,
 
     // vp_bind_group: Option<wgpu::BindGroup>,
-
     static_mesh_merger: StaticMeshMerger,
-    dynamic_mesh_buffer: GpuInputMainBuffers,
-    uniform_buffer: GpuInputUniformBuffers,
+    dynamic_mesh_buffer: GpuInputMainBuffersWithProps,
 
-    bind_group_for_objects: Vec<wgpu::BindGroup>,
-
+    // bind_group_for_objects: Vec<wgpu::BindGroup>,
     tech: Arc<tshader::ShaderTech>,
-    commands: DrawCommands,
+    static_commands: DrawCommands,
+    dynamic_commands: DrawCommands,
 }
 
 pub struct BasicMaterialHardwareRenderer {
     inner: BasicMaterialHardwareRendererInner,
 }
 
+impl RenderPassExecutor for BasicMaterialHardwareRenderer {
+    fn execute<'a>(
+        &'a mut self,
+        registry: &crate::graph::rdg::ResourceRegistry,
+        backend: &crate::graph::rdg::backend::GraphBackend,
+        pass: &mut wgpu::RenderPass<'a>,
+    ) {
+        let inner = &mut self.inner;
+        inner.dynamic_commands.draw(
+            pass,
+            inner.dynamic_mesh_buffer.index(),
+            inner.dynamic_mesh_buffer.vertex(),
+            inner.dynamic_mesh_buffer.vertex_props(),
+        );
+        inner.static_commands.draw(
+            pass,
+            inner.static_mesh_merger.index(),
+            inner.static_mesh_merger.vertex(),
+            inner.static_mesh_merger.vertex_props(),
+        );
+    }
+}
+
 impl BasicMaterialHardwareRenderer {
     pub fn prepare_material_pipeline(
         &mut self,
         gpu: &WGPUResource,
+        camera: &wgpu::Buffer,
         material: &Material,
-    ) {
+    ) -> &MaterialGpuResource {
         let label = self.label();
         let inner = &mut self.inner;
 
         let mat = material.face_by::<BasicMaterialFace>();
-        let entry = inner.material_pipelines.entry(material.id());
-        let pipe = entry.or_insert_with(|| {
-            let mut variants =material.face_by::<BasicMaterialFace>().variants();
+        inner.material_pipelines_cache.get_or(material.id(), |_| {
+            let variants = material.face_by::<BasicMaterialFace>().variants();
             let template = inner.tech.register_variant(gpu.device(), variants).unwrap();
 
-            let mut obj = RenderDescriptorObject::new();
+            let mut ins = RenderDescriptorObject::new();
 
             if let Some(blend) = material.blend() {
-                obj = obj.add_target(ColorTargetBuilder::new(gpu.surface_format()).set_default_blender().build());
+                ins = ins.add_target(
+                    ColorTargetBuilder::new(gpu.surface_format())
+                        .set_default_blender()
+                        .build(),
+                );
             } else {
-                obj = obj.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
+                ins = ins.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
             }
             let depth_format = wgpu::TextureFormat::Depth32Float;
 
-            obj = obj.set_primitive(|p: &mut _| *p = *material.primitive());
-            obj = obj.set_depth(depth_format, |depth: &mut _| {depth.depth_compare = wgpu::CompareFunction::Less;
+            ins = ins.set_primitive(|p: &mut _| *p = *material.primitive());
+            ins = ins.set_depth(depth_format, |depth: &mut _| {
+                depth.depth_compare = wgpu::CompareFunction::Less;
                 depth.depth_write_enabled = !material.is_transparent();
-             });
+            });
 
-            let pipeline = resolve_pipeline(gpu, template, obj);
+            let pipeline = resolve_pipeline(gpu, template.clone(), ins);
 
-
-            let buf = if let Some(alpha) = material.alpha_test() {
+            // material uniform buffer
+            let material_uniform = if let Some(alpha) = material.alpha_test() {
                 let buf = gpu.new_wvp_buffer::<ConstParameterWithAlpha>(label);
                 let constp = ConstParameterWithAlpha {
                     color: mat.color(),
@@ -166,14 +193,13 @@ impl BasicMaterialHardwareRenderer {
             let mut entries = vec![wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &buf,
+                    buffer: &material_uniform,
                     offset: 0,
                     size: None,
                 }),
             }];
 
-            let sampler = if variants.iter().any(|v| v.need_sampler())
-            {
+            let sampler = if variants.iter().any(|v| v.need_sampler()) {
                 let sampler = gpu.new_sampler_linear(label);
                 Some(sampler)
             } else {
@@ -190,7 +216,7 @@ impl BasicMaterialHardwareRenderer {
                         mat.texture()
                             .as_ref()
                             .expect("texture view resource not exist")
-                            .internal_view(),
+                            .texture_view(),
                     ),
                 })
             }
@@ -201,87 +227,35 @@ impl BasicMaterialHardwareRenderer {
                 entries: &entries,
             });
 
-            MaterialGpuResource {
-                buffer: buf,
-                sampler,
-                template,
-                pipeline,
-                bind_group,
-            }
-        });
-
-        let res = gpu.context().get_resource(pipe.pso.id());
-
-        if inner.vp_bind_group.is_none() {
-            let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("basic material"),
-                layout: &res.pso_ref().bind_group_layouts[0],
+            let global_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
+                label,
+                layout: &pipeline.pass[0].get_bind_group_layout(0),
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &inner.uniform_vp,
+                        buffer: camera,
                         offset: 0,
                         size: None,
                     }),
                 }],
             });
-            inner.vp_bind_group = Some(bind_group);
-        }
+
+            MaterialGpuResource {
+                buffer: material_uniform,
+                sampler,
+                template,
+                pipeline,
+                bind_group: Arc::new(bind_group),
+                global_bind_group: Arc::new(global_bind_group),
+            }
+        })
     }
     pub fn label(&self) -> Option<&'static str> {
         Some("basic material")
     }
 }
 
-struct LazyVertexDataGenerator<'a> {
-    data: Option<Vec<u8>>,
-    mesh: &'a Mesh,
-    face: &'a BasicMaterialFace,
-}
-
-impl<'a> VertexDataGenerator for LazyVertexDataGenerator<'a> {
-    fn gen(&mut self) -> &[u8] {
-        self.data = Some(zip_basic_input(self.face, self.mesh));
-        self.data.as_ref().unwrap()
-    }
-}
-
 impl MaterialRenderer for BasicMaterialHardwareRenderer {
-    fn new_frame(&mut self, gpu: &WGPUResource) {}
-    fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera) {
-        let inner = self.inner.get_or_insert_with(|| {
-            let vp = gpu.new_wvp_buffer::<MVP>(Some("basic material"));
-            BasicMaterialHardwareRendererInner {
-                pipeline_pass: HashMap::new(),
-                uniform_vp: vp,
-                vp_bind_group: None,
-                static_mesh_merger: StaticMeshMerger::new(Some(
-                    "static basic material input buffer",
-                )),
-                dynamic_mesh_buffer: GpuInputMainBuffers::new(
-                    gpu,
-                    Some("basic material input buffer"),
-                ),
-                uniform_buffer: GpuInputUniformBuffers::new(
-                    gpu,
-                    Some("basic material uniform buffer"),
-                ),
-                bind_group_for_objects: Vec::new(),
-            }
-        });
-
-        inner.uniform_buffer.finish();
-        inner.uniform_buffer.recall();
-
-        inner.dynamic_mesh_buffer.finish();
-        inner.dynamic_mesh_buffer.recall();
-
-        let wvp_data = WVP { mat: camera.vp() };
-
-        gpu.queue()
-            .write_buffer(&inner.uniform_vp, 0, any_as_u8_slice(&wvp_data));
-    }
-
     fn render_material<'a>(
         &mut self,
         ctx: &mut MaterialRenderContext<'a>,
@@ -289,142 +263,79 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
         material: &Material,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let face = material.face_by::<BasicMaterialFace>();
         let gpu = ctx.gpu;
-        let label = self.label();
 
-        self.prepare_material_pipeline(gpu, material);
+        let mgr = self.prepare_material_pipeline(gpu, ctx.main_camera, material);
+        let pipeline = mgr.pipeline.pass[0].clone();
+        let bind_groups = &[mgr.global_bind_group.clone(), mgr.bind_group.clone()];
 
         let inner = &mut self.inner;
-        let mut mgr = inner.material_pipelines.get(&material.id()).unwrap();
+        inner.dynamic_commands.clear();
+        inner.static_commands.clear();
+        inner.dynamic_mesh_buffer.recall();
 
         // prepare dynamic buffer
-        let mut total_bytes = (0, 0);
-        for id in objects {
-            let object = ctx.scene.get_object(*id).unwrap();
-            let mesh = object.geometry().mesh();
-            let vertices = zip_basic_input_size(face, &mesh);
-            let indices = mesh.indices();
-            if !object.geometry().is_static() {
-                total_bytes = (
-                    total_bytes.0 + indices.len(),
-                    total_bytes.1 + vertices as usize,
-                );
-            }
-        }
-        let uniform_changed = inner.uniform_buffer.make_sure(
-            gpu,
-            objects.len() as u64,
-            std::mem::size_of::<Model>() as u64,
-        );
-
-        if uniform_changed {
-            let buffers = inner.uniform_buffer.buffers();
-            let mut new_bind_groups = Vec::new();
-
-            for buffer in buffers {
-                let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-                    label,
-                    layout: &pipe_res.pso_ref().bind_group_layouts[2],
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer,
-                            offset: 0,
-                            size: NonZeroU64::new(std::mem::size_of::<Model>() as u64),
-                        }),
-                    }],
-                });
-                new_bind_groups.push(bind_group);
-            }
-            std::mem::swap(&mut inner.bind_group_for_objects, &mut new_bind_groups);
-        }
+        let (index_bytes, vertex_bytes, vertex_props_bytes) = ctx
+            .scene
+            .calculate_bytes(objects.iter(), |obj| !obj.geometry().is_static());
 
         // copy stage buffer
-        let mut object_info = Vec::with_capacity(objects.len());
+
+        let dynamic_pipeline = inner.dynamic_commands.add_pipeline(pipeline.clone());
+        let static_pipeline = inner.static_commands.add_pipeline(pipeline);
+
+        inner
+            .dynamic_mesh_buffer
+            .prepare(gpu, index_bytes, vertex_bytes, vertex_props_bytes);
 
         for id in objects {
             let object = ctx.scene.get_object(*id).unwrap();
             let mesh = object.geometry().mesh();
-            let model = Model {
-                model: object.geometry().transform().mat().clone(),
-            };
-            let uniforms = any_as_u8_slice(&model);
-            let result = if !object.geometry().is_static() {
-                let vertices = &zip_basic_input(face, &mesh);
-                let indices = mesh.indices();
-                inner.dynamic_mesh_buffer.copy_stage(
-                    ctx.encoder.encoder_mut(),
+
+            let mut command = if !object.geometry().is_static() {
+                let (index, vertex, vertex_props) = inner.dynamic_mesh_buffer.copy_stage(
+                    encoder,
                     gpu,
-                    indices,
-                    vertices,
-                )
+                    mesh.indices(),
+                    mesh.vertices(),
+                    mesh.vertices_props(),
+                );
+                let mut cmd = inner.dynamic_commands.new_index_draw_command(
+                    *id,
+                    index,
+                    vertex,
+                    vertex_props,
+                    mesh.index_count(),
+                );
+                cmd.set_pipeline(dynamic_pipeline);
+                cmd
             } else {
-                let indices = mesh.indices();
-                inner.static_mesh_merger.write_cached(
+                let (index, vertex, vertex_props) = inner.static_mesh_merger.write_cached(
                     gpu,
                     *id,
                     object.geometry().mesh_version(),
-                    indices,
-                    LazyVertexDataGenerator {
-                        data: None,
-                        face,
-                        mesh: &mesh,
-                    },
-                )
+                    mesh.indices(),
+                    mesh.vertices(),
+                    mesh.vertices_props(),
+                );
+                let mut cmd = inner.static_commands.new_index_draw_command(
+                    *id,
+                    index,
+                    vertex,
+                    vertex_props,
+                    mesh.index_count(),
+                );
+                cmd.set_pipeline(static_pipeline);
+                cmd
             };
-            let uniform_range =
-                inner
-                    .uniform_buffer
-                    .copy_stage(ctx.encoder.encoder_mut(), gpu, uniforms);
 
-            object_info.push((result.0, result.1, uniform_range));
+            command.set_bind_groups(bind_groups);
+
+            command.build();
         }
 
-        // draw
-        let mut pass = ctx.encoder.new_pass();
-        pass.set_pipeline(&pipe_res.pso_ref().pipeline);
-        pass.set_bind_group(0, inner.vp_bind_group.as_ref().unwrap(), &[0]);
-        pass.set_bind_group(1, &mgr.bind_group, &[0]);
-
-        for (id, (index_range, vertex_range, uniform_position)) in objects.iter().zip(object_info) {
-            let object = ctx.scene.get_object(*id).unwrap();
-            let mesh = object.geometry().mesh();
-            let index_count = mesh.index_count();
-            pass.set_bind_group(
-                2,
-                &inner.bind_group_for_objects[uniform_position.index as usize],
-                &[uniform_position.range.start as u32],
-            );
-
-            if !object.geometry().is_static() {
-                pass.set_index_buffer(
-                    inner.dynamic_mesh_buffer.index_buffer_slice(index_range),
-                    wgpu::IndexFormat::Uint32,
-                );
-                pass.set_vertex_buffer(
-                    0,
-                    inner.dynamic_mesh_buffer.vertex_buffer_slice(vertex_range),
-                );
-            } else {
-                pass.set_index_buffer(
-                    inner
-                        .static_mesh_merger
-                        .index_buffer_slice(*id, index_range),
-                    wgpu::IndexFormat::Uint32,
-                );
-                pass.set_vertex_buffer(
-                    0,
-                    inner
-                        .static_mesh_merger
-                        .vertex_buffer_slice(*id, vertex_range),
-                );
-            }
-
-            pass.draw_indexed(0..index_count, 0, 0..1);
-        }
+        inner.dynamic_mesh_buffer.finish();
     }
-
 }
 
 #[derive(Default)]
@@ -437,23 +348,28 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
         material: &[&Material],
         gpu: &WGPUResource,
         g: &mut crate::graph::rdg::RenderGraphBuilder,
-        shader_loader: &tshader::Loader,
+        setup_resource: &SetupResource,
     ) -> Arc<Mutex<dyn MaterialRenderer>> {
         let label = Some("basic");
-        let tech = shader_loader.load_tech("basic_forward").unwrap();
+        let tech = setup_resource
+            .shader_loader
+            .load_tech("basic_forward")
+            .unwrap();
 
-        let r = Arc::new(Mutex::new(
-            BasicMaterialHardwareRenderer {
-                inner: BasicMaterialHardwareRendererInner {
-                    tech,
-                    material_pipelines: HashMap::new(),
-                }
-            }
-        ));
+        let r = Arc::new(Mutex::new(BasicMaterialHardwareRenderer {
+            inner: BasicMaterialHardwareRendererInner {
+                tech,
+                material_pipelines_cache: FramedCache::new(),
+                static_mesh_merger: StaticMeshMerger::new(label),
+                dynamic_mesh_buffer: GpuInputMainBuffersWithProps::new(gpu, label),
+                dynamic_commands: DrawCommands::new(0, 2),
+                static_commands: DrawCommands::new(0, 2),
+            },
+        }));
 
-        let texture = g.import_texture();
+        let texture = g.import_texture("basic render pass default");
 
-        let pass = RenderPassBuilder::new("basic render pass");
+        let mut pass = RenderPassBuilder::new("basic render pass");
         pass.bind_default_render_target();
         pass.read_texture(texture);
         pass.async_execute(r.clone());

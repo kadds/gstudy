@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
+    backends::wgpu_backend::{GpuInputMainBuffers, NullBufferAccessor, WGPUResource},
     graph::rdg::{
         backend::GraphBackend, pass::RenderPassExecutor, RenderGraphBuilder, RenderPassBuilder,
         ResourceRegistry,
@@ -44,7 +44,12 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         pass: &mut wgpu::RenderPass<'a>,
     ) {
         let inner = &mut self.inner;
-        inner.commands.draw(pass, &inner.main_buffers);
+        inner.commands.draw(
+            pass,
+            inner.main_buffers.index(),
+            inner.main_buffers.vertex(),
+            NullBufferAccessor,
+        );
     }
 }
 
@@ -63,7 +68,8 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
 
         let mat = material.face_by::<EguiMaterialFace>();
 
-        let (index_bytes, vertex_bytes) = ctx.scene.calculate_bytes(objects);
+        let (index_bytes, vertex_bytes, vertex_props_bytes) =
+            ctx.scene.calculate_bytes(objects.iter(), |_| true);
 
         // material bind group
         let bg = inner
@@ -94,7 +100,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
 
         inner
             .main_buffers
-            .prepare(ctx.gpu, index_bytes, vertex_bytes);
+            .prepare(ctx.gpu, index_bytes, vertex_props_bytes);
 
         inner
             .commands
@@ -105,15 +111,20 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
         for id in objects {
             let object = ctx.scene.get_object(*id).unwrap();
             let mesh = object.geometry().mesh();
-            let vertices = mesh.mixed_mesh();
+            let vertices = mesh.vertices_props();
             let indices = mesh.indices();
 
-            let (index, vertex) = inner
+            let (index_range, vertex_range) = inner
                 .main_buffers
                 .copy_stage(encoder, ctx.gpu, indices, vertices);
 
-            let mut command_builder = inner.commands.new_command();
-            command_builder.draw_index(index, vertex, mesh.index_count());
+            let mut command_builder = inner.commands.new_index_draw_command(
+                *id,
+                index_range,
+                vertex_range,
+                0..0,
+                mesh.index_count(),
+            );
             command_builder.set_pipeline(default_pipeline);
             command_builder.set_bind_groups(&[bg.clone()]);
 
@@ -138,7 +149,7 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
     ) -> Arc<Mutex<dyn MaterialRenderer>> {
-        let egui_texture = g.import_texture();
+        let egui_texture = g.import_texture("egui default");
         let label = Some("egui");
         let tech = setup_resource.shader_loader.load_tech("egui").unwrap();
         let template = tech.register_variant(gpu.device(), &[]).unwrap();

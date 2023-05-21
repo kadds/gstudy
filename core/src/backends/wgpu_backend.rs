@@ -8,6 +8,7 @@ use std::{
 use crate::{
     context::{RContext, RContextRef, ResourceRef},
     event::{Event, EventProcessor, EventSource, ProcessEventResult},
+    render::common::BufferAccessor,
     types::{Rectu, Size},
 };
 use anyhow::{anyhow, Result};
@@ -375,6 +376,7 @@ impl WGPUBackend {
                 wgpu::Backends::BROWSER_WEBGPU
             }
         };
+        log::info!("wgpu {:?}", bits);
 
         let instance = Instance::new(wgpu::InstanceDescriptor {
             backends: bits,
@@ -409,19 +411,27 @@ impl WGPUBackend {
                 }
             }
         };
+        let mut limits = wgpu::Limits::default();
+        limits.max_push_constant_size = 64;
+        let mut features = wgpu::Features::empty();
+        features.toggle(Features::PUSH_CONSTANTS);
 
         let device_fut = adapter.request_device(
             &DeviceDescriptor {
-                features: Features::empty(),
-                limits: Limits::default(),
+                features,
+                limits: limits,
                 label: Some("wgpu device"),
             },
             None,
         );
+
+        let mut limits2 = wgpu::Limits::downlevel_webgl2_defaults();
+
+        limits2.max_push_constant_size = 64;
         let device_fut2 = adapter.request_device(
             &DeviceDescriptor {
-                features: Features::empty(),
-                limits: Limits::downlevel_webgl2_defaults(),
+                features,
+                limits: limits2,
                 label: Some("wgpu device"),
             },
             None,
@@ -850,12 +860,26 @@ impl GpuMainBuffer {
     }
 }
 
-struct GpuInputMainBuffer {
+pub struct NullBufferAccessor;
+
+impl<'a> BufferAccessor<'a> for NullBufferAccessor {
+    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+        None
+    }
+}
+
+pub struct GpuInputMainBuffer {
     buffer: GpuMainBuffer,
     stage: StagingBelt,
     chunk_size: u64,
     alignment: u64,
     offset: u64,
+}
+
+impl<'a> BufferAccessor<'a> for &'a GpuInputMainBuffer {
+    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+        Some(self.buffer.buffer().slice(range))
+    }
 }
 
 impl GpuInputMainBuffer {
@@ -919,116 +943,107 @@ impl GpuInputMainBuffer {
     }
 }
 
-pub struct GpuInputUniformBuffers {
-    buffers: Vec<wgpu::Buffer>,
-    label: Option<&'static str>,
-    stage: StagingBelt,
+// pub struct GpuInputUniformBuffers {
+//     buffers: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
 
-    recent_usage_size: VecDeque<u64>,
-    tick: u64,
+//     label: Option<&'static str>,
+//     stage: StagingBelt,
 
-    index: u64,
-    offset: u64,
-    size: u64,
-    alignment: u64,
-}
+//     recent_usage_size: VecDeque<u64>,
+//     tick: u64,
 
-impl GpuInputUniformBuffers {
-    pub fn new(gpu: &WGPUResource, label: Option<&'static str>) -> Self {
-        let size = gpu.device.limits().max_uniform_buffer_binding_size;
-        let alignment = gpu.device.limits().min_uniform_buffer_offset_alignment;
+//     index: u64,
+//     offset: u64,
+//     size: u64,
+//     alignment: u64,
+// }
 
-        Self {
-            buffers: Vec::new(),
-            label,
-            stage: StagingBelt::new(size as u64),
+// impl GpuInputUniformBuffers {
+//     pub fn new_with(gpu: &WGPUResource, label: Option<&'static str>) -> Self {
+//         let size = gpu.device.limits().max_uniform_buffer_binding_size;
+//         let alignment = gpu.device.limits().min_uniform_buffer_offset_alignment;
 
-            recent_usage_size: VecDeque::new(),
-            tick: 0,
-            index: 0,
-            offset: 0,
+//         Self {
+//             buffers: Vec::new(),
+//             label,
+//             stage: StagingBelt::new(size as u64),
 
-            size: size as u64,
-            alignment: alignment as u64,
-        }
-    }
+//             recent_usage_size: VecDeque::new(),
+//             tick: 0,
+//             index: 0,
+//             offset: 0,
 
-    #[inline]
-    pub fn recall(&mut self) {
-        self.stage.recall();
-        self.index = 0;
-        self.offset = 0;
-    }
+//             size: size as u64,
+//             alignment: alignment as u64,
+//         }
+//     }
 
-    #[inline]
-    pub fn finish(&mut self) {
-        self.stage.finish();
-    }
+//     #[inline]
+//     pub fn recall(&mut self) {
+//         self.stage.recall();
+//         self.index = 0;
+//         self.offset = 0;
+//     }
 
-    #[inline]
-    pub fn make_sure(&mut self, gpu: &WGPUResource, n: u64, mut single_bytes: u64) -> bool {
-        single_bytes = (single_bytes + self.alignment - 1) & (self.alignment - 1).not();
+//     #[inline]
+//     pub fn finish(&mut self) {
+//         self.stage.finish();
+//     }
 
-        let elements_for_uniform_buffer = self.size / single_bytes;
-        assert!(elements_for_uniform_buffer != 0);
-        let total_buffers =
-            (n + elements_for_uniform_buffer + 1) / elements_for_uniform_buffer + (self.index + 1);
+//     #[inline]
+//     pub fn prepare(&mut self, gpu: &WGPUResource, n: u64, mut single_bytes: u64) {
+//         single_bytes = (single_bytes + self.alignment - 1) & (self.alignment - 1).not();
 
-        let mut any_changes = false;
+//         let elements_for_uniform_buffer = self.size / single_bytes;
+//         assert!(elements_for_uniform_buffer != 0);
+//         let total_buffers =
+//             (n + elements_for_uniform_buffer + 1) / elements_for_uniform_buffer + (self.index + 1);
 
-        while self.buffers.len() < total_buffers as usize {
-            let buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
-                label: self.label,
-                size: self.size,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
-                mapped_at_creation: false,
-            });
-            self.buffers.push(buffer);
-            any_changes = true;
-        }
-        any_changes
-    }
+//         while self.buffers.len() < total_buffers as usize {
+//             let buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
+//                 label: self.label,
+//                 size: self.size,
+//                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+//                 mapped_at_creation: false,
+//             });
+//             let bind_group = (self.bind_group_creator)(&buffer, gpu);
 
-    pub fn copy_stage(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        gpu: &WGPUResource,
-        data: &[u8],
-    ) -> BufferPosition {
-        let rest = self.size - self.offset;
-        let size = data.len() as u64;
+//             self.buffers.push((buffer, bind_group));
+//         }
+//     }
 
-        if rest < size {
-            self.index += 1;
-            self.offset = 0;
-        }
+//     pub fn copy_stage(
+//         &mut self,
+//         encoder: &mut wgpu::CommandEncoder,
+//         gpu: &WGPUResource,
+//         data: &[u8],
+//     ) -> BufferPosition {
+//         let rest = self.size - self.offset;
+//         let size = data.len() as u64;
 
-        let mut bytes = self.stage.write_buffer(
-            encoder,
-            &self.buffers[self.index as usize],
-            self.offset,
-            NonZeroU64::new(size).unwrap(),
-            gpu.device(),
-        );
-        bytes.copy_from_slice(data);
+//         if rest < size {
+//             self.index += 1;
+//             self.offset = 0;
+//         }
 
-        let range = self.offset..(self.offset + size);
-        self.offset = (range.end + self.alignment - 1) & (self.alignment - 1).not();
+//         let mut bytes = self.stage.write_buffer(
+//             encoder,
+//             &self.buffers[self.index as usize].0,
+//             self.offset,
+//             NonZeroU64::new(size).unwrap(),
+//             gpu.device(),
+//         );
+//         bytes.copy_from_slice(data);
 
-        BufferPosition {
-            index: self.index,
-            range,
-        }
-    }
+//         let range = self.offset..(self.offset + size);
+//         self.offset = (range.end + self.alignment - 1) & (self.alignment - 1).not();
 
-    pub fn buffer(&self, index: u64) -> &wgpu::Buffer {
-        &self.buffers[index as usize]
-    }
-
-    pub fn buffers(&self) -> &[wgpu::Buffer] {
-        &self.buffers
-    }
-}
+//         BufferPosition {
+//             index: self.index,
+//             range,
+//         }
+//     }
+// }
 
 pub struct GpuInputMainBuffers {
     index: GpuInputMainBuffer,
@@ -1070,54 +1085,39 @@ impl GpuInputMainBuffers {
         self.vertex.finish();
     }
 
-    pub fn vertex_buffer(&self) -> &wgpu::Buffer {
-        self.vertex.buffer()
+    pub fn vertex(&self) -> &GpuInputMainBuffer {
+        &self.vertex
     }
-    pub fn vertex_buffer_slice(&self, range: Range<u64>) -> wgpu::BufferSlice {
-        self.vertex.buffer().slice(range)
-    }
-    pub fn index_buffer(&self) -> &wgpu::Buffer {
-        self.index.buffer()
-    }
-    pub fn index_buffer_slice(&self, range: Range<u64>) -> wgpu::BufferSlice {
-        self.index.buffer().slice(range)
+    pub fn index(&self) -> &GpuInputMainBuffer {
+        &self.index
     }
 }
 
-pub struct GpuInputMainBuffersWithUniform {
+pub struct GpuInputMainBuffersWithProps {
     index: GpuInputMainBuffer,
     vertex: GpuInputMainBuffer,
-    uniform: GpuInputUniformBuffers,
+    vertex_props: GpuInputMainBuffer,
 }
 
-pub struct BufferPosition {
-    pub index: u64,
-    pub range: Range<u64>,
-}
-
-impl GpuInputMainBuffersWithUniform {
+impl GpuInputMainBuffersWithProps {
     pub fn new(gpu: &WGPUResource, label: Option<&'static str>) -> Self {
-        let uniform = GpuInputUniformBuffers::new(gpu, label);
-
         Self {
             index: GpuInputMainBuffer::new(gpu, label, wgpu::BufferUsages::INDEX),
             vertex: GpuInputMainBuffer::new(gpu, label, wgpu::BufferUsages::VERTEX),
-            uniform,
+            vertex_props: GpuInputMainBuffer::new(gpu, label, wgpu::BufferUsages::VERTEX),
         }
     }
 
-    pub fn make_sure(
+    pub fn prepare(
         &mut self,
         gpu: &WGPUResource,
         index_bytes: u64,
         vertex_bytes: u64,
-        n_uniform: u64,
-        single_bytes: u64,
-    ) -> bool {
+        vertex_props_bytes: u64,
+    ) {
         self.index.prepare(gpu, index_bytes);
         self.vertex.prepare(gpu, vertex_bytes);
-        let changed = self.uniform.make_sure(gpu, n_uniform, single_bytes);
-        changed
+        self.vertex_props.prepare(gpu, vertex_props_bytes);
     }
 
     pub fn copy_stage(
@@ -1126,43 +1126,116 @@ impl GpuInputMainBuffersWithUniform {
         gpu: &WGPUResource,
         indices: &[u8],
         vertices: &[u8],
-        uniforms: &[u8],
-    ) -> (Range<u64>, Range<u64>, BufferPosition) {
+        vertices_props: &[u8],
+    ) -> (Range<u64>, Range<u64>, Range<u64>) {
         let index = self.index.copy_stage(encoder, gpu, indices);
         let vertex = self.vertex.copy_stage(encoder, gpu, vertices);
-        let uniform = self.uniform.copy_stage(encoder, gpu, uniforms);
-        (index, vertex, uniform)
+        let vertex_props = self.vertex_props.copy_stage(encoder, gpu, vertices_props);
+        (index, vertex, vertex_props)
     }
 
     pub fn recall(&mut self) {
         self.index.recall();
         self.vertex.recall();
-        self.uniform.recall();
+        self.vertex_props.recall();
     }
 
     pub fn finish(&mut self) {
         self.index.finish();
         self.vertex.finish();
-        self.uniform.finish();
+        self.vertex_props.finish();
     }
 
-    pub fn vertex_buffer(&self) -> &wgpu::Buffer {
-        self.vertex.buffer()
+    pub fn vertex(&self) -> &GpuInputMainBuffer {
+        &self.vertex
     }
-    pub fn vertex_buffer_slice(&self, range: Range<u64>) -> wgpu::BufferSlice {
-        self.vertex.buffer().slice(range)
+    pub fn vertex_props(&self) -> &GpuInputMainBuffer {
+        &self.vertex_props
     }
-    pub fn index_buffer(&self) -> &wgpu::Buffer {
-        self.index.buffer()
-    }
-    pub fn index_buffer_slice(&self, range: Range<u64>) -> wgpu::BufferSlice {
-        self.index.buffer().slice(range)
-    }
-
-    pub fn uniform_buffer(&self, buffer_position: BufferPosition) -> &wgpu::Buffer {
-        self.uniform.buffer(buffer_position.index)
-    }
-    pub fn uniform_buffers(&self) -> &[wgpu::Buffer] {
-        self.uniform.buffers()
+    pub fn index(&self) -> &GpuInputMainBuffer {
+        &self.index
     }
 }
+
+// pub struct GpuInputMainBuffersWithUniform {
+//     index: GpuInputMainBuffer,
+//     vertex: GpuInputMainBuffer,
+//     uniform: GpuInputUniformBuffers,
+// }
+
+pub struct BufferPosition {
+    pub index: u64,
+    pub range: Range<u64>,
+}
+
+// impl GpuInputMainBuffersWithUniform {
+//     pub fn new(gpu: &WGPUResource, label: Option<&'static str>) -> Self {
+//         let uniform = GpuInputUniformBuffers::new(gpu, label);
+
+//         Self {
+//             index: GpuInputMainBuffer::new(gpu, label, wgpu::BufferUsages::INDEX),
+//             vertex: GpuInputMainBuffer::new(gpu, label, wgpu::BufferUsages::VERTEX),
+//             uniform,
+//         }
+//     }
+
+//     pub fn prepare(
+//         &mut self,
+//         gpu: &WGPUResource,
+//         index_bytes: u64,
+//         vertex_bytes: u64,
+//         n_uniform: u64,
+//         single_bytes: u64,
+//     ) -> bool {
+//         self.index.prepare(gpu, index_bytes);
+//         self.vertex.prepare(gpu, vertex_bytes);
+//         let changed = self.uniform.prepare(gpu, n_uniform, single_bytes);
+//         changed
+//     }
+
+//     pub fn copy_stage(
+//         &mut self,
+//         encoder: &mut wgpu::CommandEncoder,
+//         gpu: &WGPUResource,
+//         indices: &[u8],
+//         vertices: &[u8],
+//         uniforms: &[u8],
+//     ) -> (Range<u64>, Range<u64>, BufferPosition) {
+//         let index = self.index.copy_stage(encoder, gpu, indices);
+//         let vertex = self.vertex.copy_stage(encoder, gpu, vertices);
+//         let uniform = self.uniform.copy_stage(encoder, gpu, uniforms);
+//         (index, vertex, uniform)
+//     }
+
+//     pub fn recall(&mut self) {
+//         self.index.recall();
+//         self.vertex.recall();
+//         self.uniform.recall();
+//     }
+
+//     pub fn finish(&mut self) {
+//         self.index.finish();
+//         self.vertex.finish();
+//         self.uniform.finish();
+//     }
+
+//     pub fn vertex_buffer(&self) -> &wgpu::Buffer {
+//         self.vertex.buffer()
+//     }
+//     pub fn vertex_buffer_slice(&self, range: Range<u64>) -> wgpu::BufferSlice {
+//         self.vertex.buffer().slice(range)
+//     }
+//     pub fn index_buffer(&self) -> &wgpu::Buffer {
+//         self.index.buffer()
+//     }
+//     pub fn index_buffer_slice(&self, range: Range<u64>) -> wgpu::BufferSlice {
+//         self.index.buffer().slice(range)
+//     }
+
+//     pub fn uniform_buffer(&self, buffer_position: BufferPosition) -> &wgpu::Buffer {
+//         self.uniform.buffer(buffer_position.index)
+//     }
+//     pub fn uniform_buffers(&self) -> &[wgpu::Buffer] {
+//         self.uniform.buffers()
+//     }
+// }

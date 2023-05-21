@@ -92,7 +92,6 @@ impl ShaderTech {
     fn type_to_wgpu(
         t: &naga::Type,
         space: naga::AddressSpace,
-        _size: u32,
     ) -> anyhow::Result<wgpu::BindingType> {
         let res = match space {
             naga::AddressSpace::Uniform => wgpu::BindingType::Buffer {
@@ -225,6 +224,7 @@ impl ShaderTech {
         ty: &naga::Type,
         _module: &naga::Module,
         layout: &mut BTreeMap<ResourcePosition, wgpu::VertexFormat>,
+        new_group: &mut bool,
     ) -> anyhow::Result<()> {
         match binding {
             naga::Binding::BuiltIn(_builtin) => {
@@ -236,7 +236,18 @@ impl ShaderTech {
                 sampling: _,
             } => {
                 let format = Self::to_vertex_format(ty)?;
-                layout.insert(ResourcePosition::new(0, location), format)
+                if let naga::TypeInner::Vector { size, kind, width } = ty.inner {
+                    if location == 0 && size == naga::VectorSize::Quad {
+                        *new_group = true;
+                        layout.insert(ResourcePosition::new(0, 0), format);
+                        return Ok(());
+                    }
+                }
+                if *new_group {
+                    layout.insert(ResourcePosition::new(1, location), format)
+                } else {
+                    layout.insert(ResourcePosition::new(0, location), format)
+                }
             }
         };
         Ok(())
@@ -247,10 +258,12 @@ impl ShaderTech {
         module: &naga::Module,
         layout: &mut BTreeMap<ResourcePosition, wgpu::VertexFormat>,
     ) -> anyhow::Result<()> {
+        let mut new_group = false;
+
         for arg in args {
             let ty = module.types.get_handle(arg.ty)?;
             if let Some(binding) = &arg.binding {
-                Self::input_var_to_layouts(binding.clone(), ty, module, layout)?;
+                Self::input_var_to_layouts(binding.clone(), ty, module, layout, &mut new_group)?;
             } else {
                 match &ty.inner {
                     naga::TypeInner::Struct { members, span: _ } => {
@@ -259,7 +272,7 @@ impl ShaderTech {
                                 anyhow::anyhow!("not binding found at {:?}", ty.name)
                             })?;
                             let ty = module.types.get_handle(member.ty)?;
-                            Self::input_var_to_layouts(binding, ty, module, layout)?
+                            Self::input_var_to_layouts(binding, ty, module, layout, &mut new_group)?
                         }
                     }
                     _ => {
@@ -309,26 +322,11 @@ impl ShaderTech {
             };
         }
 
-        for (_global, global_value) in module.global_variables.iter() {
+        for (_, global_value) in module.global_variables.iter() {
+            let h = module.types.get_handle(global_value.ty)?;
             if let Some(pos) = &global_value.binding {
                 let pos = ResourcePosition::new(pos.group, pos.binding);
-                let ty = {
-                    let h = module.types.get_handle(global_value.ty)?;
-                    let mut size = h.inner.size(&module.constants);
-                    match global_value.space {
-                        naga::AddressSpace::PushConstant => {
-                            if size % 4 != 0 {
-                                size += 4 - (size % 4);
-                            }
-                            pass.constants.push(wgpu::PushConstantRange {
-                                stages: wgpu::ShaderStages::all(),
-                                range: 0..size,
-                            });
-                            continue;
-                        }
-                        _ => Self::type_to_wgpu(h, global_value.space, size),
-                    }
-                }?;
+                let ty = Self::type_to_wgpu(h, global_value.space)?;
                 let layout = wgpu::BindGroupLayoutEntry {
                     binding: pos.binding,
                     visibility: wgpu::ShaderStages::all(),
@@ -336,6 +334,14 @@ impl ShaderTech {
                     count: None,
                 };
                 pass.bind_layout.insert(pos, layout);
+            } else {
+                if let naga::AddressSpace::PushConstant = global_value.space {
+                    let size = h.inner.size(&module.constants);
+                    pass.constants.push(wgpu::PushConstantRange {
+                        stages: wgpu::ShaderStages::all(),
+                        range: 0..size,
+                    });
+                }
             }
         }
 

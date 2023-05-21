@@ -2,11 +2,9 @@ use std::{
     cell::{Ref, RefCell},
     collections::{HashMap, HashSet},
     hash::Hash,
-    marker::PhantomData,
     num::NonZeroU64,
     ops::{Not, Range},
     rc::Rc,
-    sync::Arc,
 };
 
 use crate::backends::wgpu_backend::WGPUResource;
@@ -71,38 +69,6 @@ impl<'a> UniformBinderBuilder<'a> {
             group: bind_group,
         }
     }
-}
-
-pub struct FrameUniformBufferSlice {
-    buffer_index: usize,
-    offset: u32,
-}
-
-pub struct FrameUniformBufferHolder<T> {
-    buffers: Vec<wgpu::Buffer>,
-    _pd: PhantomData<T>,
-    chunk_count: usize,
-}
-
-impl<T> FrameUniformBufferHolder<T> {
-    pub fn new(chunk_count: usize, device: &wgpu::Device) -> Self {
-        let max_size = device.limits().max_uniform_buffer_binding_size;
-        let alignment = device.limits().min_uniform_buffer_offset_alignment;
-
-        Self {
-            buffers: Vec::new(),
-            _pd: PhantomData::default(),
-            chunk_count,
-        }
-    }
-
-    pub fn write_buffer(&mut self) -> FrameUniformBufferSlice {
-        todo!()
-    }
-
-    pub fn recall(&mut self) {}
-
-    pub fn finish(&mut self) {}
 }
 
 struct SharedBuffer {
@@ -209,7 +175,12 @@ impl SingleMeshMergerData {
 pub struct StaticMeshMergerData {
     index: SingleMeshMergerData,
     vertex: SingleMeshMergerData,
+    vertex_props: SingleMeshMergerData,
     version: u64,
+}
+
+pub trait BufferAccessor<'a> {
+    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>>;
 }
 
 impl StaticMeshMergerData {}
@@ -217,12 +188,45 @@ impl StaticMeshMergerData {}
 pub struct StaticMeshMerger {
     objects: HashMap<u64, StaticMeshMergerData>,
     small_shared_vertex_buffer: Option<SharedBufferRef>,
+    small_shared_vertex_props_buffer: Option<SharedBufferRef>,
     small_shared_index_buffer: Option<SharedBufferRef>,
     label: Option<&'static str>,
 }
 
-pub trait VertexDataGenerator {
-    fn gen(&mut self) -> &[u8];
+pub struct IndexStaticMesh<'a> {
+    inner: &'a StaticMeshMerger,
+}
+
+impl<'a> BufferAccessor<'a> for IndexStaticMesh<'a> {
+    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+        let p = self.inner.objects.get(&id).unwrap();
+        let b = p.index.share_buffer.borrow();
+        Some(unsafe { std::mem::transmute(b.buf.slice(range)) })
+    }
+}
+
+pub struct VertexStaticMesh<'a> {
+    inner: &'a StaticMeshMerger,
+}
+
+impl<'a> BufferAccessor<'a> for VertexStaticMesh<'a> {
+    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+        let p = self.inner.objects.get(&id).unwrap();
+        let b = p.vertex.share_buffer.borrow();
+        Some(unsafe { std::mem::transmute(b.buf.slice(range)) })
+    }
+}
+
+pub struct VertexPropsStaticMesh<'a> {
+    inner: &'a StaticMeshMerger,
+}
+
+impl<'a> BufferAccessor<'a> for VertexPropsStaticMesh<'a> {
+    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+        let p = self.inner.objects.get(&id).unwrap();
+        let b = p.vertex_props.share_buffer.borrow();
+        Some(unsafe { std::mem::transmute(b.buf.slice(range)) })
+    }
 }
 
 impl StaticMeshMerger {
@@ -230,18 +234,21 @@ impl StaticMeshMerger {
         Self {
             objects: HashMap::new(),
             small_shared_index_buffer: None,
+            small_shared_vertex_props_buffer: None,
             small_shared_vertex_buffer: None,
             label,
         }
     }
-    pub fn write_cached<V: VertexDataGenerator>(
+
+    pub fn write_cached(
         &mut self,
         gpu: &WGPUResource,
         object_id: u64,
         version: u64,
         index_data: &[u8],
-        mut vdg: V,
-    ) -> (Range<u64>, Range<u64>) {
+        vertex_data: &[u8],
+        vertex_props_data: &[u8],
+    ) -> (Range<u64>, Range<u64>, Range<u64>) {
         let need_create = self
             .objects
             .get(&object_id)
@@ -249,7 +256,6 @@ impl StaticMeshMerger {
             .unwrap_or(true);
 
         if need_create {
-            let vertex_data = vdg.gen();
             let index = SingleMeshMergerData::new_buffered(
                 gpu,
                 self.label,
@@ -264,27 +270,41 @@ impl StaticMeshMerger {
                 vertex_data,
                 &mut self.small_shared_vertex_buffer,
             );
+
+            let vertex_props = SingleMeshMergerData::new_buffered(
+                gpu,
+                self.label,
+                wgpu::BufferUsages::VERTEX,
+                vertex_props_data,
+                &mut self.small_shared_vertex_buffer,
+            );
             let smd = StaticMeshMergerData {
                 index,
                 vertex,
+                vertex_props,
                 version,
             };
 
             self.objects.insert(object_id, smd);
         }
         let o = self.objects.get(&object_id).unwrap();
-        (o.index.range.clone(), o.vertex.range.clone())
+        (
+            o.index.range.clone(),
+            o.vertex.range.clone(),
+            o.vertex_props.range.clone(),
+        )
     }
 
-    pub fn index_buffer_slice<'b>(&'b self, id: u64, range: Range<u64>) -> wgpu::BufferSlice<'b> {
-        let p = self.objects.get(&id).unwrap();
-        let b = p.index.share_buffer.borrow();
-        unsafe { std::mem::transmute(b.buf.slice(range)) }
+    pub fn index(&self) -> IndexStaticMesh {
+        IndexStaticMesh { inner: self }
     }
-    pub fn vertex_buffer_slice<'b>(&'b self, id: u64, range: Range<u64>) -> wgpu::BufferSlice<'b> {
-        let p = self.objects.get(&id).unwrap();
-        let b = p.vertex.share_buffer.borrow();
-        unsafe { std::mem::transmute(b.buf.slice(range)) }
+
+    pub fn vertex(&self) -> VertexStaticMesh {
+        VertexStaticMesh { inner: self }
+    }
+
+    pub fn vertex_props(&self) -> VertexPropsStaticMesh {
+        VertexPropsStaticMesh { inner: self }
     }
 }
 

@@ -7,8 +7,8 @@ use core::event::{Event, EventSender};
 use core::render::default_blender;
 // use crate::geometry::axis::{Axis, AxisMesh};
 use crate::taskpool::{TaskPool, TaskPoolBuilder};
-use crate::util::any_as_x_slice_array;
-use core::geometry::{Geometry, MeshCoordType};
+use crate::util::{any_as_u8_slice_array, any_as_x_slice_array};
+use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
 use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
@@ -143,7 +143,7 @@ fn parse_mesh(
 
         bound_box = &bound_box + &bb;
 
-        let mut gmesh = Mesh::new();
+        let mut gmesh = MeshBuilder::new();
         let mut color = Vec4f::new(1.0f32, 1.0f32, 1.0f32, 1.0f32);
         let indices = p.indices().unwrap();
         match indices.dimensions() {
@@ -152,6 +152,32 @@ fn parse_mesh(
                 anyhow::bail!("dimension for indices invalid");
             }
         }
+
+        let mut kind = MaterialInputKind::None;
+
+        for (semantic, accessor) in p.attributes() {
+            let mut no_position = true;
+            match semantic {
+                gltf::Semantic::Extras(ext) => {}
+                gltf::Semantic::Positions => {
+                    no_position = false;
+                }
+                gltf::Semantic::Normals => {
+                    gmesh.add_props(MeshCoordType::TexNormal);
+                }
+                gltf::Semantic::Tangents => {}
+                gltf::Semantic::Colors(_) => {
+                    gmesh.add_props(MeshCoordType::Color);
+                }
+                gltf::Semantic::TexCoords(_) => {
+                    gmesh.add_props(MeshCoordType::TexCoord);
+                }
+                gltf::Semantic::Joints(_) => {}
+                gltf::Semantic::Weights(_) => {}
+            }
+        }
+        let mut gmesh = gmesh.finish_props();
+
         match indices.data_type() {
             gltf::accessor::DataType::U8 => {
                 let buf = buf_readers[0].read_bytes(&indices);
@@ -180,8 +206,6 @@ fn parse_mesh(
             }
         }
 
-        let mut kind = MaterialInputKind::None;
-
         for (semantic, accessor) in p.attributes() {
             match semantic {
                 gltf::Semantic::Extras(ext) => {
@@ -207,7 +231,7 @@ fn parse_mesh(
                         data.push(Vec3f::new(block[0], block[1], block[2]));
                     }
 
-                    gmesh.add_vertices(&data);
+                    gmesh.add_position(&data);
                 }
                 gltf::Semantic::Normals => {}
                 gltf::Semantic::Tangents => {}
@@ -233,7 +257,11 @@ fn parse_mesh(
                         data.push(Vec4f::new(block[0], block[1], block[2], block[3]));
                     }
 
-                    gmesh.set_coord_vec4f(MeshCoordType::Color, data);
+                    gmesh.add_vertices_prop(
+                        MeshCoordType::Color,
+                        any_as_u8_slice_array(&data),
+                        4 * 4,
+                    );
                 }
                 gltf::Semantic::TexCoords(_index) => {
                     if let Some(v) = kind.add_texture() {
@@ -260,7 +288,11 @@ fn parse_mesh(
                         data.push(Vec2f::new(block[0], block[1]));
                     }
 
-                    gmesh.set_coord_vec2f(MeshCoordType::TexCoord, data);
+                    gmesh.add_vertices_prop(
+                        MeshCoordType::TexCoord,
+                        any_as_u8_slice_array(&data),
+                        4 * 2,
+                    );
                 }
                 gltf::Semantic::Joints(_index) => {}
                 gltf::Semantic::Weights(_index) => {}
@@ -275,7 +307,7 @@ fn parse_mesh(
         let idx = p.material().index();
 
         let material = material_map.prepare_kind(idx, kind);
-        let mut g = StaticGeometry::new(Arc::new(gmesh));
+        let mut g = StaticGeometry::new(Arc::new(gmesh.build()));
         g.set_attribute(core::geometry::Attribute::ConstantColor, Arc::new(color));
         g = g.with_transform(transform.clone());
 

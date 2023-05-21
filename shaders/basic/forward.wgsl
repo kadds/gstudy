@@ -6,7 +6,7 @@
 
 ///#decl POSITION_VERTEX_INPUT = _atomic_counter(0, 1)
 ///#decl POSITION_VERTEX_OUTPUT = _atomic_counter(0, 1)
-///#decl BINDING_GLOBAL_GROUP1 = _atomic_counter(0, 1)
+///#decl BINDING_GLOBAL_GROUP1 = _atomic_counter(1, 1)
 
 struct VertexInput {
     @location(#{POSITION_VERTEX_INPUT}) position: vec4<f32>,
@@ -41,7 +41,7 @@ struct Object {
 @group(1) @binding(0) var<uniform> material_uniform: MaterialUniform;
 
 ///#if VERTEX_TEX
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler: sampler;
+@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler_tex: sampler;
 ///#endif
 
 ///#if TEXTURE_COLOR
@@ -78,7 +78,10 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     var color = input.color;
 ///#if TEXTURE_COLOR
-    color *= textureSample(texture, sampler, input.uv);
+    color *= textureSample(texture_color, sampler_tex, input.uv);
+///#endif
+///#if EMISSION_TEX
+    color *= textureSample(texture_emission, sampler_tex, input.uv);
 ///#endif
 
 ///#if ALPHA_TEST

@@ -39,7 +39,7 @@ impl GraphEncoder {
             if let ResourceType::ImportTexture(info) = &texture_desc.ty {
                 render_target.add_render_target(
                     texture.texture_view(),
-                    info.clear.as_ref().map(|v| v.color()),
+                    info.0.clear.as_ref().map(|v| v.color()),
                 );
             }
         }
@@ -57,8 +57,8 @@ impl GraphEncoder {
             if let ResourceType::ImportTexture(info) = &texture_desc.ty {
                 render_target.set_depth_target(
                     texture.texture_view(),
-                    info.clear.as_ref().map(|v| v.depth()),
-                    info.clear.as_ref().map(|v| v.stencil()),
+                    info.0.clear.as_ref().map(|v| v.depth()),
+                    info.0.clear.as_ref().map(|v| v.stencil()),
                 );
             }
         }

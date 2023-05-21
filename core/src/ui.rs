@@ -7,7 +7,7 @@ use crate::{
     backends::wgpu_backend::WGPUResource,
     context::ResourceRef,
     event::{self, *},
-    geometry::{load_default_transformer, Mesh},
+    geometry::{load_default_transformer, Mesh, MeshBuilder},
     types::{Color, Rectu, Size, Vec4f},
     util::{self, any_as_u8_slice_array},
 };
@@ -291,7 +291,6 @@ impl EventProcessor for UIEventProcessor {
                         dst.mac_cmd = false;
                         dst.command = modifiers.ctrl;
                     }
-                    log::info!("{:?}", *dst);
                 }
                 InputEvent::CursorMoved { logical, physical } => {
                     let mut inner = self.inner.lock().unwrap();
@@ -407,9 +406,6 @@ impl UITextures {
         if let Some(pos) = data.pos {
             rect.x = pos[0] as u32;
             rect.y = pos[1] as u32;
-            log::info!("{:?} {:?}", pos, rect);
-        } else {
-            log::info!("{:?}", rect);
         }
 
         let size = data.image.size();
@@ -493,22 +489,21 @@ impl UIMesh {
             clip.z = clip.z.min(size.x - clip.x);
             clip.w = clip.w.min(size.y - clip.y);
 
-            let mut gmesh = Mesh::new();
-            gmesh.set_clip(clip);
+            let mut gmesh = MeshBuilder::new();
+            gmesh.set_no_position();
+            let mut gmesh = gmesh.finish_props();
 
+            gmesh.set_clip(clip);
             let texture_id = match mesh.primitive {
                 egui::epaint::Primitive::Mesh(m) => {
-                    gmesh.set_mixed_mesh(
-                        any_as_u8_slice_array(&m.vertices),
-                        load_default_transformer(),
-                    );
+                    gmesh.set_raw_props(any_as_u8_slice_array(&m.vertices));
                     gmesh.add_indices(&m.indices);
                     m.texture_id
                 }
                 egui::epaint::Primitive::Callback(_) => todo!(),
             };
 
-            ret.push((gmesh, texture_id));
+            ret.push((gmesh.build(), texture_id));
         }
 
         inner.ctx = Some(ctx);

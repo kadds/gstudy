@@ -19,7 +19,7 @@ use super::PassIdent;
 pub struct MaterialRenderContext<'a> {
     pub gpu: &'a WGPUResource,
     pub scene: &'a Scene,
-    pub camera_uniform: &'a wgpu::Buffer,
+    pub main_camera: &'a wgpu::Buffer,
 }
 
 pub trait MaterialRenderer {
@@ -50,14 +50,8 @@ pub trait MaterialRendererFactory {
     fn sort_key(&self, material: &Material, gpu: &WGPUResource) -> u64;
 }
 
-struct BufferCache {
-    vertex: wgpu::Buffer,
-    index: wgpu::Buffer,
-}
-
-// pub mod basic;
+pub mod basic;
 pub mod egui;
-// pub mod basic;
 
 pub struct HardwareMaterialShaderResource {
     pub pass: smallvec::SmallVec<[Arc<wgpu::RenderPipeline>; 1]>,

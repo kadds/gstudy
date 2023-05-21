@@ -165,10 +165,13 @@ impl RenderGraphBuilder {
             color,
             Resource {
                 refs: 0,
-                ty: ResourceType::ImportTexture(ImportTextureInfo {
-                    id: color,
-                    clear: clear.map(|v| ClearValue::Color(v)),
-                }),
+                ty: ResourceType::ImportTexture((
+                    ImportTextureInfo {
+                        id: color,
+                        clear: clear.map(|v| ClearValue::Color(v)),
+                    },
+                    "back_buffer".to_owned(),
+                )),
             },
         );
 
@@ -227,12 +230,15 @@ impl RenderGraphBuilder {
         id
     }
 
-    pub fn import_texture(&mut self) -> ResourceId {
+    pub fn import_texture(&mut self, name: &str) -> ResourceId {
         let id = self.last_id;
         self.last_id += 1;
         let resource = Resource {
             refs: 1,
-            ty: ResourceType::ImportBuffer(id),
+            ty: ResourceType::ImportTexture((
+                ImportTextureInfo { id, clear: None },
+                name.to_owned(),
+            )),
         };
         self.resource_map.insert(id, resource);
         id

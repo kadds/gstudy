@@ -3,50 +3,18 @@ use crate::{
     types::{Vec2f, Vec3f, Vec4f},
 };
 
-use super::{Material, MaterialFace};
-
-#[repr(C)]
-struct BasicInput {
-    vertices: Vec3f,
-}
-
-#[repr(C)]
-struct BasicInputC {
-    vertices: Vec3f,
-    colors: Vec4f,
-}
-
-#[repr(C)]
-struct BasicInputT {
-    vertices: Vec3f,
-    textcoord: Vec2f,
-}
-
-#[repr(C)]
-struct BasicInputCTN {
-    vertices: Vec3f,
-    colors: Vec4f,
-    texcoord: Vec2f,
-    normal: Vec2f,
-}
-
-#[repr(C)]
-struct BasicInputCT {
-    vertices: Vec3f,
-    colors: Vec4f,
-    texcoord: Vec2f,
-}
+use super::MaterialFace;
 
 #[repr(C)]
 pub struct ConstParameter {
-    color: Vec4f,
+    pub color: Vec4f,
 }
 
 #[repr(C)]
 pub struct ConstParameterWithAlpha {
-    color: Vec4f,
-    alpha: f32,
-    _pad: Vec3f,
+    pub color: Vec4f,
+    pub alpha: f32,
+    pub _pad: Vec3f,
 }
 
 #[derive(Debug)]

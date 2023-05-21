@@ -68,8 +68,8 @@ pub struct BufferInfo {
 pub enum ResourceType {
     Texture(TextureInfo),
     Buffer(BufferInfo),
-    ImportTexture(ImportTextureInfo),
-    ImportBuffer(ResourceId),
+    ImportTexture((ImportTextureInfo, String)),
+    ImportBuffer((ResourceId, String)),
     AliasResource(ResourceId, ResourceId),
 }
 

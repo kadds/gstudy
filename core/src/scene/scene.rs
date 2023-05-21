@@ -247,18 +247,24 @@ impl Scene {
         &self.drop_objects
     }
 
-    pub fn calculate_bytes(&self, objects: &[u64]) -> (u64, u64) {
-        let mut total_bytes = (0, 0);
+    pub fn calculate_bytes<'a, I: Iterator<Item = &'a u64>, F: Fn(&RenderObject) -> bool>(
+        &self,
+        objects: I,
+        filter: F,
+    ) -> (u64, u64, u64) {
+        let mut total_bytes = (0, 0, 0);
 
         for id in objects {
             let object = self.get_object(*id).unwrap();
             let mesh = object.geometry().mesh();
-            let vertices = mesh.mixed_mesh();
             let indices = mesh.indices();
-            total_bytes = (
-                total_bytes.0 + indices.len() as u64,
-                total_bytes.1 + vertices.len() as u64,
-            );
+            if filter(object) {
+                total_bytes = (
+                    total_bytes.0 + indices.len() as u64,
+                    total_bytes.1 + mesh.vertices().len() as u64,
+                    total_bytes.2 + mesh.vertices_props().len() as u64,
+                );
+            }
         }
         total_bytes
     }

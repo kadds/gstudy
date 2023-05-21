@@ -356,6 +356,7 @@ impl<'a> PreprocessorContext<'a> {
                     if let Some(v) = if_stack.last_mut() {
                         if !v.1 {
                             v.0 = true;
+                            v.1 = true;
                         }
                     } else {
                         return Err(anyhow::anyhow!("else condition is not expected"));
@@ -367,6 +368,11 @@ impl<'a> PreprocessorContext<'a> {
                     }
                 }
                 Command::Raw(raw) => {
+                    if let Some(v) = if_stack.last() {
+                        if !v.0 {
+                            continue;
+                        }
+                    }
                     self.buf.write_str(raw)?;
                 }
                 Command::Decl(decl) => {
@@ -396,6 +402,11 @@ impl<'a> PreprocessorContext<'a> {
                     }
                 }
                 Command::Reference(ident) => {
+                    if let Some(v) = if_stack.last() {
+                        if !v.0 {
+                            continue;
+                        }
+                    }
                     let val = self.var_map.get(ident.target).cloned();
                     if let Some(val) = val {
                         if let EvalVal::ContextFn(f) = val {
