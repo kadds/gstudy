@@ -1,14 +1,14 @@
 use std::{
-    any,
     borrow::Cow,
     collections::{BTreeMap, HashMap},
-    ops::Range,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use serde_derive::Deserialize;
-use tshader_builder::compiler::{variants_name, ShaderTechCompiler, Variant};
+use tshader_builder::compiler::{variants_name, ShaderTechCompiler};
+
+pub use tshader_builder::compiler::Variant;
 
 #[derive(Debug)]
 pub struct Shader {
@@ -92,7 +92,7 @@ impl ShaderTech {
     fn type_to_wgpu(
         t: &naga::Type,
         space: naga::AddressSpace,
-        size: u32,
+        _size: u32,
     ) -> anyhow::Result<wgpu::BindingType> {
         let res = match space {
             naga::AddressSpace::Uniform => wgpu::BindingType::Buffer {
@@ -111,7 +111,7 @@ impl ShaderTech {
                         let view_dimension = Self::image_to_dimension(dim, arrayed)?;
                         let mut multisampled = false;
                         let sample_type = match class {
-                            naga::ImageClass::Sampled { kind, multi } => {
+                            naga::ImageClass::Sampled { kind: _, multi } => {
                                 multisampled = multi;
                                 wgpu::TextureSampleType::Float { filterable: true }
                             }
@@ -119,7 +119,10 @@ impl ShaderTech {
                                 multisampled = multi;
                                 wgpu::TextureSampleType::Depth
                             }
-                            naga::ImageClass::Storage { format, access } => {
+                            naga::ImageClass::Storage {
+                                format: _,
+                                access: _,
+                            } => {
                                 anyhow::bail!("storage type unknown")
                             }
                         };
@@ -129,7 +132,7 @@ impl ShaderTech {
                             multisampled,
                         }
                     }
-                    naga::TypeInner::Sampler { comparison } => {
+                    naga::TypeInner::Sampler { comparison: _ } => {
                         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
                     }
                     _ => {
@@ -178,67 +181,36 @@ impl ShaderTech {
 
     fn to_vertex_format(ty: &naga::Type) -> anyhow::Result<wgpu::VertexFormat> {
         let res = match &ty.inner {
-            naga::TypeInner::Scalar { kind, width } => {
-                Self::to_vertex_format2(kind, *width)?
-            },
+            naga::TypeInner::Scalar { kind, width } => Self::to_vertex_format2(kind, *width)?,
             naga::TypeInner::Vector { size, kind, width } => {
                 match Self::to_vertex_format2(kind, *width)? {
-                    wgpu::VertexFormat::Float32 => {
-                        match size {
-                            naga::VectorSize::Bi => {
-                                wgpu::VertexFormat::Float32x2
-                            },
-                            naga::VectorSize::Tri => {
-                                wgpu::VertexFormat::Float32x3
-                            }
-                            naga::VectorSize::Quad =>{
-                                wgpu::VertexFormat::Float32x4
-                            },
-                        }
+                    wgpu::VertexFormat::Float32 => match size {
+                        naga::VectorSize::Bi => wgpu::VertexFormat::Float32x2,
+                        naga::VectorSize::Tri => wgpu::VertexFormat::Float32x3,
+                        naga::VectorSize::Quad => wgpu::VertexFormat::Float32x4,
                     },
-                    wgpu::VertexFormat::Uint32 => {
-                        match size {
-                            naga::VectorSize::Bi => {
-                                wgpu::VertexFormat::Uint32x3
-                            },
-                            naga::VectorSize::Tri => {
-                                wgpu::VertexFormat::Uint32x3
-                            }
-                            naga::VectorSize::Quad =>{
-                                wgpu::VertexFormat::Uint32x4
-                            },
-                        }
+                    wgpu::VertexFormat::Uint32 => match size {
+                        naga::VectorSize::Bi => wgpu::VertexFormat::Uint32x3,
+                        naga::VectorSize::Tri => wgpu::VertexFormat::Uint32x3,
+                        naga::VectorSize::Quad => wgpu::VertexFormat::Uint32x4,
                     },
-                    wgpu::VertexFormat::Sint32 => {
-                        match size {
-                            naga::VectorSize::Bi => {
-                                wgpu::VertexFormat::Sint32x3
-                            },
-                            naga::VectorSize::Tri => {
-                                wgpu::VertexFormat::Sint32x3
-                            }
-                            naga::VectorSize::Quad =>{
-                                wgpu::VertexFormat::Sint32x4
-                            },
-                        }
+                    wgpu::VertexFormat::Sint32 => match size {
+                        naga::VectorSize::Bi => wgpu::VertexFormat::Sint32x3,
+                        naga::VectorSize::Tri => wgpu::VertexFormat::Sint32x3,
+                        naga::VectorSize::Quad => wgpu::VertexFormat::Sint32x4,
                     },
-                    wgpu::VertexFormat::Float64 => {
-                        match size {
-                            naga::VectorSize::Bi => {
-                                wgpu::VertexFormat::Float64x2
-                            },
-                            naga::VectorSize::Tri => {
-                                wgpu::VertexFormat::Float64x3
-                            }
-                            naga::VectorSize::Quad =>{
-                                wgpu::VertexFormat::Float64x4
-                            },
-                        }
+                    wgpu::VertexFormat::Float64 => match size {
+                        naga::VectorSize::Bi => wgpu::VertexFormat::Float64x2,
+                        naga::VectorSize::Tri => wgpu::VertexFormat::Float64x3,
+                        naga::VectorSize::Quad => wgpu::VertexFormat::Float64x4,
                     },
-                    _ => anyhow::bail!("vertex format is not supported")
+                    _ => anyhow::bail!("vertex format is not supported"),
                 }
             }
-            naga::TypeInner::Struct { members, span } => {
+            naga::TypeInner::Struct {
+                members: _,
+                span: _,
+            } => {
                 anyhow::bail!("struct is not supported")
             }
             _ => {
@@ -251,17 +223,17 @@ impl ShaderTech {
     fn input_var_to_layouts(
         binding: naga::Binding,
         ty: &naga::Type,
-        module: &naga::Module,
+        _module: &naga::Module,
         layout: &mut BTreeMap<ResourcePosition, wgpu::VertexFormat>,
     ) -> anyhow::Result<()> {
         match binding {
-            naga::Binding::BuiltIn(builtin) => {
+            naga::Binding::BuiltIn(_builtin) => {
                 anyhow::bail!("unsupported vertex input binding")
             }
             naga::Binding::Location {
                 location,
-                interpolation,
-                sampling,
+                interpolation: _,
+                sampling: _,
             } => {
                 let format = Self::to_vertex_format(ty)?;
                 layout.insert(ResourcePosition::new(0, location), format)
@@ -281,7 +253,7 @@ impl ShaderTech {
                 Self::input_var_to_layouts(binding.clone(), ty, module, layout)?;
             } else {
                 match &ty.inner {
-                    naga::TypeInner::Struct { members, span } => {
+                    naga::TypeInner::Struct { members, span: _ } => {
                         for member in members {
                             let binding = member.binding.clone().ok_or_else(|| {
                                 anyhow::anyhow!("not binding found at {:?}", ty.name)
@@ -337,7 +309,7 @@ impl ShaderTech {
             };
         }
 
-        for (global, global_value) in module.global_variables.iter() {
+        for (_global, global_value) in module.global_variables.iter() {
             if let Some(pos) = &global_value.binding {
                 let pos = ResourcePosition::new(pos.group, pos.binding);
                 let ty = {
@@ -433,9 +405,13 @@ impl Loader {
                 .map
                 .get(name)
                 .ok_or_else(|| anyhow::anyhow!("shader tech {} not found", name))?;
-            let base_path = PathBuf::from(&self.desc_path).canonicalize()?.parent().unwrap().to_path_buf();
+            let base_path = PathBuf::from(&self.desc_path)
+                .canonicalize()?
+                .parent()
+                .unwrap()
+                .to_path_buf();
 
-            let compiler = ShaderTechCompiler::new(&path_component, &base_path)?;
+            let compiler = ShaderTechCompiler::new(path_component, base_path)?;
             let tech = ShaderTech {
                 compiler,
                 name: name.to_owned(),

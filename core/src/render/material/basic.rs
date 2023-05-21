@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, num::NonZeroU64};
+use std::{any::Any, collections::HashMap, num::NonZeroU64, sync::{Mutex, Arc}};
 
 use nalgebra::Matrix4;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -9,16 +9,14 @@ use crate::{
         PipelineReflector, WGPUResource,
     },
     context::RContext,
-    ds::PipelineStateObject,
     geometry::{Attribute, Mesh, MeshCoordType},
     material::{basic::*, Material, MaterialId},
     render::{
-        common::{StaticMeshMerger, VertexDataGenerator},
-        WVP,
+        common::{StaticMeshMerger, VertexDataGenerator}, RenderDescriptorObject, ColorTargetBuilder, resolve_pipeline, PipelinePassResource, DrawCommands,
     },
-    scene::{Camera, Object},
+    scene::{Camera},
     types::*,
-    util::{any_as_u8_slice, any_as_u8_slice_array},
+    util::{any_as_u8_slice, any_as_u8_slice_array}, graph::rdg::RenderPassBuilder,
 };
 
 use super::{BufferCache, MaterialRenderContext, MaterialRenderer, MaterialRendererFactory};
@@ -29,195 +27,125 @@ struct MVP {
 }
 
 #[repr(C)]
-struct BasicInput {
-    vertices: Vec3f,
-}
-
-#[repr(C)]
-struct BasicInputC {
-    vertices: Vec3f,
-    colors: Vec4f,
-}
-
-#[repr(C)]
-struct BasicInputT {
-    vertices: Vec3f,
-    textcoord: Vec2f,
-}
-
-#[repr(C)]
-struct BasicInputCTN {
-    vertices: Vec3f,
-    colors: Vec4f,
-    texcoord: Vec2f,
-    normal: Vec2f,
-}
-
-#[repr(C)]
-struct BasicInputCT {
-    vertices: Vec3f,
-    colors: Vec4f,
-    texcoord: Vec2f,
-}
-
-#[repr(C)]
-struct ConstParameter {
-    color: Vec4f,
-}
-
-#[repr(C)]
-struct ConstParameterWithAlpha {
-    color: Vec4f,
-    alpha: f32,
-    _pad: Vec3f,
-}
-
-#[repr(C)]
 struct Model {
     model: Mat4x4f,
 }
 
-fn zip_basic_input_size(m: &BasicMaterialFace, mesh: &Mesh) -> u64 {
-    match m.shader_ex() {
-        BasicMaterialShader::None => {
-            mesh.vertices.iter().len() as u64 * std::mem::size_of::<BasicInput>() as u64
-        }
-        BasicMaterialShader::Color => {
-            mesh.vertices.iter().len() as u64 * std::mem::size_of::<BasicInputC>() as u64
-        }
-        BasicMaterialShader::Texture => {
-            mesh.vertices.iter().len() as u64 * std::mem::size_of::<BasicInputT>() as u64
-        }
-        BasicMaterialShader::ColorTexture => {
-            mesh.vertices.iter().len() as u64 * std::mem::size_of::<BasicInputCT>() as u64
-        }
-    }
-}
-
-fn zip_basic_input(face: &BasicMaterialFace, mesh: &Mesh) -> Vec<u8> {
-    let mut ret = Vec::new();
-    match face.shader_ex() {
-        BasicMaterialShader::None => {
-            for a in mesh.vertices.iter() {
-                let input = BasicInput { vertices: *a };
-                ret.extend_from_slice(any_as_u8_slice(&input));
-            }
-        }
-        BasicMaterialShader::Color => {
-            for (a, b) in mesh
-                .vertices
-                .iter()
-                .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
-            {
-                let input = BasicInputC {
-                    vertices: *a,
-                    colors: *b,
-                };
-                ret.extend_from_slice(any_as_u8_slice(&input));
-            }
-        }
-        BasicMaterialShader::Texture => {
-            for (a, b) in mesh
-                .vertices
-                .iter()
-                .zip(mesh.coord_vec2f(MeshCoordType::TexCoord).unwrap().iter())
-            {
-                let input = BasicInputT {
-                    vertices: *a,
-                    textcoord: *b,
-                };
-                ret.extend_from_slice(any_as_u8_slice(&input));
-            }
-        }
-        BasicMaterialShader::ColorTexture => {
-            for ((a, b), c) in mesh
-                .vertices
-                .iter()
-                .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
-                .zip(mesh.coord_vec2f(MeshCoordType::TexCoord).unwrap().iter())
-            {
-                let input = BasicInputCT {
-                    vertices: *a,
-                    colors: *b,
-                    texcoord: *c,
-                };
-                ret.extend_from_slice(any_as_u8_slice(&input));
-            }
-        }
-    }
-    ret
-}
+// fn zip_basic_input(face: &BasicMaterialFace, mesh: &Mesh) -> Vec<u8> {
+//     let mut ret = Vec::new();
+//     match face.shader_ex() {
+//         BasicMaterialShader::None => {
+//             for a in mesh.vertices.iter() {
+//                 let input = BasicInput { vertices: *a };
+//                 ret.extend_from_slice(any_as_u8_slice(&input));
+//             }
+//         }
+//         BasicMaterialShader::Color => {
+//             for (a, b) in mesh
+//                 .vertices
+//                 .iter()
+//                 .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
+//             {
+//                 let input = BasicInputC {
+//                     vertices: *a,
+//                     colors: *b,
+//                 };
+//                 ret.extend_from_slice(any_as_u8_slice(&input));
+//             }
+//         }
+//         BasicMaterialShader::Texture => {
+//             for (a, b) in mesh
+//                 .vertices
+//                 .iter()
+//                 .zip(mesh.coord_vec2f(MeshCoordType::TexCoord).unwrap().iter())
+//             {
+//                 let input = BasicInputT {
+//                     vertices: *a,
+//                     textcoord: *b,
+//                 };
+//                 ret.extend_from_slice(any_as_u8_slice(&input));
+//             }
+//         }
+//         BasicMaterialShader::ColorTexture => {
+//             for ((a, b), c) in mesh
+//                 .vertices
+//                 .iter()
+//                 .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
+//                 .zip(mesh.coord_vec2f(MeshCoordType::TexCoord).unwrap().iter())
+//             {
+//                 let input = BasicInputCT {
+//                     vertices: *a,
+//                     colors: *b,
+//                     texcoord: *c,
+//                 };
+//                 ret.extend_from_slice(any_as_u8_slice(&input));
+//             }
+//         }
+//     }
+//     ret
+// }
 
 
 struct MaterialGpuResource {
-    pso: PipelineStateObject,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    template: Arc<Vec<tshader::Pass>>,
+    pipeline: PipelinePassResource,
     sampler: Option<wgpu::Sampler>,
 }
 
 struct BasicMaterialHardwareRendererInner {
-    pipeline_pass: HashMap<MaterialId, MaterialGpuResource>,
+    material_pipelines: HashMap<MaterialId, MaterialGpuResource>,
 
-    uniform_vp: wgpu::Buffer,
+    // uniform_vp: wgpu::Buffer,
 
-    vp_bind_group: Option<wgpu::BindGroup>,
+    // vp_bind_group: Option<wgpu::BindGroup>,
 
     static_mesh_merger: StaticMeshMerger,
     dynamic_mesh_buffer: GpuInputMainBuffers,
     uniform_buffer: GpuInputUniformBuffers,
 
     bind_group_for_objects: Vec<wgpu::BindGroup>,
+
+    tech: Arc<tshader::ShaderTech>,
+    commands: DrawCommands,
 }
 
 pub struct BasicMaterialHardwareRenderer {
-    inner: Option<BasicMaterialHardwareRendererInner>,
+    inner: BasicMaterialHardwareRendererInner,
 }
 
 impl BasicMaterialHardwareRenderer {
-    pub fn new() -> Self {
-        Self { inner: None }
-    }
     pub fn prepare_material_pipeline(
         &mut self,
         gpu: &WGPUResource,
         material: &Material,
-        fmt: wgpu::TextureFormat,
     ) {
         let label = self.label();
-        let inner = self.inner.as_mut().unwrap();
+        let inner = &mut self.inner;
 
         let mat = material.face_by::<BasicMaterialFace>();
-        let entry = inner.pipeline_pass.entry(material.id());
+        let entry = inner.material_pipelines.entry(material.id());
         let pipe = entry.or_insert_with(|| {
-            let shader = mat.shader_ex();
-            let (vs_source, fs_source) = forward_shader_source(shader, material.alpha_test());
-            let vs = wgpu::util::make_spirv(&vs_source);
-            let fs = wgpu::util::make_spirv(&fs_source);
-            let vs = wgpu::ShaderModuleDescriptor { label, source: vs };
-            let fs = wgpu::ShaderModuleDescriptor { label, source: fs };
+            let mut variants =material.face_by::<BasicMaterialFace>().variants();
+            let template = inner.tech.register_variant(gpu.device(), variants).unwrap();
 
-            let fs_target = match material.blend() {
-                Some(blend) => FsTarget::new_with_blend(fmt, blend),
-                None => FsTarget::new(fmt),
-            };
+            let mut obj = RenderDescriptorObject::new();
 
-            let primitive = material.primitive();
+            if let Some(blend) = material.blend() {
+                obj = obj.add_target(ColorTargetBuilder::new(gpu.surface_format()).set_default_blender().build());
+            } else {
+                obj = obj.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
+            }
+            let depth_format = wgpu::TextureFormat::Depth32Float;
 
-            let depth = wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: !material.is_transparent(),
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            };
+            obj = obj.set_primitive(|p: &mut _| *p = *material.primitive());
+            obj = obj.set_depth(depth_format, |depth: &mut _| {depth.depth_compare = wgpu::CompareFunction::Less;
+                depth.depth_write_enabled = !material.is_transparent();
+             });
 
-            let pass = PipelineReflector::new(label, gpu.device())
-                .add_vs(vs)
-                .add_fs(fs, fs_target)
-                .with_depth(depth)
-                .build(primitive.clone())
-                .unwrap();
+            let pipeline = resolve_pipeline(gpu, template, obj);
+
 
             let buf = if let Some(alpha) = material.alpha_test() {
                 let buf = gpu.new_wvp_buffer::<ConstParameterWithAlpha>(label);
@@ -244,11 +172,8 @@ impl BasicMaterialHardwareRenderer {
                 }),
             }];
 
-            let sampler = if match mat.shader_ex() {
-                BasicMaterialShader::Texture => true,
-                BasicMaterialShader::ColorTexture => true,
-                _ => false,
-            } {
+            let sampler = if variants.iter().any(|v| v.need_sampler())
+            {
                 let sampler = gpu.new_sampler_linear(label);
                 Some(sampler)
             } else {
@@ -272,16 +197,15 @@ impl BasicMaterialHardwareRenderer {
 
             let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
                 label,
-                layout: &pass.bind_group_layouts[1],
+                layout: &pipeline.pass[0].get_bind_group_layout(1),
                 entries: &entries,
             });
 
-            let pso = gpu.context().register_pso(pass);
-
             MaterialGpuResource {
-                pso,
                 buffer: buf,
                 sampler,
+                template,
+                pipeline,
                 bind_group,
             }
         });
@@ -323,12 +247,10 @@ impl<'a> VertexDataGenerator for LazyVertexDataGenerator<'a> {
 }
 
 impl MaterialRenderer for BasicMaterialHardwareRenderer {
-
     fn new_frame(&mut self, gpu: &WGPUResource) {}
     fn prepare_render(&mut self, gpu: &WGPUResource, camera: &Camera) {
         let inner = self.inner.get_or_insert_with(|| {
             let vp = gpu.new_wvp_buffer::<MVP>(Some("basic material"));
-
             BasicMaterialHardwareRendererInner {
                 pipeline_pass: HashMap::new(),
                 uniform_vp: vp,
@@ -360,21 +282,21 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
             .write_buffer(&inner.uniform_vp, 0, any_as_u8_slice(&wvp_data));
     }
 
-    fn render_material<'a, 'b>(
+    fn render_material<'a>(
         &mut self,
-        ctx: &mut MaterialRenderContext<'a, 'b>,
+        ctx: &mut MaterialRenderContext<'a>,
         objects: &[u64],
         material: &Material,
+        encoder: &mut wgpu::CommandEncoder,
     ) {
         let face = material.face_by::<BasicMaterialFace>();
         let gpu = ctx.gpu;
         let label = self.label();
 
-        self.prepare_material_pipeline(gpu, material, ctx.hint_fmt);
+        self.prepare_material_pipeline(gpu, material);
 
-        let inner = self.inner.as_mut().unwrap();
-        let mut mgr = inner.pipeline_pass.get(&material.id()).unwrap();
-        let pipe_res = gpu.context().get_resource(mgr.pso.id());
+        let inner = &mut self.inner;
+        let mut mgr = inner.material_pipelines.get(&material.id()).unwrap();
 
         // prepare dynamic buffer
         let mut total_bytes = (0, 0);
@@ -503,25 +425,51 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
         }
     }
 
-    // zorder 8bits
-    // shader 8bits
-    // ----------
-    // pso_id 32bits
-    fn sort_key(&mut self, material: &Material, gpu: &WGPUResource) -> u64 {
-        let shader_id = material.face().shader_id();
-
-        (material.id().id() as u64) | (shader_id << 48)
-    }
-
-    fn setup(&mut self, g: &mut crate::graph::rdg::RenderGraphBuilder) {
-    }
 }
 
 #[derive(Default)]
 pub struct BasicMaterialRendererFactory {}
 
 impl MaterialRendererFactory for BasicMaterialRendererFactory {
-    fn new(&self) -> Box<dyn MaterialRenderer> {
-        Box::new(BasicMaterialHardwareRenderer::new())
+    fn setup(
+        &self,
+        pass_ident: crate::render::PassIdent,
+        material: &[&Material],
+        gpu: &WGPUResource,
+        g: &mut crate::graph::rdg::RenderGraphBuilder,
+        shader_loader: &tshader::Loader,
+    ) -> Arc<Mutex<dyn MaterialRenderer>> {
+        let label = Some("basic");
+        let tech = shader_loader.load_tech("basic_forward").unwrap();
+
+        let r = Arc::new(Mutex::new(
+            BasicMaterialHardwareRenderer {
+                inner: BasicMaterialHardwareRendererInner {
+                    tech,
+                    material_pipelines: HashMap::new(),
+                }
+            }
+        ));
+
+        let texture = g.import_texture();
+
+        let pass = RenderPassBuilder::new("basic render pass");
+        pass.bind_default_render_target();
+        pass.read_texture(texture);
+        pass.async_execute(r.clone());
+
+        g.add_render_pass(pass.build());
+
+        r
+    }
+
+    // zorder 8bits
+    // shader 8bits
+    // ----------
+    // pso_id 32bits
+    fn sort_key(&self, material: &Material, gpu: &WGPUResource) -> u64 {
+        let shader_id = material.face().shader_id();
+
+        (material.id().id() as u64) | (shader_id << 48)
     }
 }

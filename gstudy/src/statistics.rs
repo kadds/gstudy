@@ -56,7 +56,7 @@ impl Statistics {
 
         let pass = now - self.last_statistics_timestamp;
         if pass >= self.statistics_tick || self.fps == 0f32 {
-            self.frame_secends = (pass.as_micros() as f32 / 1000_000f32) / self.times as f32;
+            self.frame_secends = (pass.as_micros() as f32 / 1_000_000_f32) / self.times as f32;
             self.fps = 1.0f32 / self.frame_secends;
             self.frame_count = self.times;
 

@@ -22,7 +22,7 @@ fn main() {
 
     let _log = slog::Logger::root(_g, slog::o!());
     let _scope_guard = slog_scope::set_global_logger(_log);
-    let _log_guard = slog_stdlog::init().unwrap();
+    slog_stdlog::init().unwrap();
 
     entry::real_main();
 }

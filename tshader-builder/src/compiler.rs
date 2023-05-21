@@ -1,8 +1,8 @@
-use std::{path::{Path, PathBuf}, collections::{HashMap, HashSet}, str::FromStr};
 use itertools::Itertools;
+use std::{path::PathBuf, str::FromStr};
 
-use serde_derive::{Serialize, Deserialize};
-use strum::{Display, EnumString, EnumIter};
+use serde_derive::Deserialize;
+use strum::{Display, EnumIter, EnumString};
 
 use crate::preprocessor::{Preprocessor, PreprocessorConfig};
 
@@ -41,7 +41,6 @@ pub struct Config {
     pub pass: Vec<Pass>,
 }
 
-
 #[derive(Debug, Clone, Copy, Display, EnumIter, EnumString, PartialEq, Eq, Hash)]
 #[repr(u8)]
 #[strum(serialize_all = "snake_case", use_phf)]
@@ -58,6 +57,19 @@ pub enum Variant {
     VertexColor,
     #[strum(serialize = "ALPHA_TEST")]
     AlphaTest,
+}
+
+impl Variant {
+    pub fn need_sampler(&self) -> bool {
+        match self {
+            Variant::TextureColor => true,
+            Variant::NormalTex => true,
+            Variant::HeightTex => true,
+            Variant::EmissionTex => true,
+            Variant::VertexColor => false,
+            Variant::AlphaTest => false,
+        }
+    }
 }
 
 pub fn variants_name<S: Into<Vec<Variant>>>(variants: S) -> String {
@@ -90,19 +102,16 @@ pub struct ShaderTechCompiler {
     include_base_path: PathBuf,
 }
 
-
 impl ShaderTechCompiler {
     pub fn new<P: Into<PathBuf>>(source: &str, base_path: P) -> anyhow::Result<Self> {
         let p: PathBuf = base_path.into();
         let mut source_path = p.join(source);
         source_path.set_extension("toml");
 
-        let source = std::fs::read_to_string(&source_path).map_err(|e| {
-            anyhow::anyhow!("{} {:?}", e, p)
-        })?;
+        let source =
+            std::fs::read_to_string(&source_path).map_err(|e| anyhow::anyhow!("{} {:?}", e, p))?;
         let mut config: Config = toml::from_str(&source)?;
         config.pass.sort_by_key(|k| k.index);
-
 
         Ok(Self {
             config,
@@ -111,7 +120,11 @@ impl ShaderTechCompiler {
         })
     }
 
-    pub fn compile_pass(&self, pass_index: usize, variants: &[Variant]) -> anyhow::Result<PassShaderSourceDescriptor> {
+    pub fn compile_pass(
+        &self,
+        pass_index: usize,
+        variants: &[Variant],
+    ) -> anyhow::Result<PassShaderSourceDescriptor> {
         let mut cfg = PreprocessorConfig::default();
 
         for variant in variants {
@@ -125,14 +138,19 @@ impl ShaderTechCompiler {
 
         let res = preprocessor.process(&real_path.as_os_str().to_str().unwrap())?;
 
-        let shaders = self.config.pass[pass_index].shaders.iter()
-            .map(|v| Shader::from_str(&v)).collect::<Result<Vec<_>, strum::ParseError>>()?;
+        let shaders = self.config.pass[pass_index]
+            .shaders
+            .iter()
+            .map(|v| Shader::from_str(&v))
+            .collect::<Result<Vec<_>, strum::ParseError>>()?;
 
-        Ok(PassShaderSourceDescriptor { source: res, include_shaders: shaders })
+        Ok(PassShaderSourceDescriptor {
+            source: res,
+            include_shaders: shaders,
+        })
     }
 
     pub fn npass(&self) -> usize {
         self.config.pass.len()
     }
-
 }

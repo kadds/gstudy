@@ -1,20 +1,17 @@
 use nalgebra::Unit;
 
-use core::backends::wgpu_backend::{WGPURenderTarget, WGPUResource};
-use core::backends::WGPUBackend;
-use core::context::{RContext, RContextRef, ResourceRef};
+use core::backends::wgpu_backend::WGPUResource;
+
+use core::context::{RContext, ResourceRef};
 use core::event::{Event, EventSender};
-use core::ps::{BlendState, PrimitiveStateDescriptor};
+use core::render::default_blender;
 // use crate::geometry::axis::{Axis, AxisMesh};
 use crate::taskpool::{TaskPool, TaskPoolBuilder};
 use crate::util::any_as_x_slice_array;
 use core::geometry::{Geometry, MeshCoordType};
 use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
-use core::scene::{
-    Camera, Object, Scene, Transform, TransformBuilder, LAYER_ALPHA_TEST, LAYER_BACKGROUND,
-    LAYER_NORMAL, LAYER_TRANSPARENT,
-};
+use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
 use core::types::{BoundBox, Size, Vec2f, Vec3f, Vec4f};
 // use core::util::any_as_x_slice_array;
 use core::{
@@ -23,7 +20,7 @@ use core::{
 };
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::{
     fs::File,
     io::{BufReader, Read},
@@ -41,16 +38,16 @@ impl<'a> GltfBuffer<'a> {
         let size = accessor.size() * accessor.count();
         match self {
             GltfBuffer::Cursor(c) => {
-                c.seek(SeekFrom::Start(offset));
+                let _ = c.seek(SeekFrom::Start(offset));
                 let mut buf = Vec::new();
-                buf.resize(size as usize, 0);
+                buf.resize(size, 0);
                 c.read_exact(&mut buf).unwrap();
                 buf
             }
             GltfBuffer::File(f) => {
-                f.seek(SeekFrom::Start(offset));
+                let _ = f.seek(SeekFrom::Start(offset));
                 let mut buf = Vec::new();
-                buf.resize(size as usize, 0);
+                buf.resize(size, 0);
                 f.read_exact(&mut buf).unwrap();
                 buf
             }
@@ -214,7 +211,7 @@ fn parse_mesh(
                 }
                 gltf::Semantic::Normals => {}
                 gltf::Semantic::Tangents => {}
-                gltf::Semantic::Colors(index) => {
+                gltf::Semantic::Colors(_index) => {
                     kind = kind.add_color().unwrap();
 
                     let buf = buf_readers[0].read_bytes(&accessor);
@@ -238,7 +235,7 @@ fn parse_mesh(
 
                     gmesh.set_coord_vec4f(MeshCoordType::Color, data);
                 }
-                gltf::Semantic::TexCoords(index) => {
+                gltf::Semantic::TexCoords(_index) => {
                     if let Some(v) = kind.add_texture() {
                         kind = v;
                     }
@@ -265,8 +262,8 @@ fn parse_mesh(
 
                     gmesh.set_coord_vec2f(MeshCoordType::TexCoord, data);
                 }
-                gltf::Semantic::Joints(index) => {}
-                gltf::Semantic::Weights(index) => {}
+                gltf::Semantic::Joints(_index) => {}
+                gltf::Semantic::Weights(_index) => {}
             }
         }
         color = p
@@ -282,7 +279,7 @@ fn parse_mesh(
         g.set_attribute(core::geometry::Attribute::ConstantColor, Arc::new(color));
         g = g.with_transform(transform.clone());
 
-        gscene.add_object(Object::new(Box::new(g), material));
+        gscene.add_object(RenderObject::new(Box::new(g), material));
     }
     log::info!("mesh {:?} {:?}", mesh.name(), transform);
 
@@ -296,10 +293,10 @@ fn parse_texture(
     texture: gltf::Texture,
 ) -> anyhow::Result<()> {
     let source = texture.source().source();
-    let (data, ty) = match source {
-        gltf::image::Source::View { view, mime_type } => {
-            let buf = view.buffer();
-            let offset = view.offset();
+    let (data, _ty) = match source {
+        gltf::image::Source::View { view, mime_type: _ } => {
+            let _buf = view.buffer();
+            let _offset = view.offset();
             todo!();
         }
         gltf::image::Source::Uri { uri, mime_type } => {
@@ -338,7 +335,7 @@ fn parse_node(
     transform: &Transform,
     bound_box: &mut BoundBox,
 ) -> anyhow::Result<()> {
-    let d = node.transform().clone().decomposed();
+    let d = node.transform().decomposed();
     let q = nalgebra::Quaternion::from(Vec4f::new(d.1[0], d.1[1], d.1[2], d.1[3]));
     let q = Unit::new_unchecked(q);
 
@@ -399,7 +396,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     // add default material
     {
-        let primitive = PrimitiveStateDescriptor::default();
+        let primitive = wgpu::PrimitiveState::default();
         let mut material_builder = MaterialBuilder::default();
         material_builder = material_builder.with_primitive(primitive);
 
@@ -419,10 +416,10 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     for material in gltf.materials() {
         let idx = material.index().unwrap_or_default();
-        let mut primitive = PrimitiveStateDescriptor::default();
+        let mut primitive = wgpu::PrimitiveState::default();
         let mut material_builder = MaterialBuilder::default();
         if material.double_sided() {
-            primitive = primitive.with_cull_face(core::ps::CullFace::None);
+            primitive.cull_mode = None;
         }
         material_builder = material_builder.with_primitive(primitive);
 
@@ -443,7 +440,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                     material_builder.with_alpha_test(material.alpha_cutoff().unwrap_or(0.5f32));
             }
             gltf::material::AlphaMode::Blend => {
-                material_builder = material_builder.with_blend(BlendState::default_gltf_blender());
+                material_builder = material_builder.with_blend(default_blender());
             }
         }
 
@@ -494,13 +491,13 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     let dist = nalgebra::distance(&from.into(), &center.into());
 
-    let mut from_max_point = from.clone();
+    let mut from_max_point = from;
     // from_max_point.z = bound_box.max().z + size.max() * 4f32;
     // if from_max_point.z > from.z {
     from_max_point.z = from.z - bound_box.size().z / 100f32;
     // }
 
-    let mut from_min_point = from.clone();
+    let mut from_min_point = from;
     from_min_point.z = bound_box.min().z - size.max() * 100f32;
 
     let camera = match gltf.cameras().next() {
@@ -522,7 +519,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                         c.aspect_ratio().unwrap_or(aspect),
                         c.yfov(),
                         c.znear(),
-                        c.zfar().unwrap_or(1000_00f32),
+                        c.zfar().unwrap_or(100_000_f32),
                     );
                     camera
                 }
@@ -538,7 +535,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
         }
     };
 
-    camera.look_at(from.into(), center.into(), Vec3f::new(0f32, 1f32, 0f32));
+    camera.look_at(from, center, Vec3f::new(0f32, 1f32, 0f32));
     let camera = Arc::new(camera);
     log::info!(
         "bound box {:?} with camera {:?} distance {}",
@@ -569,7 +566,7 @@ fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<Resou
         };
 
         log::error!("load model {}", name);
-        let _ = proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(result))));
+        proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(result))));
     }
 }
 
@@ -584,7 +581,7 @@ impl Loader {
         let (tx, rx) = mpsc::channel();
         let rm = resource_manager.clone();
         let mut this = Self {
-            thread: None.into(),
+            thread: None,
             tx,
             resource_manager,
         };

@@ -2,6 +2,7 @@ use crate::loader::ResourceManager;
 use core::backends::WGPUBackend;
 use std::sync::Arc;
 
+#[allow(unused)]
 pub fn real_main() {
     use crate::{loader::Loader, looper};
 
@@ -31,7 +32,7 @@ pub fn real_main() {
     let resource_manager = Arc::new(ResourceManager::new(gpu));
     looper.bind(backend, resource_manager.clone());
 
-    let loader = Loader::new(resource_manager.clone());
+    let loader = Loader::new(resource_manager);
     looper.register_processor(loader.event_processor());
 
     looper.run();

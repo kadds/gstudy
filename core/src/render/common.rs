@@ -1,6 +1,7 @@
 use std::{
     cell::{Ref, RefCell},
     collections::{HashMap, HashSet},
+    hash::Hash,
     marker::PhantomData,
     num::NonZeroU64,
     ops::{Not, Range},
@@ -284,5 +285,46 @@ impl StaticMeshMerger {
         let p = self.objects.get(&id).unwrap();
         let b = p.vertex.share_buffer.borrow();
         unsafe { std::mem::transmute(b.buf.slice(range)) }
+    }
+}
+
+pub struct FramedCache<K: Hash + Eq + PartialEq + Clone, V> {
+    map: HashMap<K, V>,
+    used: HashSet<K>,
+    frame: u64,
+}
+
+impl<K: Hash + Eq + PartialEq + Clone, V> FramedCache<K, V> {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            used: HashSet::new(),
+            frame: 0,
+        }
+    }
+
+    pub fn recall(&mut self) {
+        self.frame += 1;
+        if self.frame % 16 != 0 {
+            return;
+        }
+
+        let mut removal = vec![];
+
+        for (key, _) in &self.map {
+            if !self.used.contains(key) {
+                removal.push(key.clone());
+            }
+        }
+        for key in removal {
+            self.map.remove(&key);
+        }
+
+        self.used.clear();
+    }
+
+    pub fn get_or<F: FnOnce(&K) -> V>(&mut self, key: K, f: F) -> &V {
+        self.used.insert(key.clone());
+        self.map.entry(key.clone()).or_insert_with(|| f(&key))
     }
 }

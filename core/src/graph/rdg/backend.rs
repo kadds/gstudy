@@ -108,6 +108,7 @@ impl GraphBackend {
                         dimension: wgpu::TextureDimension::D2,
                         format: t.format,
                         usage: t.usage,
+                        view_formats: &[],
                     });
                     self.gpu.context().register_texture(tex)
                 } else {
@@ -123,6 +124,7 @@ impl GraphBackend {
                         dimension: wgpu::TextureDimension::D3,
                         format: t.format,
                         usage: t.usage,
+                        view_formats: &[],
                     });
                     self.gpu.context().register_texture(tex)
                 }

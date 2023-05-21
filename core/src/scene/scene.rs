@@ -1,3 +1,5 @@
+use bevy_ecs::prelude::Component;
+
 use crate::{
     context::RContextRef,
     geometry::Geometry,
@@ -29,7 +31,7 @@ pub const LAYER_UI: u64 = 10_0000;
 pub struct Scene {
     context: RContextRef,
 
-    objects: HashMap<u64, Object>,
+    objects: HashMap<u64, RenderObject>,
 
     // reader layer -> objects
     layers: BTreeMap<u64, LayerObjects>,
@@ -39,7 +41,8 @@ pub struct Scene {
     cameras: Vec<Arc<Camera>>,
     ui_camera: Option<Arc<Camera>>,
 
-    change: AtomicBool,
+    material_face_map: HashMap<TypeId, i32>,
+    material_face_change_map: HashMap<TypeId, i32>,
 }
 
 impl Scene {
@@ -52,7 +55,8 @@ impl Scene {
 
             cameras: Vec::new(),
             ui_camera: None,
-            change: AtomicBool::new(false),
+            material_face_map: HashMap::new(),
+            material_face_change_map: HashMap::new(),
         }
     }
 
@@ -84,7 +88,7 @@ impl Scene {
         self.objects.len()
     }
 
-    pub fn add_object(&mut self, object: Object) -> u64 {
+    pub fn add_object(&mut self, object: RenderObject) -> u64 {
         if object.is_alpha_test() {
             self.add_object_with(object, LAYER_ALPHA_TEST)
         } else if object.is_blend() {
@@ -94,11 +98,11 @@ impl Scene {
         }
     }
 
-    pub fn add_ui(&mut self, object: Object) -> u64 {
+    pub fn add_ui(&mut self, object: RenderObject) -> u64 {
         self.add_object_with(object, LAYER_UI)
     }
 
-    pub fn add_object_with(&mut self, object: Object, layer: u64) -> u64 {
+    pub fn add_object_with(&mut self, object: RenderObject, layer: u64) -> u64 {
         let id = self.context.alloc_object_id();
 
         let material = object.material();
@@ -109,10 +113,12 @@ impl Scene {
 
         entry.map.entry(material_id).or_default().push(id);
         entry.dirty = true;
+        self.material_face_change_map
+            .entry(material.face_id())
+            .and_modify(|v| *v += 1)
+            .or_insert(1);
 
         self.objects.insert(id, object);
-
-        self.change.store(true, atomic::Ordering::SeqCst);
 
         id
     }
@@ -132,11 +138,11 @@ impl Scene {
     //     true
     // }
 
-    pub fn get_object(&self, id: u64) -> Option<&Object> {
+    pub fn get_object(&self, id: u64) -> Option<&RenderObject> {
         self.objects.get(&id)
     }
 
-    pub fn get_object_mut(&mut self, id: u64) -> Option<&mut Object> {
+    pub fn get_object_mut(&mut self, id: u64) -> Option<&mut RenderObject> {
         self.objects.get_mut(&id)
     }
 
@@ -144,9 +150,39 @@ impl Scene {
         self.layers.iter()
     }
 
-    pub fn change(&self) -> bool {
-        let change = self.change.load(atomic::Ordering::SeqCst);
-        change
+    pub fn material_change(&mut self) -> bool {
+        let m = self.material_face_map.clone();
+
+        for (id, n) in &self.material_face_change_map {
+            let entry = self.material_face_map.entry(*id);
+            entry.or_default();
+            *self.material_face_map.get_mut(id).unwrap() += *n;
+        }
+
+        let mut removal = vec![];
+        for (id, n) in &self.material_face_map {
+            if *n <= 0 {
+                removal.push(*id);
+            }
+        }
+
+        for id in removal {
+            self.material_face_map.remove(&id);
+        }
+
+        self.material_face_change_map.clear();
+
+        if m.len() != self.material_face_map.len() {
+            return true;
+        }
+
+        for (key, _) in m {
+            if !self.material_face_map.contains_key(&key) {
+                return true;
+            }
+        }
+        // log::info!("key {:?} {}", self.material_face_map, self.object_size());
+        false
     }
 
     pub fn layer(&self, layer: u64) -> &LayerObjects {
@@ -175,17 +211,16 @@ impl Scene {
         }
     }
 
-    pub fn update(&self, delta: f64) {
-        self.change.store(false, atomic::Ordering::SeqCst)
-    }
+    pub fn update(&self, delta: f64) {}
 
     pub fn clear_objects(&mut self) {
         for (_, layer) in &mut self.layers {
             layer.sorted_objects.clear();
             layer.map.clear();
             layer.dirty = true;
+            self.material_face_change_map.clear();
+            self.material_face_map.clear();
         }
-        self.change.store(true, atomic::Ordering::SeqCst);
         self.objects.clear();
     }
 
@@ -194,10 +229,14 @@ impl Scene {
         if let Some(v) = v {
             for (_, objs) in &v.map {
                 for obj in objs {
+                    let material = self.objects.get(&obj).unwrap().material();
+                    self.material_face_change_map
+                        .entry(material.face_id())
+                        .and_modify(|v| *v -= 1)
+                        .or_insert(-1);
                     self.objects.remove(&obj);
                 }
             }
-            self.change.store(true, atomic::Ordering::SeqCst);
             v.map.clear();
             v.sorted_objects.clear();
             v.dirty = true;
@@ -207,20 +246,36 @@ impl Scene {
     pub fn drop_objects(&self) -> &[u64] {
         &self.drop_objects
     }
+
+    pub fn calculate_bytes(&self, objects: &[u64]) -> (u64, u64) {
+        let mut total_bytes = (0, 0);
+
+        for id in objects {
+            let object = self.get_object(*id).unwrap();
+            let mesh = object.geometry().mesh();
+            let vertices = mesh.mixed_mesh();
+            let indices = mesh.indices();
+            total_bytes = (
+                total_bytes.0 + indices.len() as u64,
+                total_bytes.1 + vertices.len() as u64,
+            );
+        }
+        total_bytes
+    }
 }
 
 pub trait ObjectDrop: std::fmt::Debug {
     fn drop(&self, id: u64);
 }
 
-#[derive(Debug)]
-pub struct Object {
+#[derive(Debug, Component)]
+pub struct RenderObject {
     geometry: Box<dyn Geometry>,
     material: Arc<Material>,
     z_order: i8,
 }
 
-impl Object {
+impl RenderObject {
     pub fn new(geometry: Box<dyn Geometry>, material: Arc<Material>) -> Self {
         Self {
             geometry,
@@ -253,3 +308,5 @@ impl Object {
         self.z_order
     }
 }
+
+fn mesh_render_system() {}

@@ -9,10 +9,11 @@ edition = "2021"
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.7"
-naga = {version="0.11", features = ["wgsl-in"]}
+naga = {version="0.12", features = ["wgsl-in"]}
 anyhow = "1.0.57"
-wgpu-types = "0.14"
-num_enum = "0.5.7"
+wgpu-types = "0.16"
+num_enum = "0.6"
 dashmap = "5.4.0"
 tshader-builder = {path="../tshader-builder"}
-wgpu = { version = "0.14" , default-features = false, features = ["spirv", "webgl"]}
+wgpu = { version = "0.16" , default-features = false, features = ["webgl", "wgsl"]}
+

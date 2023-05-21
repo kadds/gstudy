@@ -8,7 +8,7 @@ use std::{
 use tshader::ShaderTech;
 
 use crate::{
-    backends::wgpu_backend::{PipelineReflector, WGPUResource},
+    backends::wgpu_backend::WGPUResource,
     graph::rdg::{RenderGraph, RenderGraphBuilder},
     material::Material,
     scene::{Camera, Scene},
@@ -32,6 +32,12 @@ pub trait MaterialRenderer {
     );
 }
 
+pub struct SetupResource<'a> {
+    pub ui_camera: &'a wgpu::Buffer,
+    pub main_camera: &'a wgpu::Buffer,
+    pub shader_loader: &'a tshader::Loader,
+}
+
 pub trait MaterialRendererFactory {
     fn setup(
         &self,
@@ -39,7 +45,7 @@ pub trait MaterialRendererFactory {
         material: &[&Material],
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
-        shader_loader: &tshader::Loader,
+        setup_resource: &SetupResource,
     ) -> Arc<Mutex<dyn MaterialRenderer>>;
     fn sort_key(&self, material: &Material, gpu: &WGPUResource) -> u64;
 }
@@ -51,6 +57,7 @@ struct BufferCache {
 
 // pub mod basic;
 pub mod egui;
+// pub mod basic;
 
 pub struct HardwareMaterialShaderResource {
     pub pass: smallvec::SmallVec<[Arc<wgpu::RenderPipeline>; 1]>,

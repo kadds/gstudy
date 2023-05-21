@@ -1,24 +1,24 @@
 use std::{
-    any::{Any, TypeId},
-    collections::{HashMap, HashSet},
+    any::TypeId,
+    collections::HashMap,
     ops::Range,
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
 use crate::{
-    backends::wgpu_backend::{self, WGPURenderTarget, WGPURenderer, WGPUResource},
+    backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
-    material::{basic::BasicMaterialFace, egui::EguiMaterialFace, MaterialFace, MaterialId},
-    ps::{DepthDescriptor, PrimitiveStateDescriptor},
+    material::{egui::EguiMaterialFace, MaterialFace},
+    render::material::SetupResource,
     scene::{Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
     util::any_as_u8_slice,
 };
 
 use self::material::{
-    egui::{EguiMaterialHardwareRenderer, EguiMaterialRendererFactory},
-    MaterialRendererFactory, MaterialResourceId,
+    egui::EguiMaterialRendererFactory,
+    MaterialRendererFactory,
+    // basic::BasicMaterialRendererFactory,
 };
 use self::material::{MaterialRenderContext, MaterialRenderer};
 
@@ -81,12 +81,7 @@ struct DrawCommandBuilder<'a> {
 }
 
 impl<'a> DrawCommandBuilder<'a> {
-    pub fn with_draw(mut self, index: Range<u64>, vertex: Range<u64>, draw_count: u32) -> Self {
-        self.set_draw(index, vertex, draw_count);
-        self
-    }
-
-    pub fn set_draw(&mut self, index: Range<u64>, vertex: Range<u64>, draw_count: u32) {
+    pub fn draw_index(&mut self, index: Range<u64>, vertex: Range<u64>, draw_count: u32) {
         self.command = Some(DrawCommand {
             vertex,
             index,
@@ -98,44 +93,59 @@ impl<'a> DrawCommandBuilder<'a> {
         })
     }
 
+    fn command_mut(&mut self) -> &mut DrawCommand {
+        self.command.as_mut().unwrap()
+    }
+
     pub fn with_clip(mut self, clip: Rectu) -> Self {
+        self.set_clip(clip);
+        self
+    }
+
+    pub fn set_clip(&mut self, clip: Rectu) {
         if let Some(last) = self.inner.clips.last() {
             if *last == clip {
-                self.command.as_mut().unwrap().clip_offset = (self.inner.clips.len() - 1) as u32;
-                return self;
+                self.command_mut().clip_offset = (self.inner.clips.len() - 1) as u32;
+                return;
             }
         }
-        self.command.as_mut().unwrap().clip_offset = (self.inner.clips.len()) as u32;
+        self.command_mut().clip_offset = (self.inner.clips.len()) as u32;
         self.inner.clips.push(clip);
-        self
     }
 
     pub fn with_constant(mut self, buffer: &[u8]) -> Self {
+        self.set_constant(buffer);
+        self
+    }
+
+    pub fn set_constant(&mut self, buffer: &[u8]) {
+        assert_eq!(buffer.len(), self.inner.constant_buffer_size as usize);
+        assert_eq!(self.command_mut().push_constant_offset, u32::MAX);
+
         let offset = self.inner.push_constant_buffer.len() as u32;
         self.inner.push_constant_buffer.extend_from_slice(buffer);
-        self.command.as_mut().unwrap().push_constant_offset = offset;
-
-        self
+        self.command_mut().push_constant_offset = offset;
     }
 
     pub fn with_bind_groups(mut self, group: &[Arc<wgpu::BindGroup>]) -> Self {
+        self.set_bind_groups(group);
+        self
+    }
+
+    pub fn set_bind_groups(&mut self, group: &[Arc<wgpu::BindGroup>]) {
         assert_eq!(group.len() as u8, self.inner.bind_group_count);
         let offset = self.inner.bind_groups.len() as u32;
         self.inner.bind_groups.extend_from_slice(group);
-        self.command.as_mut().unwrap().bind_groups = offset;
+        self.command_mut().bind_groups = offset;
+    }
 
+    pub fn with_pipeline(mut self, pipeline: u32) -> Self {
+        self.set_pipeline(pipeline);
         self
     }
 
-    pub fn with_pipeline(mut self, pipeline: Arc<Pipeline>) -> Self {
-        let offset = self.inner.pipelines.len() as u32;
-        self.inner.pipelines.push(pipeline);
-        self.command.as_mut().unwrap().pipeline = offset;
-        self
-    }
-    pub fn with_pipeline_offset(mut self, pipeline: u32) -> Self {
-        self.command.as_mut().unwrap().pipeline = pipeline;
-        self
+    pub fn set_pipeline(&mut self, pipeline: u32) {
+        self.command_mut().pipeline = pipeline;
     }
 
     pub fn build(self) {
@@ -158,12 +168,14 @@ impl DrawCommands {
             global_bind_group: u32::MAX,
         }
     }
-    pub fn builder<'a>(&'a mut self) -> DrawCommandBuilder<'a> {
+
+    pub fn new_command<'a>(&'a mut self) -> DrawCommandBuilder<'a> {
         DrawCommandBuilder {
             inner: self,
             command: None,
         }
     }
+
     fn get_bind_groups(&self, command: &DrawCommand) -> impl Iterator<Item = &wgpu::BindGroup> {
         if command.bind_groups == u32::MAX {
             self.bind_groups[0..0].iter()
@@ -179,6 +191,7 @@ impl DrawCommands {
         &self.push_constant_buffer[(command.push_constant_offset as usize)
             ..((command.push_constant_offset + self.constant_buffer_size as u32) as usize)]
     }
+
     fn get_clip(&self, command: &DrawCommand) -> Option<Rectu> {
         if command.clip_offset == u32::MAX {
             return None;
@@ -187,7 +200,7 @@ impl DrawCommands {
         }
     }
 
-    fn push_cached_pipeline(&mut self, pipeline: Arc<Pipeline>) -> u32 {
+    fn add_pipeline(&mut self, pipeline: Arc<Pipeline>) -> u32 {
         let offset = self.pipelines.len() as u32;
         self.pipelines.push(pipeline);
         offset
@@ -209,23 +222,51 @@ impl DrawCommands {
         }
     }
 
-    fn get_pipeline(&self, command: &DrawCommand) -> &Pipeline {
-        &self.pipelines[command.pipeline as usize]
-    }
+    pub fn draw<'a>(
+        &'a mut self,
+        pass: &mut wgpu::RenderPass<'a>,
+        buffers: &'a GpuInputMainBuffers,
+    ) {
+        pass.set_bind_group(0, self.get_global_bind_group().unwrap(), &[]);
 
-    pub fn commands(&mut self) -> Vec<DrawCommand> {
-        let mut tmp = Vec::new();
-        std::mem::swap(&mut self.commands, &mut tmp);
-        tmp
+        let mut last_pipeline = u32::MAX;
+        for command in &self.commands {
+            if let Some(clip) = self.get_clip(&command) {
+                pass.set_scissor_rect(clip.x, clip.y, clip.z, clip.w);
+            }
+            if last_pipeline != command.pipeline {
+                last_pipeline = command.pipeline;
+                if let Pipeline::Render(pipeline) =
+                    self.pipelines[command.pipeline as usize].as_ref()
+                {
+                    pass.set_pipeline(pipeline);
+                }
+            }
+
+            let mut bind_group_iter = self.get_bind_groups(&command);
+            let g = bind_group_iter.next().unwrap();
+
+            pass.set_bind_group(1, g, &[]);
+
+            pass.set_index_buffer(
+                buffers.index_buffer_slice(command.index.clone()),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.set_vertex_buffer(0, buffers.vertex_buffer_slice(command.vertex.clone()));
+            pass.draw_indexed(0..command.draw_count, 0, 0..1);
+        }
     }
 
     pub fn clear(&mut self) {
         self.bind_groups.clear();
         self.clips.clear();
         self.pipelines.clear();
+        self.commands.clear();
+        self.push_constant_buffer.clear();
         self.global_bind_group = u32::MAX;
     }
 }
+
 struct DrawCommand {
     vertex: Range<u64>,
     index: Range<u64>,
@@ -238,29 +279,13 @@ struct DrawCommand {
 
 struct GlobalUniform {
     buffer: wgpu::Buffer,
-    bind_group: Arc<wgpu::BindGroup>,
 }
 
 impl GlobalUniform {
     pub fn new(gpu: &WGPUResource, layout: &wgpu::BindGroupLayout, size: u32) -> Self {
         let label = Some("global uniform");
         let buffer = gpu.new_uniform_buffer(label, size as u64);
-        let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label,
-            layout: layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            }],
-        });
-        Self {
-            buffer,
-            bind_group: Arc::new(bind_group),
-        }
+        Self { buffer }
     }
 }
 
@@ -286,6 +311,11 @@ impl HardwareRenderer {
             TypeId::of::<EguiMaterialFace>(),
             Box::new(EguiMaterialRendererFactory::default()),
         );
+
+        // material_renderer_factory.insert(
+        //     TypeId::of::<BasicMaterialFace>(),
+        //     Box::new(BasicMaterialRendererFactory::default()),
+        // );
         let shader_loader = tshader::Loader::new("./shaders/desc.toml".into()).unwrap();
 
         Self {
@@ -339,6 +369,14 @@ impl ModuleRenderer for HardwareRenderer {
             f.sort_key(m, &gpu)
         });
 
+        let inner = self.inner.as_ref().unwrap();
+
+        let setup_resource = SetupResource {
+            ui_camera: &inner.ui_camera.buffer,
+            main_camera: &inner.main_camera.buffer,
+            shader_loader: &self.shader_loader,
+        };
+
         for (layer, objects) in scene.layers() {
             let mut last_material_id = TypeId::of::<u32>();
             let mut mats = Vec::new();
@@ -352,10 +390,8 @@ impl ModuleRenderer for HardwareRenderer {
                             .material_renderer_factory
                             .get(&last_material_id)
                             .unwrap();
-                        self.material_renderers.insert(
-                            ident,
-                            f.setup(ident, &mats, &gpu, g, &mut self.shader_loader),
-                        );
+                        self.material_renderers
+                            .insert(ident, f.setup(ident, &mats, &gpu, g, &setup_resource));
                     }
                     // new material face
                     last_material_id = id;
@@ -369,10 +405,8 @@ impl ModuleRenderer for HardwareRenderer {
                     .material_renderer_factory
                     .get(&last_material_id)
                     .unwrap();
-                self.material_renderers.insert(
-                    ident,
-                    f.setup(ident, &mats, &gpu, g, &mut self.shader_loader),
-                );
+                self.material_renderers
+                    .insert(ident, f.setup(ident, &mats, &gpu, g, &setup_resource));
             }
         }
     }
@@ -398,6 +432,11 @@ impl ModuleRenderer for HardwareRenderer {
                 .queue()
                 .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
         }
+
+        scene.sort_all(|layer, m| {
+            let f = self.material_renderer_factory.get(&m.face_id()).unwrap();
+            f.sort_key(m, &gpu)
+        });
 
         let g = p.g;
 
@@ -458,6 +497,7 @@ impl Pipeline {
 
 #[derive(Debug)]
 pub struct PipelinePassResource {
+    #[allow(unused)]
     inner: Arc<Vec<tshader::Pass>>,
     pass: Vec<Arc<Pipeline>>,
 }
@@ -498,19 +538,28 @@ impl ColorTargetBuilder {
     }
 
     pub fn set_default_blender(mut self) -> Self {
-        self.target.blend = Some(wgpu::BlendState {
-            color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::SrcAlpha,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-            alpha: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::Zero,
-                operation: wgpu::BlendOperation::Add,
-            },
-        });
+        self.target.blend = Some(default_blender());
         self
+    }
+
+    pub fn clear_blender(mut self) -> Self {
+        self.target.blend = None;
+        self
+    }
+}
+
+pub fn default_blender() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::Zero,
+            operation: wgpu::BlendOperation::Add,
+        },
     }
 }
 

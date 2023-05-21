@@ -8,7 +8,6 @@ use std::{
 use crate::{
     context::{RContext, RContextRef, ResourceRef},
     event::{Event, EventProcessor, EventSource, ProcessEventResult},
-    ps::{DepthDescriptor, DepthStencilDescriptor},
     types::{Rectu, Size},
 };
 use anyhow::{anyhow, Result};
@@ -74,6 +73,7 @@ impl WGPUResource {
             height,
             present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
         }
     }
     pub(crate) fn device(&self) -> &Device {
@@ -89,7 +89,6 @@ impl WGPUResource {
         let cp = self.surface().get_current_texture()?;
         let c = Arc::new(cp);
         let texture = self.context.register_surface_texture(c.clone());
-
 
         Ok(WindowSurfaceFrame {
             texture: Some(texture),
@@ -158,6 +157,7 @@ impl WGPUResource {
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
             data,
         );
@@ -181,6 +181,7 @@ impl WGPUResource {
             usage: wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         });
 
         self.context().register_texture(texture)
@@ -208,7 +209,7 @@ impl WGPUResource {
         let row_bytes = rectangle.z * bytes_per_pixel;
         let data_layout = wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: NonZeroU32::new(row_bytes),
+            bytes_per_row: Some(row_bytes),
             rows_per_image: None,
         };
 
@@ -238,6 +239,7 @@ impl WGPUResource {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
         texture
     }
@@ -260,6 +262,7 @@ impl WGPUResource {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
         texture
     }
@@ -284,6 +287,7 @@ impl WGPUResource {
             usage: wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         });
         texture
     }
@@ -300,7 +304,7 @@ impl WGPUResource {
             lod_min_clamp: 0f32,
             lod_max_clamp: f32::MAX,
             compare: None,
-            anisotropy_clamp: None,
+            anisotropy_clamp: 1,
             border_color: None,
         })
     }
@@ -317,7 +321,7 @@ impl WGPUResource {
             lod_min_clamp: 0f32,
             lod_max_clamp: f32::MAX,
             compare: None,
-            anisotropy_clamp: None,
+            anisotropy_clamp: 1,
             border_color: None,
         })
     }
@@ -372,8 +376,11 @@ impl WGPUBackend {
             }
         };
 
-        let instance = Instance::new(bits);
-        let surface = unsafe { instance.create_surface(surface) };
+        let instance = Instance::new(wgpu::InstanceDescriptor {
+            backends: bits,
+            dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+        });
+        let surface = unsafe { instance.create_surface(surface) }.unwrap();
         let adapter_fut = instance.request_adapter(&RequestAdapterOptions {
             power_preference: PowerPreference::HighPerformance,
             force_fallback_adapter: false,
@@ -424,8 +431,7 @@ impl WGPUBackend {
             Ok(v) => v,
             Err(e) => pollster::block_on(device_fut2)?,
         };
-
-        let formats = surface.get_supported_formats(&adapter);
+        let formats = surface.get_capabilities(&adapter).formats;
         let has_format = formats.iter().find(|v| **v == TextureFormat::Rgba8Unorm);
         let has_format_bgr = formats.iter().find(|v| **v == TextureFormat::Bgra8Unorm);
         let format = if has_format.is_some() {
@@ -743,622 +749,6 @@ impl Position {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct PipelineReflector<'a> {
-    device: &'a Device,
-    label: Option<&'static str>,
-    vs: Option<&'a ShaderModule>,
-    fs: Option<&'a ShaderModule>,
-    fs_target: Option<FsTarget>,
-    cs: Option<&'a ShaderModule>,
-    vertex_attrs: BTreeMap<Position, VertexFormat>,
-    bind_group_layout_entries: BTreeMap<Position, BindGroupLayoutEntry>,
-    depth: Option<DepthStencilState>,
-    err: Option<anyhow::Error>,
-    primitive: PrimitiveStateDescriptor,
-}
-
-fn make_reflection(shader: &ShaderModuleDescriptor) -> SpirvBinary {
-    match &shader.source {
-        ShaderSource::SpirV(val) => val.as_ref().into(),
-        _ => {
-            panic!("un support shader binary");
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct FsTarget {
-    states: Vec<Option<ColorTargetState>>,
-}
-
-impl FsTarget {
-    pub fn new_single(state: ColorTargetState) -> Self {
-        Self {
-            states: vec![Some(state)],
-        }
-    }
-
-    pub fn new(fmt: TextureFormat) -> Self {
-        let state = ColorTargetState {
-            format: fmt,
-            blend: None,
-            write_mask: ColorWrites::all(),
-        };
-        Self::new_single(state)
-    }
-
-    pub fn new_with_blend(fmt: TextureFormat, blend: &crate::ps::BlendState) -> Self {
-        let state = ColorTargetState {
-            format: fmt,
-            blend: Some(blend.into()),
-            write_mask: ColorWrites::all(),
-        };
-        Self::new_single(state)
-    }
-}
-
-use lazy_static::lazy_static;
-use spirq::ty::ScalarType;
-
-use crate::ps::PrimitiveStateDescriptor;
-
-lazy_static! {
-    static ref SIGNED_MAP: HashMap<(u32, u32), VertexFormat> = {
-        let mut map = HashMap::new();
-        map.insert((1, 2), VertexFormat::Sint8x2);
-        map.insert((1, 4), VertexFormat::Sint8x4);
-        map.insert((2, 2), VertexFormat::Sint16x2);
-        map.insert((2, 4), VertexFormat::Sint16x4);
-        map.insert((4, 1), VertexFormat::Sint32);
-        map.insert((4, 2), VertexFormat::Sint32x2);
-        map.insert((4, 3), VertexFormat::Sint32x3);
-        map.insert((4, 4), VertexFormat::Sint32x4);
-        map
-    };
-    static ref UNSIGNED_MAP: HashMap<(u32, u32), VertexFormat> = {
-        let mut map = HashMap::new();
-        map.insert((1, 2), VertexFormat::Uint8x2);
-        map.insert((1, 4), VertexFormat::Uint8x4);
-        map.insert((2, 2), VertexFormat::Uint16x2);
-        map.insert((2, 4), VertexFormat::Uint16x4);
-        map.insert((4, 1), VertexFormat::Uint32);
-        map.insert((4, 2), VertexFormat::Uint32x2);
-        map.insert((4, 3), VertexFormat::Uint32x3);
-        map.insert((4, 4), VertexFormat::Uint32x4);
-        map
-    };
-    static ref FLOAT_MAP: HashMap<(u32, u32), VertexFormat> = {
-        let mut map = HashMap::new();
-        map.insert((2, 2), VertexFormat::Float16x2);
-        map.insert((2, 4), VertexFormat::Float16x4);
-        map.insert((4, 1), VertexFormat::Float32);
-        map.insert((4, 2), VertexFormat::Float32x2);
-        map.insert((4, 3), VertexFormat::Float32x3);
-        map.insert((4, 4), VertexFormat::Float32x4);
-        map.insert((8, 1), VertexFormat::Float64);
-        map.insert((8, 2), VertexFormat::Float64x2);
-        map.insert((8, 3), VertexFormat::Float64x3);
-        map.insert((8, 4), VertexFormat::Float64x4);
-        map
-    };
-}
-
-fn scalar_to_wgpu_format(stype: &ScalarType, num: u32) -> Option<VertexFormat> {
-    match stype {
-        ScalarType::Signed(bits) => SIGNED_MAP.get(&(*bits, num)).copied(),
-        ScalarType::Unsigned(bits) => UNSIGNED_MAP.get(&(*bits, num)).copied(),
-        ScalarType::Float(bits) => FLOAT_MAP.get(&(*bits, num)).copied(),
-        _ => None,
-    }
-}
-
-fn image_to_wgpu_dimension(dim: spirv_headers::Dim, is_array: bool) -> TextureViewDimension {
-    match dim {
-        spirv_headers::Dim::Dim1D => {
-            if is_array {
-                todo!();
-            }
-            TextureViewDimension::D1
-        }
-        spirv_headers::Dim::Dim2D => {
-            if is_array {
-                TextureViewDimension::D2Array
-            } else {
-                TextureViewDimension::D2
-            }
-        }
-        spirv_headers::Dim::Dim3D => {
-            if is_array {
-                todo!();
-            }
-            TextureViewDimension::D3
-        }
-        spirv_headers::Dim::DimCube => {
-            if is_array {
-                TextureViewDimension::CubeArray
-            } else {
-                TextureViewDimension::Cube
-            }
-        }
-        spirv_headers::Dim::DimRect => {
-            todo!();
-        }
-        spirv_headers::Dim::DimBuffer => todo!(),
-        spirv_headers::Dim::DimSubpassData => todo!(),
-    }
-}
-
-impl<'a> PipelineReflector<'a> {
-    pub fn new(label: Option<&'static str>, device: &'a Device) -> Self {
-        Self {
-            label,
-            device,
-            vs: None,
-            fs: None,
-            fs_target: None,
-            cs: None,
-            vertex_attrs: BTreeMap::new(),
-            bind_group_layout_entries: BTreeMap::new(),
-            depth: None,
-            err: None,
-            primitive: PrimitiveStateDescriptor::default(),
-        }
-    }
-
-    fn build_vertex_input(&mut self, entry: &EntryPoint) {
-        for input in &entry.vars {
-            let format = match input.ty() {
-                spirq::ty::Type::Scalar(s) => scalar_to_wgpu_format(s, 1),
-                spirq::ty::Type::Vector(t) => scalar_to_wgpu_format(&t.scalar_ty, t.nscalar),
-                _ => {
-                    continue;
-                }
-            }
-            .unwrap();
-            let locator = input.locator();
-            if let Locator::Input(t) = locator {
-                let position = Position::new(t.comp(), t.loc());
-                self.vertex_attrs.insert(position, format);
-            }
-        }
-    }
-
-    fn build_bind_group_layout(
-        &mut self,
-        entry: &EntryPoint,
-        ty: ShaderType,
-    ) -> anyhow::Result<()> {
-        let visibility = match ty {
-            ShaderType::Vertex => ShaderStages::VERTEX,
-            ShaderType::Fragment => ShaderStages::FRAGMENT,
-            ShaderType::Compute => ShaderStages::COMPUTE,
-        };
-
-        for desc in &entry.vars {
-            if let Variable::Descriptor {
-                name,
-                desc_bind,
-                desc_ty,
-                ty,
-                nbind,
-            } = desc
-            {
-                let binding = desc_bind.bind();
-                let set = desc_bind.set();
-                let entry = match desc_ty {
-                    spirq::DescriptorType::UniformBuffer() => match ty {
-                        spirq::ty::Type::Struct(struct_type) => Some(BindGroupLayoutEntry {
-                            binding,
-                            visibility: visibility,
-                            count: None,
-                            ty: BindingType::Buffer {
-                                ty: BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: None,
-                            },
-                        }),
-                        _ => None,
-                    },
-                    spirq::DescriptorType::SampledImage() => match ty {
-                        spirq::ty::Type::Image(img) => {
-                            let multisampled = img.is_multisampled;
-
-                            let sample_type = loop {
-                                if let Some(is_depth) = img.is_depth {
-                                    if is_depth {
-                                        break TextureSampleType::Depth;
-                                    }
-                                }
-                                if let Some(is_sampled) = img.is_sampled {
-                                    if is_sampled {
-                                        break TextureSampleType::Float { filterable: true };
-                                    }
-                                }
-                                break TextureSampleType::Float { filterable: true };
-                            };
-                            let view_dimension = image_to_wgpu_dimension(img.dim, img.is_array);
-                            Some(BindGroupLayoutEntry {
-                                binding,
-                                visibility,
-                                count: None,
-                                ty: BindingType::Texture {
-                                    multisampled,
-                                    view_dimension,
-                                    sample_type,
-                                },
-                            })
-                        }
-                        spirq::ty::Type::SampledImage(sample) => {
-                            let view_dimension =
-                                image_to_wgpu_dimension(sample.dim, sample.is_array);
-                            let multisampled = sample.is_multisampled;
-                            let sample_type = TextureSampleType::Float { filterable: true };
-
-                            Some(BindGroupLayoutEntry {
-                                binding,
-                                visibility,
-                                count: None,
-                                ty: BindingType::Texture {
-                                    multisampled,
-                                    view_dimension,
-                                    sample_type,
-                                },
-                            })
-                        }
-                        _ => {
-                            todo!()
-                        }
-                    },
-                    spirq::DescriptorType::Sampler() => Some(BindGroupLayoutEntry {
-                        binding,
-                        visibility: visibility,
-                        count: None,
-                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    }),
-                    spirq::DescriptorType::InputAttachment(_) => todo!(),
-                    spirq::DescriptorType::AccelStruct() => todo!(),
-                    dt => {
-                        log::error!("{:?}", dt);
-                        None
-                    }
-                }
-                .unwrap();
-                let position = Position::new(set, binding);
-                if let Some(item) = self.bind_group_layout_entries.get_mut(&position) {
-                    if item.visibility != entry.visibility {
-                        if item.ty != entry.ty {
-                            anyhow::bail!("repeated binding in vs&fs at {}", entry.binding);
-                        }
-                    }
-                } else {
-                    self.bind_group_layout_entries.insert(position, entry);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    // pub fn add_vs(mut self, vs: ShaderModuleDescriptor) -> Self {
-    //     let vs_ref = make_reflection(&vs);
-    //     self.vs = Some(self.device.create_shader_module(vs));
-    //     let entry = ReflectConfig::new()
-    //         .spv(vs_ref)
-    //         .ref_all_rscs(false)
-    //         .reflect()
-    //         .unwrap();
-    //     self.build_vertex_input(&entry[0]);
-
-    //     if let Err(err) = self.build_bind_group_layout(&entry[0], ShaderType::Vertex) {
-    //         self.err = Some(err);
-    //     }
-    //     self
-    // }
-
-    pub fn add_vs2(mut self, vs: &'a ShaderModule, vss: &[u8]) -> Self {
-        let vs_ref: SpirvBinary = vss.into();
-        self.vs = Some(vs);
-        let entry = ReflectConfig::new()
-            .spv(vs_ref)
-            .ref_all_rscs(false)
-            .reflect()
-            .unwrap();
-        self.build_vertex_input(&entry[0]);
-
-        if let Err(err) = self.build_bind_group_layout(&entry[0], ShaderType::Vertex) {
-            self.err = Some(err);
-        }
-        self
-    }
-
-    // pub fn add_fs(mut self, fs: ShaderModuleDescriptor) -> Self {
-    //     let fs_ref = make_reflection(&fs);
-    //     self.fs = Some(self.device.create_shader_module(fs));
-    //     let entry = ReflectConfig::new()
-    //         .spv(fs_ref)
-    //         .ref_all_rscs(false)
-    //         .reflect()
-    //         .unwrap();
-    //     if let Err(err) = self.build_bind_group_layout(&entry[0], ShaderType::Fragment) {
-    //         self.err = Some(err);
-    //     }
-    //     self
-    // }
-
-    pub fn add_fs2(mut self, fs: &'a ShaderModule, fss: &[u8]) -> Self {
-        let fs_ref: SpirvBinary = fss.into();
-        self.fs = Some(fs);
-        let entry = ReflectConfig::new()
-            .spv(fs_ref)
-            .ref_all_rscs(false)
-            .reflect()
-            .unwrap();
-        if let Err(err) = self.build_bind_group_layout(&entry[0], ShaderType::Fragment) {
-            self.err = Some(err);
-        }
-        self
-    }
-
-    pub fn add_fs_target(mut self, fs_target: FsTarget) -> Self {
-        self.fs_target = Some(fs_target);
-        self
-    }
-
-    pub fn with_depth(mut self, depth: &DepthStencilDescriptor) -> Self {
-        self.depth = Some(depth.into());
-        self
-    }
-
-    pub fn with_primitive(mut self, primitive: PrimitiveStateDescriptor) -> Self {
-        self.primitive = primitive;
-        self
-    }
-
-    pub fn build(self) -> anyhow::Result<wgpu::RenderPipeline> {
-        if let Some(err) = self.err {
-            return Err(err);
-        }
-
-        let label = self.label;
-        // build vertex buffer layout firstly
-        let mut vertex_buffer_layouts = Vec::new();
-        let mut vertex_attrs = Vec::new();
-        {
-            let mut ranges_size = Vec::new();
-            let mut current = (0, 0);
-            let mut offset = 0;
-
-            for (pos, format) in self.vertex_attrs {
-                if current.0 != pos.set {
-                    if current.1 < vertex_attrs.len() {
-                        ranges_size.push((current.1..vertex_attrs.len(), offset));
-                    }
-                    offset = 0;
-                    current = (pos.set, vertex_attrs.len());
-                }
-                vertex_attrs.push(VertexAttribute {
-                    format,
-                    offset,
-                    shader_location: pos.binding,
-                });
-                offset += format.size();
-            }
-            if current.1 < vertex_attrs.len() {
-                ranges_size.push((current.1..vertex_attrs.len(), offset));
-            }
-            for (range, size) in ranges_size {
-                vertex_buffer_layouts.push(VertexBufferLayout {
-                    array_stride: size as BufferAddress,
-                    step_mode: VertexStepMode::Vertex,
-                    attributes: &vertex_attrs[range],
-                });
-            }
-        }
-
-        // build bind groups secondly
-        let mut layouts = Vec::new();
-        {
-            let mut layout_entries = Vec::new();
-            let mut current = Position::new(u32::MAX, u32::MAX);
-            for (pos, entry) in self.bind_group_layout_entries {
-                if current.set != pos.set {
-                    if !layout_entries.is_empty() {
-                        let layout =
-                            self.device
-                                .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                                    label,
-                                    entries: &layout_entries,
-                                });
-                        layouts.push(layout);
-                        layout_entries.clear();
-                    }
-                }
-                current = pos;
-                layout_entries.push(entry);
-            }
-            if !layout_entries.is_empty() {
-                let layout = self
-                    .device
-                    .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                        label,
-                        entries: &layout_entries,
-                    });
-                layouts.push(layout);
-            }
-        }
-        let mut ref_layouts = Vec::new();
-        for layout in &layouts {
-            ref_layouts.push(layout);
-        }
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&PipelineLayoutDescriptor {
-                label,
-                bind_group_layouts: &ref_layouts,
-                push_constant_ranges: &[],
-            });
-
-        if self.depth.is_some() {
-            log::info!("{:?} init with depth", label);
-        }
-        let primitive = self.primitive.into();
-
-        let mut pipeline_desc = RenderPipelineDescriptor {
-            label,
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &self.vs.unwrap(),
-                entry_point: "main",
-                buffers: &vertex_buffer_layouts,
-            },
-            fragment: None,
-            primitive,
-            depth_stencil: self.depth,
-            multisample: MultisampleState::default(),
-            multiview: None,
-        };
-
-        if let Some(fs) = &self.fs {
-            pipeline_desc.fragment = Some(FragmentState {
-                module: &fs,
-                entry_point: "main",
-                targets: &self.fs_target.as_ref().unwrap().states,
-            })
-        }
-
-        log::info!("{:?}", pipeline_desc);
-
-        let pipeline = self.device.create_render_pipeline(&pipeline_desc);
-
-        Ok(pipeline)
-    }
-}
-
-impl From<crate::ps::Topology> for PrimitiveTopology {
-    fn from(value: crate::ps::Topology) -> Self {
-        match value {
-            crate::ps::Topology::PointList => Self::PointList,
-            crate::ps::Topology::LineList => Self::LineList,
-            crate::ps::Topology::LineStrip => Self::LineStrip,
-            crate::ps::Topology::TriangleList => Self::TriangleList,
-            crate::ps::Topology::TriangleStrip => Self::TriangleStrip,
-        }
-    }
-}
-
-impl From<crate::ps::CullFace> for Option<Face> {
-    fn from(value: crate::ps::CullFace) -> Self {
-        match value {
-            crate::ps::CullFace::None => None,
-            crate::ps::CullFace::Front => Some(Face::Front),
-            crate::ps::CullFace::Back => Some(Face::Back),
-        }
-    }
-}
-
-impl From<crate::ps::PolygonMode> for PolygonMode {
-    fn from(value: crate::ps::PolygonMode) -> Self {
-        match value {
-            crate::ps::PolygonMode::Fill => Self::Fill,
-            crate::ps::PolygonMode::Line => Self::Line,
-            crate::ps::PolygonMode::Point => Self::Point,
-        }
-    }
-}
-
-impl From<PrimitiveStateDescriptor> for PrimitiveState {
-    fn from(p: PrimitiveStateDescriptor) -> Self {
-        Self {
-            topology: p.topology().into(),
-            strip_index_format: None,
-            front_face: FrontFace::Ccw,
-            cull_mode: p.cull_face().into(),
-            unclipped_depth: false,
-            polygon_mode: p.polygon().into(),
-            conservative: false,
-        }
-    }
-}
-
-impl From<&crate::ps::BlendFactor> for BlendFactor {
-    fn from(value: &crate::ps::BlendFactor) -> Self {
-        match value {
-            crate::ps::BlendFactor::Zero => Self::Zero,
-            crate::ps::BlendFactor::One => Self::One,
-            crate::ps::BlendFactor::Src => Self::Src,
-            crate::ps::BlendFactor::OneMinusSrc => Self::OneMinusSrc,
-            crate::ps::BlendFactor::SrcAlpha => Self::SrcAlpha,
-            crate::ps::BlendFactor::OneMinusSrcAlpha => Self::OneMinusSrcAlpha,
-            crate::ps::BlendFactor::Dst => Self::Dst,
-            crate::ps::BlendFactor::OneMinusDst => Self::OneMinusDst,
-            crate::ps::BlendFactor::DstAlpha => Self::DstAlpha,
-            crate::ps::BlendFactor::OneMinusDstAlpha => Self::OneMinusDstAlpha,
-            crate::ps::BlendFactor::SrcAlphaSaturated => Self::SrcAlphaSaturated,
-            crate::ps::BlendFactor::Constant => Self::Constant,
-            crate::ps::BlendFactor::OneMinusConstant => Self::OneMinusConstant,
-        }
-    }
-}
-
-impl From<&crate::ps::BlendOperation> for BlendOperation {
-    fn from(value: &crate::ps::BlendOperation) -> Self {
-        match value {
-            crate::ps::BlendOperation::Add => Self::Add,
-            crate::ps::BlendOperation::Subtract => Self::Subtract,
-            crate::ps::BlendOperation::ReverseSubtract => Self::ReverseSubtract,
-            crate::ps::BlendOperation::Min => Self::Min,
-            crate::ps::BlendOperation::Max => Self::Max,
-        }
-    }
-}
-
-impl From<&crate::ps::BlendComponent> for BlendComponent {
-    fn from(value: &crate::ps::BlendComponent) -> Self {
-        Self {
-            src_factor: (&value.src_factor).into(),
-            dst_factor: (&value.dst_factor).into(),
-            operation: (&value.operation).into(),
-        }
-    }
-}
-
-impl From<&crate::ps::BlendState> for BlendState {
-    fn from(value: &crate::ps::BlendState) -> Self {
-        Self {
-            color: (&value.color).into(),
-            alpha: (&value.alpha).into(),
-        }
-    }
-}
-
-impl From<&crate::ps::CompareFunction> for CompareFunction {
-    fn from(value: &crate::ps::CompareFunction) -> Self {
-        match value {
-            crate::ps::CompareFunction::Never => Self::Never,
-            crate::ps::CompareFunction::Less => Self::Less,
-            crate::ps::CompareFunction::Equal => Self::Equal,
-            crate::ps::CompareFunction::LessEqual => Self::LessEqual,
-            crate::ps::CompareFunction::Greater => Self::Greater,
-            crate::ps::CompareFunction::NotEqual => Self::NotEqual,
-            crate::ps::CompareFunction::GreaterEqual => Self::GreaterEqual,
-            crate::ps::CompareFunction::Always => Self::Always,
-        }
-    }
-}
-
-impl From<&crate::ps::DepthStencilDescriptor> for DepthStencilState {
-    fn from(value: &crate::ps::DepthStencilDescriptor) -> Self {
-        Self {
-            format: value.depth.format,
-            depth_write_enabled: value.depth.depth_write_enabled,
-            depth_compare: (&value.depth.compare).into(),
-            stencil: StencilState::default(),
-            bias: DepthBiasState::default(),
-        }
-    }
-}
-
 pub struct SharedBuffers {
     buffers: Vec<wgpu::Buffer>,
     buf_size: u32,
@@ -1425,7 +815,7 @@ impl GpuMainBuffer {
         Self::new(gpu, label, wgpu::BufferUsages::INDEX)
     }
 
-    pub fn make_sure(&mut self, mut size: u64, gpu: &WGPUResource) -> bool {
+    pub fn prepare(&mut self, mut size: u64, gpu: &WGPUResource) -> bool {
         self.tick += 1;
         for _ in 0..1 {
             if self.size < size {
@@ -1470,7 +860,7 @@ struct GpuInputMainBuffer {
 
 impl GpuInputMainBuffer {
     pub fn new(gpu: &WGPUResource, label: Option<&'static str>, usage: wgpu::BufferUsages) -> Self {
-        let chunk_size = 1024 * 1024 * 4;
+        let chunk_size = 1024 * 1024 * 2; // 2 Mib
 
         Self {
             buffer: GpuMainBuffer::new(gpu, label, usage),
@@ -1497,8 +887,8 @@ impl GpuInputMainBuffer {
     }
 
     #[inline]
-    pub fn make_sure(&mut self, gpu: &WGPUResource, bytes: u64) -> bool {
-        self.buffer.make_sure(bytes + self.offset, gpu)
+    pub fn prepare(&mut self, gpu: &WGPUResource, bytes: u64) -> bool {
+        self.buffer.prepare(bytes + self.offset, gpu)
     }
 
     pub fn copy_stage(
@@ -1653,9 +1043,9 @@ impl GpuInputMainBuffers {
         }
     }
 
-    pub fn make_sure(&mut self, gpu: &WGPUResource, index_bytes: u64, vertex_bytes: u64) {
-        self.index.make_sure(gpu, index_bytes);
-        self.vertex.make_sure(gpu, vertex_bytes);
+    pub fn prepare(&mut self, gpu: &WGPUResource, index_bytes: u64, vertex_bytes: u64) {
+        self.index.prepare(gpu, index_bytes);
+        self.vertex.prepare(gpu, vertex_bytes);
     }
 
     pub fn copy_stage(
@@ -1724,8 +1114,8 @@ impl GpuInputMainBuffersWithUniform {
         n_uniform: u64,
         single_bytes: u64,
     ) -> bool {
-        self.index.make_sure(gpu, index_bytes);
-        self.vertex.make_sure(gpu, vertex_bytes);
+        self.index.prepare(gpu, index_bytes);
+        self.vertex.prepare(gpu, vertex_bytes);
         let changed = self.uniform.make_sure(gpu, n_uniform, single_bytes);
         changed
     }

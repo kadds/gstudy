@@ -1,17 +1,6 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use egui::Widget;
-use instant::Instant;
-use winit::{
-    dpi::{LogicalPosition, PhysicalPosition},
-    event_loop::EventLoopProxy,
-};
-
 use core::{
     event::{self, CustomEvent, Event, EventSender},
-    material::basic::{BasicMaterialFace, BasicMaterialFaceBuilder},
-    ps::{PrimitiveStateDescriptor, Topology},
-    types::{Color, Size, Vec2f, Vec3f, Vec4f},
+    types::Color,
     ui::{UIContext, UILogic},
 };
 
@@ -75,8 +64,8 @@ impl UILogic for MainLogic {
 impl MainLogic {
     fn main_side(
         &mut self,
-        ctx: &egui::Context,
-        ui_context: &mut UIContext,
+        _ctx: &egui::Context,
+        _ui_context: &mut UIContext,
         event_sender: &dyn EventSender,
         ui: &mut egui::Ui,
     ) {
@@ -195,18 +184,17 @@ impl MainLogic {
         egui::Window::new("About")
             .vscroll(true)
             .collapsible(false)
-            .fixed_size(&[500f32, 260f32])
-            .anchor(egui::Align2::CENTER_CENTER, &[0f32, 0f32])
+            .fixed_size([500f32, 260f32])
+            .anchor(egui::Align2::CENTER_CENTER, [0f32, 0f32])
             .open(&mut state.show_about)
             .show(&ctx, |ui| {
                 use egui::special_emojis::*;
                 ui.label(egui::RichText::new("GStudy project").heading().strong());
                 ui.label(egui::RichText::new(format!(
-                    "built by: {} {}\ncommit {} at {}",
-                    env!("VERGEN_CARGO_PROFILE"),
+                    "built by: {}\ncommit {} at {}",
                     env!("VERGEN_CARGO_TARGET_TRIPLE"),
                     env!("VERGEN_BUILD_DATE"),
-                    env!("VERGEN_GIT_SHA_SHORT")
+                    env!("VERGEN_GIT_SHA")
                 )));
                 ui.horizontal(|ui| {
                     ui.label("🌞 => ");
@@ -227,7 +215,7 @@ impl MainLogic {
 }
 
 impl MainLogic {
-    pub fn on_input(&self, ui_context: &UIContext, ev: &event::InputEvent) -> Option<()> {
+    pub fn on_input(&self, _ui_context: &UIContext, _ev: &event::InputEvent) -> Option<()> {
         Some(())
     }
 }

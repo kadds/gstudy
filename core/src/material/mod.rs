@@ -5,10 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    context::RContext,
-    ps::{BlendState, PrimitiveStateDescriptor},
-};
+use crate::context::RContext;
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub struct MaterialId(u64);
@@ -31,18 +28,18 @@ pub trait MaterialFace: Any + Sync + Send + Debug {
 #[derive(Debug)]
 pub struct Material {
     id: MaterialId,
-    primitive: PrimitiveStateDescriptor,
-    blend: Option<BlendState>,
+    primitive: wgpu::PrimitiveState,
+    blend: Option<wgpu::BlendState>,
     alpha_test: Option<f32>,
 
     face: Box<dyn MaterialFace>, // material face
 }
 
 impl Material {
-    pub fn primitive(&self) -> &PrimitiveStateDescriptor {
+    pub fn primitive(&self) -> &wgpu::PrimitiveState {
         &self.primitive
     }
-    pub fn blend(&self) -> Option<&BlendState> {
+    pub fn blend(&self) -> Option<&wgpu::BlendState> {
         self.blend.as_ref()
     }
     pub fn alpha_test(&self) -> Option<f32> {
@@ -74,8 +71,8 @@ impl Material {
 
 #[derive(Debug, Default)]
 pub struct MaterialBuilder {
-    primitive: PrimitiveStateDescriptor,
-    blend: Option<BlendState>,
+    primitive: wgpu::PrimitiveState,
+    blend: Option<wgpu::BlendState>,
     alpha_test: Option<f32>,
     face: Option<Box<dyn MaterialFace>>,
 }
@@ -92,11 +89,11 @@ impl Clone for MaterialBuilder {
 }
 
 impl MaterialBuilder {
-    pub fn with_blend(mut self, blend: BlendState) -> Self {
+    pub fn with_blend(mut self, blend: wgpu::BlendState) -> Self {
         self.blend = Some(blend);
         self
     }
-    pub fn with_primitive(mut self, primitive: PrimitiveStateDescriptor) -> Self {
+    pub fn with_primitive(mut self, primitive: wgpu::PrimitiveState) -> Self {
         self.primitive = primitive;
         self
     }

@@ -273,6 +273,7 @@ impl EventProcessor for UIEventProcessor {
                             pressed: input.state.is_pressed(),
                             modifiers,
                             key,
+                            repeat: false,
                         });
                     }
                 }

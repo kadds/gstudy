@@ -2,8 +2,8 @@ use anyhow::bail;
 use lazy_static::lazy_static;
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, escaped_transform, tag, take_till, take_till1, take_while},
-    character::complete::{digit0, digit1, multispace0, one_of, satisfy, space0, space1},
+    bytes::complete::{escaped_transform, tag, take_while},
+    character::complete::{digit0, digit1, satisfy, space0, space1},
     combinator::{consumed, cut, map_opt, opt, peek, recognize, value},
     error::context,
     multi::{many0, separated_list0},
@@ -11,13 +11,13 @@ use nom::{
     IResult, InputTakeAtPosition,
 };
 use petgraph::stable_graph::NodeIndex;
-use rand::{Rng, distributions::Alphanumeric};
+use rand::{distributions::Alphanumeric, Rng};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::{Display, Write},
     path::PathBuf,
+    rc::Rc,
     str::FromStr,
-    sync::Arc, rc::Rc,
 };
 use strum::*;
 
@@ -52,9 +52,7 @@ enum EvalVal {
     Number(i64),
     Float(f64),
     String(String),
-    ContextFn(
-        Rc<dyn Fn(&[EvalVal], &mut HashMap<String, EvalVal>) -> anyhow::Result<EvalVal>>,
-    ),
+    ContextFn(Rc<dyn Fn(&[EvalVal], &mut HashMap<String, EvalVal>) -> anyhow::Result<EvalVal>>),
     Bool(bool),
     None,
 }
@@ -88,7 +86,7 @@ impl From<f64> for EvalVal {
 }
 
 impl From<()> for EvalVal {
-    fn from(value: ()) -> Self {
+    fn from(_: ()) -> Self {
         Self::None
     }
 }
@@ -110,7 +108,7 @@ impl Display for EvalVal {
                 .and_then(|_| f.write_char('"')),
             EvalVal::None => f.write_str("None"),
             EvalVal::Bool(b) => b.fmt(f),
-            EvalVal::ContextFn(func) => f.write_str("fn"),
+            EvalVal::ContextFn(_) => f.write_str("fn"),
         }
     }
 }
@@ -139,7 +137,14 @@ fn atomic_counter(
     } else {
         anyhow::bail!("invalid parameter count");
     }
-    let hidden_name = format!("__HIDDEN__{}", rand::thread_rng().sample_iter(&Alphanumeric).take(12).map(char::from).collect::<String>());
+    let hidden_name = format!(
+        "__HIDDEN__{}",
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(12)
+            .map(char::from)
+            .collect::<String>()
+    );
     ctx.insert(hidden_name.clone(), EvalVal::Number(beg));
     return Ok(EvalVal::ContextFn(Rc::new(move |inputs, ctx| {
         let val = ctx.get_mut(&hidden_name).unwrap();
@@ -149,9 +154,7 @@ fn atomic_counter(
             return Ok(EvalVal::Number(val));
         }
         anyhow::bail!("atomic_counter invalid type");
-    }
-
-    )));
+    })));
 }
 
 #[derive(Default)]
@@ -166,9 +169,8 @@ struct PreprocessorContext<'a> {
     var_map: HashMap<String, EvalVal>,
     built_in_func: HashMap<
         String,
-        Box<dyn Fn(&[EvalVal], &mut HashMap<String, EvalVal>) ->
-            anyhow::Result< EvalVal>
-    >>,
+        Box<dyn Fn(&[EvalVal], &mut HashMap<String, EvalVal>) -> anyhow::Result<EvalVal>>,
+    >,
 }
 
 impl<'a> PreprocessorContext<'a> {
@@ -200,7 +202,8 @@ impl<'a> PreprocessorContext<'a> {
             var_map,
             ..Default::default()
         };
-        res.built_in_func.insert("_atomic_counter".to_owned(), Box::new(atomic_counter));
+        res.built_in_func
+            .insert("_atomic_counter".to_owned(), Box::new(atomic_counter));
 
         Ok(res)
     }
@@ -1142,17 +1145,4 @@ fn endif_cmd(i: &str) -> IResult<&str, EndIf> {
 
 fn else_cmd(i: &str) -> IResult<&str, Else> {
     map_opt(tuple((tag("else"),)), |_| Some(Else {}))(i)
-}
-
-#[test]
-fn tt() {
-    std::env::set_current_dir("C:\\code\\gstudy");
-    let ret = Preprocessor::new(
-        PreprocessorConfig::default()
-            .with_include("./shaders")
-            .with_define("TEXTURE_COLOR", "True"),
-    )
-    .process("./shaders/basic/forward.wgsl")
-    .unwrap();
-    panic!("{}", ret);
 }

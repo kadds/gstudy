@@ -9,11 +9,14 @@ use std::{
     time::Instant,
 };
 
+#[allow(unused)]
 pub fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     unsafe {
         ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
     }
 }
+
+#[allow(unused)]
 pub fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
     unsafe {
         ::std::slice::from_raw_parts(
@@ -23,6 +26,7 @@ pub fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
     }
 }
 
+#[allow(unused)]
 pub fn any_as_x_slice_array<X: Sized, T: Sized>(p: &[T]) -> &[X] {
     unsafe {
         ::std::slice::from_raw_parts(

@@ -1,52 +1,84 @@
-use std::sync::Arc;
-
 use crate::{
     context::ResourceRef,
-    ps::{BlendState, DepthDescriptor, PrimitiveStateDescriptor},
-    types::Vec4f,
+    types::{Vec2f, Vec3f, Vec4f},
 };
 
-use super::{Material, MaterialFace, MaterialShader};
+use super::{Material, MaterialFace};
 
-#[derive(Debug, Clone, Copy)]
-pub enum BasicMaterialShader {
-    None,
-    Color,
-    Texture,
-    ColorTexture,
+#[repr(C)]
+struct BasicInput {
+    vertices: Vec3f,
 }
 
-impl MaterialShader for BasicMaterialShader {}
+#[repr(C)]
+struct BasicInputC {
+    vertices: Vec3f,
+    colors: Vec4f,
+}
+
+#[repr(C)]
+struct BasicInputT {
+    vertices: Vec3f,
+    textcoord: Vec2f,
+}
+
+#[repr(C)]
+struct BasicInputCTN {
+    vertices: Vec3f,
+    colors: Vec4f,
+    texcoord: Vec2f,
+    normal: Vec2f,
+}
+
+#[repr(C)]
+struct BasicInputCT {
+    vertices: Vec3f,
+    colors: Vec4f,
+    texcoord: Vec2f,
+}
+
+#[repr(C)]
+pub struct ConstParameter {
+    color: Vec4f,
+}
+
+#[repr(C)]
+pub struct ConstParameterWithAlpha {
+    color: Vec4f,
+    alpha: f32,
+    _pad: Vec3f,
+}
 
 #[derive(Debug)]
 pub struct BasicMaterialFace {
     color: Vec4f,
-    shader: BasicMaterialShader,
+    variants: Vec<tshader::Variant>,
     texture: Option<ResourceRef>,
 }
 
 impl BasicMaterialFace {
-    pub fn shader_ex(&self) -> BasicMaterialShader {
-        self.shader
-    }
     pub fn texture(&self) -> Option<&ResourceRef> {
         self.texture.as_ref().map(|v| v)
     }
     pub fn color(&self) -> Vec4f {
         self.color
     }
+    pub fn variants(&self) -> &[tshader::Variant] {
+        &self.variants
+    }
 }
 
 impl MaterialFace for BasicMaterialFace {
     fn shader_id(&self) -> u64 {
-        self.shader as u64
+        // self.shader as u64
+        0
     }
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct BasicMaterialFaceBuilder {
-    primitive: PrimitiveStateDescriptor,
-    blend: Option<BlendState>,
+    primitive: wgpu::PrimitiveState,
+    blend: Option<wgpu::BlendState>,
     has_color: bool,
     has_texture: bool,
     texture: Option<ResourceRef>,
@@ -61,7 +93,7 @@ impl BasicMaterialFaceBuilder {
             texture: None,
             color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
             blend: None,
-            primitive: PrimitiveStateDescriptor::default(),
+            primitive: wgpu::PrimitiveState::default(),
         }
     }
     pub fn with_color(mut self) -> Self {
@@ -82,24 +114,23 @@ impl BasicMaterialFaceBuilder {
     }
 
     pub fn build(mut self) -> BasicMaterialFace {
+        let mut variants = vec![];
+
         let shader = if self.has_color {
             if self.has_texture {
-                BasicMaterialShader::ColorTexture
+                variants.push(tshader::Variant::TextureColor);
             } else {
                 self.texture = None;
-                BasicMaterialShader::Color
             }
         } else {
             if self.has_texture {
-                BasicMaterialShader::Texture
             } else {
                 self.texture = None;
-                BasicMaterialShader::None
             }
         };
         BasicMaterialFace {
             color: self.color,
-            shader,
+            variants,
             texture: self.texture,
         }
     }

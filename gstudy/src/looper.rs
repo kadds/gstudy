@@ -12,7 +12,7 @@ use core::material::egui::EguiMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, TrackballCameraController};
-use core::scene::{Camera, Object, Scene, LAYER_NORMAL, LAYER_UI};
+use core::scene::{Camera, RenderObject, Scene, LAYER_NORMAL, LAYER_UI};
 use core::types::{Color, Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
 use std::borrow::Borrow;
@@ -101,12 +101,6 @@ impl LooperInner {
     }
 
     fn build_ui_objects(&mut self) {
-        if let Some(obj) = self.scene.get_object_mut(self.last_ui_id) {
-
-        } else {
-
-        }
-
         self.scene.clear_layer_objects(LAYER_UI);
 
         let mut ui_materials = self.ui_materials.take().unwrap();
@@ -124,7 +118,7 @@ impl LooperInner {
                     .build(self.gpu.context())
             });
 
-            let object = Object::new(
+            let object = RenderObject::new(
                 Box::new(StaticGeometry::new(Arc::new(mesh))),
                 material.clone(),
             );
@@ -150,7 +144,8 @@ impl LooperInner {
         let depth_texture = self.main_depth_texture.as_ref().unwrap();
         let clear_color = self.ui.clear_color();
 
-        if self.scene.change() {
+        if self.scene.material_change() {
+            log::warn!("recreate render graph");
             self.g = None;
         }
 
@@ -464,9 +459,11 @@ impl Looper {
                     modifiers: _,
                 } => InputEvent::MouseWheel {
                     delta: match delta {
-                        winit::event::MouseScrollDelta::LineDelta(x, y) => Vec3f::new(x, y, 0f32),
+                        winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                            Vec3f::new(x * 20f32, y * 20f32, 0f32)
+                        }
                         winit::event::MouseScrollDelta::PixelDelta(p) => {
-                            Vec3f::new(p.x as f32 * 10f32, p.y as f32 * 10f32, 0f32)
+                            Vec3f::new(p.x as f32 * 20f32, p.y as f32 * 20f32, 0f32)
                         }
                     },
                 },

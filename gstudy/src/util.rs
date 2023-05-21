@@ -1,7 +1,9 @@
 type WI = winit::window::CursorIcon;
 type EI = egui::CursorIcon;
 
+#[allow(unused)]
 type WK = winit::event::VirtualKeyCode;
+#[allow(unused)]
 type EK = egui::Key;
 
 pub fn match_winit_cursor(c: EI) -> Option<WI> {
@@ -138,24 +140,29 @@ pub fn match_button(button: winit::event::MouseButton) -> Option<core::event::Mo
     }
 }
 
+#[allow(unused)]
 pub fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     unsafe {
         ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
     }
 }
+
+#[allow(unused)]
 pub fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
     unsafe {
         ::std::slice::from_raw_parts(
             (p.as_ptr() as *const T) as *const u8,
-            ::std::mem::size_of::<T>() * p.len(),
+            std::mem::size_of_val(p),
         )
     }
 }
+
+#[allow(unused)]
 pub fn any_as_x_slice_array<X: Sized, T: Sized>(p: &[T]) -> &[X] {
     unsafe {
         ::std::slice::from_raw_parts(
             (p.as_ptr() as *const T) as *const X,
-            p.len() * ::std::mem::size_of::<T>() / ::std::mem::size_of::<X>(),
+            std::mem::size_of_val(p) / ::std::mem::size_of::<X>(),
         )
     }
 }
