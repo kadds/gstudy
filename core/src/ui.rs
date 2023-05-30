@@ -189,7 +189,7 @@ impl UIEventProcessor {
         let output = ctx.end_frame();
         if output.platform_output.cursor_icon != inner.cursor {
             inner.cursor = output.platform_output.cursor_icon;
-            let _ = proxy.send_event(Event::UpdateCursor(inner.cursor));
+            proxy.send_event(Event::UpdateCursor(inner.cursor));
         }
         if !output.platform_output.copied_text.is_empty() {
             #[cfg(not(target_arch = "wasm32"))]
@@ -202,10 +202,10 @@ impl UIEventProcessor {
             }
         }
         if let Some(url) = output.platform_output.open_url {
-            let _ = proxy.send_event(Event::CustomEvent(CustomEvent::OpenUrl(url.url)));
+            proxy.send_event(Event::CustomEvent(CustomEvent::OpenUrl(url.url)));
         }
         if let Some(pos) = output.platform_output.text_cursor_pos {
-            let _ = proxy.send_event(Event::UpdateImePosition((pos.x as u32, pos.y as u32)));
+            proxy.send_event(Event::UpdateImePosition((pos.x as u32, pos.y as u32)));
         }
 
         inner.frame = Some(EguiRenderFrame {
@@ -213,7 +213,7 @@ impl UIEventProcessor {
             shapes: output.shapes,
         });
         if output.repaint_after.is_zero() || inner.must_render {
-            let _ = proxy.send_event(Event::Render);
+            proxy.send_event(Event::Render);
             inner.must_render = false;
         }
 
@@ -302,16 +302,13 @@ impl EventProcessor for UIEventProcessor {
                     } else {
                         false
                     };
-                    let ev = egui::Event::PointerMoved(egui::Pos2::new(
-                        logical.x as f32,
-                        logical.y as f32,
-                    ));
+                    let ev = egui::Event::PointerMoved(egui::Pos2::new(logical.x, logical.y));
                     if replace {
                         *inner.input.events.last_mut().unwrap() = ev;
                     } else {
                         inner.input.events.push(ev)
                     }
-                    inner.cursor_position = (logical.x as f32, logical.y as f32);
+                    inner.cursor_position = (logical.x, logical.y);
                 }
                 InputEvent::ReceivedCharacter(c) => {
                     let c = *c;

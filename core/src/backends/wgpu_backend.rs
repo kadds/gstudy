@@ -28,7 +28,9 @@ struct WGPUResourceInner {
 struct WGPUInstance {
     surface: Surface,
     inner: Mutex<WGPUResourceInner>,
+    #[allow(unused)]
     instance: Instance,
+    #[allow(unused)]
     adapter: Adapter,
     format: TextureFormat,
 }
@@ -94,7 +96,7 @@ impl WGPUResource {
         Ok(WindowSurfaceFrame {
             texture: Some(texture),
             s: Some(c),
-            gpu: &self,
+            gpu: self,
         })
     }
 
@@ -251,7 +253,7 @@ impl WGPUResource {
         size: Size,
     ) -> wgpu::Texture {
         let device = self.device();
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        device.create_texture(&wgpu::TextureDescriptor {
             label,
             size: wgpu::Extent3d {
                 width: size.x,
@@ -264,8 +266,7 @@ impl WGPUResource {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
-        });
-        texture
+        })
     }
 
     pub(crate) fn new_2d_attachment_texture(
@@ -293,7 +294,7 @@ impl WGPUResource {
         texture
     }
 
-    pub(crate) fn new_sampler(&self, label: Option<&'static str>) -> wgpu::Sampler {
+    pub(crate) fn new_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
         self.device.create_sampler(&wgpu::SamplerDescriptor {
             label,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -310,7 +311,7 @@ impl WGPUResource {
         })
     }
 
-    pub(crate) fn new_sampler_linear(&self, label: Option<&'static str>) -> wgpu::Sampler {
+    pub(crate) fn new_sampler_linear(&self, label: Option<&str>) -> wgpu::Sampler {
         self.device.create_sampler(&wgpu::SamplerDescriptor {
             label,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -327,7 +328,7 @@ impl WGPUResource {
         })
     }
 
-    pub(crate) fn new_wvp_buffer<T>(&self, label: Option<&'static str>) -> wgpu::Buffer {
+    pub(crate) fn new_wvp_buffer<T>(&self, label: Option<&str>) -> wgpu::Buffer {
         self.device.create_buffer(&BufferDescriptor {
             label,
             size: std::mem::size_of::<T>() as u64,
@@ -336,11 +337,7 @@ impl WGPUResource {
         })
     }
 
-    pub(crate) fn new_uniform_buffer(
-        &self,
-        label: Option<&'static str>,
-        size: u64,
-    ) -> wgpu::Buffer {
+    pub(crate) fn new_uniform_buffer(&self, label: Option<&str>, size: u64) -> wgpu::Buffer {
         self.device.create_buffer(&BufferDescriptor {
             label,
             size,
@@ -411,8 +408,10 @@ impl WGPUBackend {
                 }
             }
         };
-        let mut limits = wgpu::Limits::default();
-        limits.max_push_constant_size = 64;
+        let limits = wgpu::Limits {
+            max_push_constant_size: 64,
+            ..Default::default()
+        };
         let mut features = wgpu::Features::empty();
         features.toggle(Features::PUSH_CONSTANTS);
 
@@ -426,8 +425,8 @@ impl WGPUBackend {
         );
 
         let mut limits2 = wgpu::Limits::downlevel_webgl2_defaults();
-
         limits2.max_push_constant_size = 64;
+
         let device_fut2 = adapter.request_device(
             &DeviceDescriptor {
                 features,
@@ -516,8 +515,7 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
         unsafe {
             self.render_pass_desc.color_attachments =
                 std::mem::transmute(self.color_attachments.as_slice());
-            self.render_pass_desc.depth_stencil_attachment =
-                self.depth_attachment.clone().map(|v| v);
+            self.render_pass_desc.depth_stencil_attachment = self.depth_attachment.clone();
         }
         &self.render_pass_desc
     }
@@ -856,7 +854,7 @@ impl GpuMainBuffer {
             }
             return false;
         }
-        return true;
+        true
     }
 }
 

@@ -206,7 +206,7 @@ impl MeshDataBuilder {
     }
 
     pub fn add_vertices_prop(&mut self, prop_name: MeshCoordType, prop: &[u8], strip: u32) {
-        let write_count = prop.len() as u64 / prop_name.size_alignment().0 as u64;
+        let write_count = prop.len() as u64 / prop_name.size_alignment().0;
         let prev_write_count = *self.props_write_map.get(&prop_name).unwrap();
 
         let result_count = write_count + prev_write_count;
@@ -247,8 +247,8 @@ impl MeshDataBuilder {
         self.mesh.clip = Some(clip);
     }
 
-    pub fn build(mut self) -> Mesh {
-        if self.mesh.has_position {
+    pub fn build(self) -> Mesh {
+        if self.mesh.has_position && !self.props_write_map.is_empty() {
             assert_eq!(self.max_count, self.max_props_count);
         }
         self.mesh

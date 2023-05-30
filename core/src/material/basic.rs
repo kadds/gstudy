@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     context::ResourceRef,
     types::{Vec2f, Vec3f, Vec4f},
@@ -21,12 +23,13 @@ pub struct ConstParameterWithAlpha {
 pub struct BasicMaterialFace {
     color: Vec4f,
     variants: Vec<tshader::Variant>,
+    variants_name: String,
     texture: Option<ResourceRef>,
 }
 
 impl BasicMaterialFace {
     pub fn texture(&self) -> Option<&ResourceRef> {
-        self.texture.as_ref().map(|v| v)
+        self.texture.as_ref()
     }
     pub fn color(&self) -> Vec4f {
         self.color
@@ -34,11 +37,13 @@ impl BasicMaterialFace {
     pub fn variants(&self) -> &[tshader::Variant] {
         &self.variants
     }
+    pub fn variants_name(&self) -> &str {
+        &self.variants_name
+    }
 }
 
 impl MaterialFace for BasicMaterialFace {
     fn shader_id(&self) -> u64 {
-        // self.shader as u64
         0
     }
 }
@@ -49,6 +54,7 @@ pub struct BasicMaterialFaceBuilder {
     blend: Option<wgpu::BlendState>,
     has_color: bool,
     has_texture: bool,
+    has_alpha_test: bool,
     texture: Option<ResourceRef>,
     color: Vec4f,
 }
@@ -58,6 +64,7 @@ impl BasicMaterialFaceBuilder {
         Self {
             has_color: false,
             has_texture: false,
+            has_alpha_test: false,
             texture: None,
             color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
             blend: None,
@@ -80,24 +87,28 @@ impl BasicMaterialFaceBuilder {
         self.texture = Some(texture);
         self
     }
+    pub fn enable_alpha_test(&mut self) {
+        self.has_alpha_test = true;
+    }
 
     pub fn build(mut self) -> BasicMaterialFace {
         let mut variants = vec![];
-
-        let shader = if self.has_color {
-            if self.has_texture {
-                variants.push(tshader::Variant::TextureColor);
-            } else {
-                self.texture = None;
-            }
+        if self.has_texture {
+            variants.push(tshader::Variant::TextureColor);
         } else {
-            if self.has_texture {
-            } else {
-                self.texture = None;
-            }
-        };
+            self.texture = None;
+        }
+
+        if self.has_color {
+            variants.push(tshader::Variant::VertexColor);
+        }
+        if self.has_alpha_test {
+            variants.push(tshader::Variant::AlphaTest);
+        }
+
         BasicMaterialFace {
             color: self.color,
+            variants_name: tshader::variants_name(&variants[..]),
             variants,
             texture: self.texture,
         }

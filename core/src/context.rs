@@ -5,9 +5,13 @@ use std::sync::{
 
 use dashmap::DashMap;
 
+pub struct Texture {
+    owned: Arc<wgpu::Texture>,
+    views: wgpu::TextureView,
+}
+
 #[derive(Debug)]
 pub enum ResourceTy {
-    // Pso(wgpu::RenderPipeline),
     Texture((wgpu::Texture, wgpu::TextureView)),
     SurfaceTexture((Arc<wgpu::SurfaceTexture>, wgpu::TextureView)),
 }

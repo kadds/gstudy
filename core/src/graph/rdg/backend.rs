@@ -5,7 +5,7 @@ use crate::{
     context::ResourceRef,
 };
 
-use super::{pass::PassRenderTargets, resource::ResourceType, ResourceRegistry};
+use super::{pass::RenderTargetDescriptor, resource::*, ResourceRegistry, ResourceStateMap};
 
 pub struct GraphBackend {
     gpu: Arc<WGPUResource>,
@@ -23,43 +23,75 @@ impl GraphEncoder {
     pub fn new_pass<'a>(
         &'a mut self,
         name: &str,
-        pass_render_target: &PassRenderTargets,
+        pass_render_target: &RenderTargetDescriptor,
         registry: &ResourceRegistry,
+        state: &mut ResourceStateMap,
     ) -> wgpu::RenderPass<'a> {
         let mut render_target = WGPURenderTarget::new("graph target");
         for color in &pass_render_target.colors {
-            let (texture_desc, texture) = registry.get_desc_and_underlying(*color);
+            let res_id = match color.prefer_attachment {
+                super::pass::PreferAttachment::Default => RT_COLOR_RESOURCE_ID,
+                super::pass::PreferAttachment::None => continue,
+                super::pass::PreferAttachment::Resource(r) => r,
+            };
+            let (texture, texture_desc) = registry.get_underlying(res_id);
+            let need_clear = !state.has_clear(res_id);
 
-            if let ResourceType::Texture(info) = &texture_desc.ty {
+            if let ResourceType::Texture(info) = &texture_desc.inner {
                 render_target.add_render_target(
                     texture.texture_view(),
-                    info.clear.as_ref().map(|v| v.color()),
+                    info.clear
+                        .as_ref()
+                        .and_then(|v| v.color())
+                        .filter(|_| need_clear),
                 );
             }
-            if let ResourceType::ImportTexture(info) = &texture_desc.ty {
+            if let ResourceType::ImportTexture(info) = &texture_desc.inner {
                 render_target.add_render_target(
                     texture.texture_view(),
-                    info.0.clear.as_ref().map(|v| v.color()),
+                    info.clear
+                        .as_ref()
+                        .and_then(|v| v.color())
+                        .filter(|_| need_clear),
                 );
             }
         }
-
         if let Some(depth) = &pass_render_target.depth {
-            let (texture_desc, texture) = registry.get_desc_and_underlying(*depth);
+            let res_id = match depth.prefer_attachment {
+                super::pass::PreferAttachment::Default => Some(RT_DEPTH_RESOURCE_ID),
+                super::pass::PreferAttachment::None => None,
+                super::pass::PreferAttachment::Resource(r) => Some(r),
+            };
+            if let Some(res_id) = res_id {
+                let (texture, texture_desc) = registry.get_underlying(res_id);
+                let need_clear = !state.has_clear(res_id);
 
-            if let ResourceType::Texture(info) = &texture_desc.ty {
-                render_target.set_depth_target(
-                    texture.texture_view(),
-                    info.clear.as_ref().map(|v| v.depth()),
-                    info.clear.as_ref().map(|v| v.stencil()),
-                );
-            }
-            if let ResourceType::ImportTexture(info) = &texture_desc.ty {
-                render_target.set_depth_target(
-                    texture.texture_view(),
-                    info.0.clear.as_ref().map(|v| v.depth()),
-                    info.0.clear.as_ref().map(|v| v.stencil()),
-                );
+                if let ResourceType::Texture(info) = &texture_desc.inner {
+                    render_target.set_depth_target(
+                        texture.texture_view(),
+                        info.clear
+                            .as_ref()
+                            .and_then(|v| v.depth())
+                            .filter(|_| need_clear),
+                        info.clear
+                            .as_ref()
+                            .and_then(|v| v.stencil())
+                            .filter(|_| need_clear),
+                    );
+                }
+                if let ResourceType::ImportTexture(info) = &texture_desc.inner {
+                    render_target.set_depth_target(
+                        texture.texture_view(),
+                        info.clear
+                            .as_ref()
+                            .and_then(|v| v.depth())
+                            .filter(|_| need_clear),
+                        info.clear
+                            .as_ref()
+                            .and_then(|v| v.stencil())
+                            .filter(|_| need_clear),
+                    );
+                }
             }
         }
 

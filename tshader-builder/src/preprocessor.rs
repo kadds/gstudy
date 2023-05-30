@@ -385,7 +385,7 @@ impl<'a> PreprocessorContext<'a> {
                         let val = self.eval(&expr)?;
                         self.var_map.insert(decl.ident.to_owned(), val);
                     } else {
-                        self.var_map.insert(decl.ident.to_owned(), ().into());
+                        self.var_map.insert(decl.ident.to_owned(), true.into());
                     }
                 }
                 Command::Assign(assign) => {
@@ -398,7 +398,7 @@ impl<'a> PreprocessorContext<'a> {
                         let val = self.eval(&expr)?;
                         self.var_map.insert(assign.ident.to_owned(), val);
                     } else {
-                        self.var_map.insert(assign.ident.to_owned(), ().into());
+                        self.var_map.insert(assign.ident.to_owned(), true.into());
                     }
                 }
                 Command::Reference(ident) => {

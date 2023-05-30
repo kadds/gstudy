@@ -1,5 +1,6 @@
 use std::{
-    cell::{Ref, RefCell},
+    borrow::Borrow,
+    cell::RefCell,
     collections::{HashMap, HashSet},
     hash::Hash,
     num::NonZeroU64,
@@ -53,7 +54,7 @@ impl<'a> UniformBinderBuilder<'a> {
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     offset: 0,
                     size: NonZeroU64::new(v.size()),
-                    buffer: &v,
+                    buffer: v,
                 }),
             })
             .collect();
@@ -128,7 +129,7 @@ impl SingleMeshMergerData {
         let (buf, range) = if data.len() < 1024 * 4 {
             // use small allocator
             let recreate_sba = if let Some(v) = small_buffer_allocator {
-                let rest = v.borrow().rest();
+                let rest = v.as_ref().borrow().rest();
                 rest < data.len() as u64
             } else {
                 true
@@ -136,10 +137,10 @@ impl SingleMeshMergerData {
 
             if recreate_sba {
                 let buf = Self::create(gpu, label, 1024 * 1024 * 2, usage);
-                *small_buffer_allocator = Some(buf.clone());
+                *small_buffer_allocator = Some(buf);
             }
             let range = {
-                let mut sba = small_buffer_allocator.as_mut().unwrap();
+                let sba = small_buffer_allocator.as_mut().unwrap();
                 let mut sba = sba.borrow_mut();
                 let offset = sba.current_offset as u64;
                 let end = offset + data.len() as u64;
@@ -159,8 +160,8 @@ impl SingleMeshMergerData {
             let buf = Self::create(gpu, label, data.len() as u64, usage);
             let range = 0..(data.len() as u64);
             {
-                let sb = buf.borrow();
-                gpu.queue().write_buffer(&sb.buf, 0, data);
+                let sb = &buf.as_ref().borrow().buf;
+                gpu.queue().write_buffer(sb, 0, data);
             }
             (buf, range)
         };
@@ -200,7 +201,7 @@ pub struct IndexStaticMesh<'a> {
 impl<'a> BufferAccessor<'a> for IndexStaticMesh<'a> {
     fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
         let p = self.inner.objects.get(&id).unwrap();
-        let b = p.index.share_buffer.borrow();
+        let b = p.index.share_buffer.as_ref().borrow();
         Some(unsafe { std::mem::transmute(b.buf.slice(range)) })
     }
 }
@@ -212,7 +213,7 @@ pub struct VertexStaticMesh<'a> {
 impl<'a> BufferAccessor<'a> for VertexStaticMesh<'a> {
     fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
         let p = self.inner.objects.get(&id).unwrap();
-        let b = p.vertex.share_buffer.borrow();
+        let b = p.vertex.share_buffer.as_ref().borrow();
         Some(unsafe { std::mem::transmute(b.buf.slice(range)) })
     }
 }
@@ -224,7 +225,7 @@ pub struct VertexPropsStaticMesh<'a> {
 impl<'a> BufferAccessor<'a> for VertexPropsStaticMesh<'a> {
     fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
         let p = self.inner.objects.get(&id).unwrap();
-        let b = p.vertex_props.share_buffer.borrow();
+        let b = p.vertex_props.share_buffer.as_ref().borrow();
         Some(unsafe { std::mem::transmute(b.buf.slice(range)) })
     }
 }
@@ -276,7 +277,7 @@ impl StaticMeshMerger {
                 self.label,
                 wgpu::BufferUsages::VERTEX,
                 vertex_props_data,
-                &mut self.small_shared_vertex_buffer,
+                &mut self.small_shared_vertex_props_buffer,
             );
             let smd = StaticMeshMergerData {
                 index,
@@ -294,6 +295,8 @@ impl StaticMeshMerger {
             o.vertex_props.range.clone(),
         )
     }
+
+    pub fn recall(&mut self) {}
 
     pub fn index(&self) -> IndexStaticMesh {
         IndexStaticMesh { inner: self }
@@ -331,7 +334,7 @@ impl<K: Hash + Eq + PartialEq + Clone, V> FramedCache<K, V> {
 
         let mut removal = vec![];
 
-        for (key, _) in &self.map {
+        for key in self.map.keys() {
             if !self.used.contains(key) {
                 removal.push(key.clone());
             }
@@ -343,8 +346,39 @@ impl<K: Hash + Eq + PartialEq + Clone, V> FramedCache<K, V> {
         self.used.clear();
     }
 
-    pub fn get_or<F: FnOnce(&K) -> V>(&mut self, key: K, f: F) -> &V {
+    pub fn get_or<S: Into<K>, F: FnOnce(&K) -> V>(&mut self, key: S, f: F) -> &V {
+        let key = key.into();
         self.used.insert(key.clone());
         self.map.entry(key.clone()).or_insert_with(|| f(&key))
+    }
+
+    pub fn get_mut_or<S: Into<K>, F: FnOnce(&K) -> V>(&mut self, key: S, f: F) -> &mut V {
+        let key = key.into();
+        self.used.insert(key.clone());
+        self.map.entry(key.clone()).or_insert_with(|| f(&key))
+    }
+
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.map.get(key)
+    }
+
+    pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.map.get_mut(key)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.map.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> {
+        self.map.iter_mut()
     }
 }

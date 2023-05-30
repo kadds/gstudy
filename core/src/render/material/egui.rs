@@ -3,8 +3,10 @@ use std::sync::{Arc, Mutex};
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, NullBufferAccessor, WGPUResource},
     graph::rdg::{
-        backend::GraphBackend, pass::RenderPassExecutor, RenderGraphBuilder, RenderPassBuilder,
-        ResourceRegistry,
+        backend::GraphBackend,
+        pass::*,
+        resource::{ClearValue, ResourceOps},
+        RenderGraphBuilder, RenderPassBuilder, ResourceRegistry, ResourceStateMap,
     },
     material::{egui::EguiMaterialFace, Material, MaterialId},
     render::{
@@ -37,15 +39,12 @@ pub struct EguiMaterialHardwareRenderer {
 impl EguiMaterialHardwareRenderer {}
 
 impl RenderPassExecutor for EguiMaterialHardwareRenderer {
-    fn execute<'a>(
-        &'a mut self,
-        registry: &ResourceRegistry,
-        backend: &GraphBackend,
-        pass: &mut wgpu::RenderPass<'a>,
-    ) {
+    fn execute<'a>(&'a mut self, mut context: RenderPassContext<'a>) {
         let inner = &mut self.inner;
+        let mut pass = context.new_pass();
+
         inner.commands.draw(
-            pass,
+            &mut pass,
             inner.main_buffers.index(),
             inner.main_buffers.vertex(),
             NullBufferAccessor,
@@ -54,18 +53,14 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
 }
 
 impl MaterialRenderer for EguiMaterialHardwareRenderer {
-    fn render_material<'a, 'b>(
-        &'a mut self,
+    fn render_material<'b>(
+        &mut self,
         ctx: &'b mut super::MaterialRenderContext<'b>,
         objects: &'b [u64],
         material: &'b Material,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let inner = &mut self.inner;
-        inner.main_buffers.recall();
-        inner.material_bind_group_cache.recall();
-        inner.commands.clear();
-
         let mat = material.face_by::<EguiMaterialFace>();
 
         let (index_bytes, vertex_bytes, vertex_props_bytes) =
@@ -102,9 +97,6 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             .main_buffers
             .prepare(ctx.gpu, index_bytes, vertex_props_bytes);
 
-        inner
-            .commands
-            .set_global_bind_group(inner.global_bind_group.clone());
         let default_pipeline = inner.commands.add_pipeline(inner.pipeline.pass[0].clone());
 
         // copy staging buffer
@@ -133,6 +125,21 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             }
             command_builder.build();
         }
+    }
+
+    fn before_render(&mut self) {
+        let inner = &mut self.inner;
+        inner.main_buffers.recall();
+        inner.material_bind_group_cache.recall();
+        inner.commands.clear();
+
+        inner
+            .commands
+            .set_global_bind_group(inner.global_bind_group.clone());
+    }
+
+    fn finish_render(&mut self) {
+        let inner = &mut self.inner;
         inner.main_buffers.finish();
     }
 }
@@ -149,7 +156,6 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
     ) -> Arc<Mutex<dyn MaterialRenderer>> {
-        let egui_texture = g.import_texture("egui default");
         let label = Some("egui");
         let tech = setup_resource.shader_loader.load_tech("egui").unwrap();
         let template = tech.register_variant(gpu.device(), &[]).unwrap();
@@ -199,8 +205,24 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         }));
 
         let mut pass = RenderPassBuilder::new("egui pass");
-        pass.read_texture(egui_texture);
-        pass.bind_default_render_target();
+        pass.render_target(RenderTargetDescriptor {
+            colors: smallvec::smallvec![ColorRenderTargetDescriptor {
+                prefer_attachment: PreferAttachment::Default,
+                ops: ResourceOps {
+                    load: None,
+                    store: true,
+                },
+            }],
+            depth: Some(DepthRenderTargetDescriptor {
+                prefer_attachment: PreferAttachment::Default,
+                depth_ops: Some(ResourceOps {
+                    load: Some(ClearValue::Depth(1.0f32)),
+                    store: true,
+                }),
+                stencil_ops: None,
+            }),
+        });
+
         pass.async_execute(r.clone());
 
         g.add_render_pass(pass.build());

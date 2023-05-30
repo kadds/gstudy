@@ -161,14 +161,14 @@ impl DrawCommands {
         }
     }
 
-    pub fn new_index_draw_command<'a>(
-        &'a mut self,
+    pub fn new_index_draw_command(
+        &mut self,
         id: u64,
         index: Range<u64>,
         vertex: Range<u64>,
         vertex_props: Range<u64>,
         draw_count: u32,
-    ) -> DrawCommandBuilder<'a> {
+    ) -> DrawCommandBuilder {
         let command = DrawCommand {
             id,
             vertex,
@@ -204,7 +204,7 @@ impl DrawCommands {
 
     fn get_clip(&self, command: &DrawCommand) -> Option<Rectu> {
         if command.clip_offset == u32::MAX {
-            return None;
+            None
         } else {
             Some(self.clips[command.clip_offset as usize])
         }
@@ -233,17 +233,18 @@ impl DrawCommands {
     }
 
     pub fn draw<'a, B: BufferAccessor<'a>, U: BufferAccessor<'a>, G: BufferAccessor<'a>>(
-        &'a mut self,
+        &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         index_buffer: B,
         vertex_buffer: U,
         vertex_props_buffer: G,
     ) {
-        pass.set_bind_group(0, self.get_global_bind_group().unwrap(), &[]);
+        let bind_group = self.get_global_bind_group().unwrap();
+        pass.set_bind_group(0, bind_group, &[]);
 
         let mut last_pipeline = u32::MAX;
         for command in &self.commands {
-            if let Some(clip) = self.get_clip(&command) {
+            if let Some(clip) = self.get_clip(command) {
                 pass.set_scissor_rect(clip.x, clip.y, clip.z, clip.w);
             }
             if last_pipeline != command.pipeline {
@@ -255,7 +256,7 @@ impl DrawCommands {
                 }
             }
 
-            let mut bind_group_iter = self.get_bind_groups(&command);
+            let mut bind_group_iter = self.get_bind_groups(command);
             let g = bind_group_iter.next().unwrap();
 
             pass.set_bind_group(1, g, &[]);
@@ -288,6 +289,10 @@ impl DrawCommands {
                         .buffer_slice(command.id, command.vertex_props.clone())
                         .unwrap(),
                 );
+            }
+            if command.push_constant_offset != u32::MAX {
+                let constant = self.get_constant_data(command);
+                pass.set_push_constants(wgpu::ShaderStages::all(), 0, constant);
             }
 
             pass.draw_indexed(0..command.draw_count, 0, 0..1);
@@ -349,12 +354,12 @@ impl HardwareRenderer {
         let material_renderers = HashMap::new();
         material_renderer_factory.insert(
             TypeId::of::<EguiMaterialFace>(),
-            Box::new(EguiMaterialRendererFactory::default()),
+            Box::<EguiMaterialRendererFactory>::default(),
         );
 
         material_renderer_factory.insert(
             TypeId::of::<BasicMaterialFace>(),
-            Box::new(BasicMaterialRendererFactory::default()),
+            Box::<BasicMaterialRendererFactory>::default(),
         );
         let shader_loader = tshader::Loader::new("./shaders/desc.toml".into()).unwrap();
 
@@ -422,7 +427,7 @@ impl ModuleRenderer for HardwareRenderer {
             let mut mats = Vec::new();
             let mut ident = PassIdent::new(last_material_id, *layer);
 
-            for (_, mat) in &objects.sorted_objects {
+            for mat in objects.sorted_objects.values() {
                 let id = mat.face_id();
                 if last_material_id != id {
                     if !mats.is_empty() {
@@ -483,6 +488,11 @@ impl ModuleRenderer for HardwareRenderer {
         let backend = GraphBackend::new(gpu);
         let mut encoder = backend.begin_thread();
 
+        for r in self.material_renderers.values() {
+            let mut r = r.lock().unwrap();
+            r.before_render();
+        }
+
         for (layer, objects) in scene.layers() {
             let camera_uniform = if *layer >= LAYER_UI {
                 &inner.ui_camera.buffer
@@ -503,10 +513,15 @@ impl ModuleRenderer for HardwareRenderer {
                 };
                 let r = self.material_renderers.get(&ident).unwrap();
                 let mut r = r.lock().unwrap();
-                r.render_material(&mut ctx, objects, &mat, encoder.encoder_mut());
+                r.render_material(&mut ctx, objects, mat, encoder.encoder_mut());
             }
         }
         drop(encoder);
+
+        for (_, r) in &self.material_renderers {
+            let mut r = r.lock().unwrap();
+            r.finish_render();
+        }
 
         g.execute(|_, _| {}, |_| {}, backend);
     }
@@ -579,6 +594,11 @@ impl ColorTargetBuilder {
 
     pub fn set_default_blender(mut self) -> Self {
         self.target.blend = Some(default_blender());
+        self
+    }
+
+    pub fn set_blender(mut self, blender: wgpu::BlendState) -> Self {
+        self.target.blend = Some(blender);
         self
     }
 
@@ -746,7 +766,7 @@ fn resolve_single_pass(
                     current = (pos.group, vertex_attrs.len());
                 }
                 vertex_attrs.push(wgpu::VertexAttribute {
-                    format: format.clone(),
+                    format: *format,
                     offset,
                     shader_location: pos.binding,
                 });
@@ -801,7 +821,7 @@ pub fn resolve_pipeline(
     };
 
     for pass in template.iter() {
-        let pipeline = resolve_single_pass(gpu, &pass, &ins);
+        let pipeline = resolve_single_pass(gpu, pass, &ins);
         desc.pass.push(Arc::new(pipeline));
     }
 

@@ -257,7 +257,7 @@ impl CameraController for TrackballCameraController {
                 _ => (),
             },
             crate::event::InputEvent::CursorMoved { logical, physical } => {
-                let last_pos = Vec2f::new(physical.x as f32, physical.y as f32);
+                let last_pos = Vec2f::new(physical.x, physical.y);
                 let delta = last_pos - self.last_pos;
                 self.last_pos = last_pos;
                 if self.down_pos.is_none() {

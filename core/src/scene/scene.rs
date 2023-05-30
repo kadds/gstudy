@@ -109,7 +109,7 @@ impl Scene {
         let material_id = material.id();
 
         let entry = self.layers.entry(layer);
-        let entry = entry.or_insert_with(|| LayerObjects::default());
+        let entry = entry.or_insert_with(LayerObjects::default);
 
         entry.map.entry(material_id).or_default().push(id);
         entry.dirty = true;
@@ -214,7 +214,7 @@ impl Scene {
     pub fn update(&self, delta: f64) {}
 
     pub fn clear_objects(&mut self) {
-        for (_, layer) in &mut self.layers {
+        for layer in self.layers.values_mut() {
             layer.sorted_objects.clear();
             layer.map.clear();
             layer.dirty = true;
@@ -229,12 +229,12 @@ impl Scene {
         if let Some(v) = v {
             for (_, objs) in &v.map {
                 for obj in objs {
-                    let material = self.objects.get(&obj).unwrap().material();
+                    let material = self.objects.get(obj).unwrap().material();
                     self.material_face_change_map
                         .entry(material.face_id())
                         .and_modify(|v| *v -= 1)
                         .or_insert(-1);
-                    self.objects.remove(&obj);
+                    self.objects.remove(obj);
                 }
             }
             v.map.clear();
@@ -314,5 +314,3 @@ impl RenderObject {
         self.z_order
     }
 }
-
-fn mesh_render_system() {}

@@ -9,7 +9,7 @@
 ///#decl BINDING_GLOBAL_GROUP1 = _atomic_counter(1, 1)
 
 struct VertexInput {
-    @location(#{POSITION_VERTEX_INPUT}) position: vec4<f32>,
+    @location(#{POSITION_VERTEX_INPUT}) position: vec3<f32>,
 ///#if VERTEX_COLOR
     @location(#{POSITION_VERTEX_INPUT}) color: vec4<f32>,
 ///#endif
@@ -65,10 +65,13 @@ var<push_constant> object: Object;
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput{
     var output: VertexOutput;
-    output.position = camera_uniform.vp * object.model * input.position;
+    output.position = camera_uniform.vp * object.model * vec4<f32>(input.position, 1.0);
     output.color = material_uniform.color;
 ///#if VERTEX_COLOR
     output.color *= input.color;
+///#endif
+///#if VERTEX_TEX
+    output.uv = input.uv;
 ///#endif
 
     return output;

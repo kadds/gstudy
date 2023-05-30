@@ -6,8 +6,9 @@ use std::{
 };
 
 use serde_derive::Deserialize;
-use tshader_builder::compiler::{variants_name, ShaderTechCompiler};
+use tshader_builder::compiler::ShaderTechCompiler;
 
+pub use tshader_builder::compiler::variants_name;
 pub use tshader_builder::compiler::Variant;
 
 #[derive(Debug)]
@@ -237,7 +238,9 @@ impl ShaderTech {
             } => {
                 let format = Self::to_vertex_format(ty)?;
                 if let naga::TypeInner::Vector { size, kind, width } = ty.inner {
-                    if location == 0 && size == naga::VectorSize::Quad {
+                    if location == 0
+                        && (size == naga::VectorSize::Quad || size == naga::VectorSize::Tri)
+                    {
                         *new_group = true;
                         layout.insert(ResourcePosition::new(0, 0), format);
                         return Ok(());

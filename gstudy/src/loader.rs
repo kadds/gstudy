@@ -155,15 +155,15 @@ fn parse_mesh(
 
         let mut kind = MaterialInputKind::None;
 
-        for (semantic, accessor) in p.attributes() {
-            let mut no_position = true;
+        let mut no_position = true;
+        for (semantic, _) in p.attributes() {
             match semantic {
                 gltf::Semantic::Extras(ext) => {}
                 gltf::Semantic::Positions => {
                     no_position = false;
                 }
                 gltf::Semantic::Normals => {
-                    gmesh.add_props(MeshCoordType::TexNormal);
+                    // gmesh.add_props(MeshCoordType::TexNormal);
                 }
                 gltf::Semantic::Tangents => {}
                 gltf::Semantic::Colors(_) => {
@@ -175,6 +175,9 @@ fn parse_mesh(
                 gltf::Semantic::Joints(_) => {}
                 gltf::Semantic::Weights(_) => {}
             }
+        }
+        if no_position {
+            gmesh.set_no_position();
         }
         let mut gmesh = gmesh.finish_props();
 
@@ -468,6 +471,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
         match material.alpha_mode() {
             gltf::material::AlphaMode::Opaque => {}
             gltf::material::AlphaMode::Mask => {
+                basic_material_builder.enable_alpha_test();
                 material_builder =
                     material_builder.with_alpha_test(material.alpha_cutoff().unwrap_or(0.5f32));
             }

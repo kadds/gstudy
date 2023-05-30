@@ -1,30 +1,45 @@
-use crate::types::{Color, Vec3u};
+use std::fmt::Debug;
+
+use crate::{
+    context::ResourceRef,
+    types::{Color, Vec3u},
+};
 
 #[derive(Debug)]
 pub enum ClearValue {
     Color(Color),
-    Depth((f32, u32)),
+    Depth(f32),
+    Stencil(u32),
+    DepthAndStencil((f32, u32)),
 }
 
 impl ClearValue {
-    pub fn depth(&self) -> f32 {
+    pub fn depth(&self) -> Option<f32> {
         match self {
-            ClearValue::Color(_) => todo!(),
-            ClearValue::Depth((d, s)) => *d,
+            ClearValue::Depth(d) => Some(*d),
+            ClearValue::DepthAndStencil((d, s)) => Some(*d),
+            _ => None,
         }
     }
-    pub fn stencil(&self) -> u32 {
+    pub fn stencil(&self) -> Option<u32> {
         match self {
-            ClearValue::Color(_) => todo!(),
-            ClearValue::Depth((d, s)) => *s,
+            ClearValue::Stencil(s) => Some(*s),
+            ClearValue::DepthAndStencil((d, s)) => Some(*s),
+            _ => None,
         }
     }
-    pub fn color(&self) -> Color {
+    pub fn color(&self) -> Option<Color> {
         match self {
-            ClearValue::Color(c) => *c,
-            ClearValue::Depth(_) => todo!(),
+            ClearValue::Color(c) => Some(*c),
+            _ => None,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct ResourceOps {
+    pub load: Option<ClearValue>,
+    pub store: bool,
 }
 
 pub type ResourceId = u32;
@@ -32,7 +47,7 @@ pub const RT_COLOR_RESOURCE_ID: ResourceId = 0;
 pub const RT_DEPTH_RESOURCE_ID: ResourceId = 1;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ResourceOp {
+pub enum ResourceUsage {
     TextureRead,
     TextureWrite,
     TextureReadAndWrite,
@@ -46,34 +61,53 @@ pub enum ResourceOp {
 pub struct TextureInfo {
     pub size: Vec3u,
     pub format: wgpu::TextureFormat,
-    pub id: ResourceId,
     pub clear: Option<ClearValue>,
     pub usage: wgpu::TextureUsages,
 }
 
 #[derive(Debug)]
 pub struct ImportTextureInfo {
-    pub id: ResourceId,
     pub clear: Option<ClearValue>,
 }
 
 #[derive(Debug)]
 pub struct BufferInfo {
     pub size: u64,
-    pub id: ResourceId,
     pub usage: wgpu::BufferUsages,
 }
 
-#[derive(Debug)]
 pub enum ResourceType {
     Texture(TextureInfo),
     Buffer(BufferInfo),
-    ImportTexture((ImportTextureInfo, String)),
-    ImportBuffer((ResourceId, String)),
+    ImportTexture(ImportTextureInfo),
+    ImportBuffer(ResourceId),
     AliasResource(ResourceId, ResourceId),
 }
 
-pub struct Resource {
-    pub(crate) refs: u32,
-    pub(crate) ty: ResourceType,
+impl Debug for ResourceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Texture(arg0) => f.debug_tuple("Texture").finish(),
+            Self::Buffer(arg0) => f.debug_tuple("Buffer").finish(),
+            Self::ImportTexture(arg0) => f.debug_tuple("ImportTexture").finish(),
+            Self::ImportBuffer(arg0) => f.debug_tuple("ImportBuffer").finish(),
+            Self::AliasResource(arg0, arg1) => f.debug_tuple("AliasResource").finish(),
+        }
+    }
+}
+
+pub struct ResourceNode {
+    pub inner: ResourceType,
+    pub name: String,
+    pub id: ResourceId,
+}
+
+impl Debug for ResourceNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResourceNode")
+            .field("inner", &self.inner)
+            .field("name", &self.name)
+            .field("id", &self.id)
+            .finish()
+    }
 }

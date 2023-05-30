@@ -23,13 +23,17 @@ pub struct MaterialRenderContext<'a> {
 }
 
 pub trait MaterialRenderer {
-    fn render_material<'a, 'b>(
-        &'a mut self,
+    fn before_render(&mut self);
+
+    fn render_material<'b>(
+        &mut self,
         ctx: &'b mut MaterialRenderContext<'b>,
         objects: &'b [u64],
         material: &'b Material,
         encoder: &mut wgpu::CommandEncoder,
     );
+
+    fn finish_render(&mut self);
 }
 
 pub struct SetupResource<'a> {
@@ -56,5 +60,3 @@ pub mod egui;
 pub struct HardwareMaterialShaderResource {
     pub pass: smallvec::SmallVec<[Arc<wgpu::RenderPipeline>; 1]>,
 }
-
-pub type MaterialResourceId = u64;

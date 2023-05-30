@@ -43,8 +43,6 @@ struct LooperInner {
     ui_camera: Arc<Camera>,
     ui: UI,
 
-    main_depth_texture: Option<ResourceRef>,
-
     ui_textures: Option<UITextures>,
     ui_mesh: UIMesh,
 
@@ -82,7 +80,6 @@ impl LooperInner {
             ui_camera,
             ui,
             last_ui_id: u64::MAX,
-            main_depth_texture: None,
             size: Size::new(1u32, 1u32),
             ui_materials: Some(HashMap::new()),
             ui_mesh,
@@ -141,7 +138,6 @@ impl LooperInner {
             }
         };
 
-        let depth_texture = self.main_depth_texture.as_ref().unwrap();
         let clear_color = self.ui.clear_color();
 
         if self.scene.material_change() {
@@ -166,7 +162,7 @@ impl LooperInner {
             .as_mut()
             .unwrap()
             .registry()
-            .import_underlying(RT_COLOR_RESOURCE_ID, surface_frame.texture());
+            .import(RT_COLOR_RESOURCE_ID, surface_frame.texture());
 
         let p = RenderParameter {
             gpu: self.gpu.clone(),
@@ -243,13 +239,6 @@ impl EventProcessor for DefaultProcessor {
             }
             core::event::Event::Resized { logical, physical } => {
                 inner.size = physical.clone();
-
-                // create depth texture
-                let texture = inner
-                    .gpu
-                    .new_depth_texture(Some("depth texture"), physical.clone());
-
-                inner.main_depth_texture = Some(texture);
 
                 inner.ui_camera.make_orthographic(
                     Vec4f::new(0f32, 0f32, logical.x as f32, logical.y as f32),

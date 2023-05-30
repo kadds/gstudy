@@ -80,8 +80,8 @@ pub struct MaterialBuilder {
 impl Clone for MaterialBuilder {
     fn clone(&self) -> Self {
         Self {
-            primitive: self.primitive.clone(),
-            blend: self.blend.clone(),
+            primitive: self.primitive,
+            blend: self.blend,
             alpha_test: self.alpha_test,
             face: None,
         }
