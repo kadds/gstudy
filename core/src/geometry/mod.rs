@@ -18,8 +18,8 @@ pub struct IntersectResult {
 #[repr(u8)]
 #[derive(Debug, Hash, Eq, Ord, PartialEq, PartialOrd, Clone, Copy)]
 pub enum MeshCoordType {
-    Pos2,
     Color,
+    Pos2,
     TexCoord,
     TexNormal,
     TexBump,
@@ -38,8 +38,8 @@ pub enum MeshCoordType {
 impl MeshCoordType {
     pub fn size_alignment(&self) -> (u64, u64) {
         match self {
-            MeshCoordType::Pos2 => (8, 8),
             MeshCoordType::Color => (16, 16),
+            MeshCoordType::Pos2 => (8, 8),
             MeshCoordType::TexCoord => (8, 8),
             MeshCoordType::TexNormal => (8, 8),
             MeshCoordType::TexBump => (8, 8),
@@ -59,6 +59,7 @@ pub fn load_default_transformer() -> MeshTransformer {
     Box::new(default_transformer)
 }
 
+#[derive(Debug)]
 struct BytesOffset {
     offset: u32,
     len: u32,
@@ -127,7 +128,7 @@ impl Mesh {
 
             let rest = offset % max_alignment;
             if rest != 0 {
-                offset += max_alignment - rest;
+                // offset += max_alignment - rest;
             }
             let row_strip_size = offset as u32;
 
@@ -281,6 +282,7 @@ impl MeshBuilder {
         for prop in &self.props {
             props_write_map.insert(*prop, 0);
         }
+        self.props.sort();
 
         MeshDataBuilder {
             mesh: Mesh::new(!self.no_position, &self.props),

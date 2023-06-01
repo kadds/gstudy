@@ -115,6 +115,8 @@ impl RenderGraph {
                             self.registry.underlying_map.insert(*id, underlying);
                         }
                         ResourceLifetimeOperation::Destroy(id) => {
+                            let res = self.registry.underlying_map.get(id).unwrap();
+                            backend.remove_resource(res.clone());
                             self.registry.underlying_map.remove(id);
                         }
                     }
@@ -423,7 +425,7 @@ impl RenderGraphBuilder {
             let gz = Dot::with_config(&g, &[Config::EdgeNoLabel]);
             panic!("cyclic detected in render graph {:?}", gz);
         }
-        log::info!("{:?}", usage_resources);
+        // log::info!("{:?}", usage_resources);
 
         let mut passes_vec = vec![];
         passes_vec.push((present_index, vec![]));

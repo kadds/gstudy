@@ -304,8 +304,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
                     resource: wgpu::BindingResource::TextureView(
                         mat.texture()
                             .as_ref()
-                            .expect("texture view resource not exist")
-                            .texture_view(),
+                            .map_or_else(|| gpu.default_texture(), |v| v.texture_view()),
                     ),
                 })
             }

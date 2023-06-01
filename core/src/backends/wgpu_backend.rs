@@ -9,7 +9,8 @@ use crate::{
     context::{RContext, RContextRef, ResourceRef},
     event::{Event, EventProcessor, EventSource, ProcessEventResult},
     render::common::BufferAccessor,
-    types::{Rectu, Size},
+    types::{Rectu, Size, Vec4, Vec4f},
+    util::any_as_u8_slice_array,
 };
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
@@ -65,9 +66,13 @@ pub struct WGPUResource {
     queue: Queue,
     instance: Arc<WGPUInstance>,
     context: Arc<RContext>,
+    default_texture: (wgpu::Texture, wgpu::TextureView),
 }
 
 impl WGPUResource {
+    pub(crate) fn default_texture(&self) -> &wgpu::TextureView {
+        &self.default_texture.1
+    }
     fn build_surface_desc(width: u32, height: u32, format: TextureFormat) -> SurfaceConfiguration {
         SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
@@ -107,6 +112,13 @@ impl WGPUResource {
     pub(crate) fn height(&self) -> u32 {
         let inner = self.instance.inner.lock().unwrap();
         inner.height
+    }
+    pub fn aspect(&self) -> f32 {
+        let mut h = self.height();
+        if h == 0 {
+            h = 1;
+        }
+        self.width() as f32 / h as f32
     }
     pub(crate) fn set_width_height(&self, width: u32, height: u32) {
         let mut inner = self.instance.inner.lock().unwrap();
@@ -418,7 +430,7 @@ impl WGPUBackend {
         let device_fut = adapter.request_device(
             &DeviceDescriptor {
                 features,
-                limits: limits,
+                limits,
                 label: Some("wgpu device"),
             },
             None,
@@ -438,7 +450,7 @@ impl WGPUBackend {
 
         let (device, queue) = match pollster::block_on(device_fut) {
             Ok(v) => v,
-            Err(e) => pollster::block_on(device_fut2)?,
+            Err(_) => pollster::block_on(device_fut2)?,
         };
         let formats = surface.get_capabilities(&adapter).formats;
         let has_format = formats.iter().find(|v| **v == TextureFormat::Rgba8Unorm);
@@ -452,9 +464,42 @@ impl WGPUBackend {
         };
         log::info!("use format {:?}", format);
 
+        let mut texture_data = vec![];
+        let deep_color = Vec4::<u8>::new(44, 45, 40, 255);
+        let white_color = Vec4::<u8>::new(192, 198, 202, 255);
+        texture_data.push(deep_color);
+        texture_data.push(white_color);
+        texture_data.push(white_color);
+        texture_data.push(deep_color);
+
+        let default_texture = device.create_texture_with_data(
+            &queue,
+            &wgpu::TextureDescriptor {
+                label: Some("default texture"),
+                size: wgpu::Extent3d {
+                    width: 2,
+                    height: 2,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            any_as_u8_slice_array(&texture_data),
+        );
+        let view = default_texture.create_view(&wgpu::TextureViewDescriptor {
+            ..Default::default()
+        });
+
+        let default_texture = (default_texture, view);
+
         Ok(WGPUBackend {
             inner: WGPUResource {
                 context: RContext::new(),
+                default_texture,
                 instance: Arc::new(WGPUInstance {
                     instance,
                     surface,

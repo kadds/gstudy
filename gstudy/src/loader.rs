@@ -510,7 +510,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
             s.nodes().len()
         );
     }
-    let aspect = 1.0f32;
+    let aspect = rm.gpu.aspect();
     let ctx = rm.gpu.context();
 
     let center = bound_box.center();
