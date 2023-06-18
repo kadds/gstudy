@@ -1,6 +1,5 @@
 use core::backends::wgpu_backend::WGPUResource;
 use core::backends::WGPUBackend;
-use core::context::ResourceRef;
 use core::event::{
     CustomEvent, Event, EventProcessor, EventSender, EventSource, InputEvent, ProcessEventResult,
     Theme,
@@ -12,10 +11,9 @@ use core::material::egui::EguiMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, TrackballCameraController};
-use core::scene::{Camera, RenderObject, Scene, LAYER_NORMAL, LAYER_UI};
-use core::types::{Color, Size, Vec2f, Vec3f, Vec4f};
+use core::scene::{Camera, RenderObject, Scene, LAYER_UI};
+use core::types::{Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -36,7 +34,6 @@ type WEvent<'a> = winit::event::Event<'a, Event>;
 struct LooperInner {
     renderer: HardwareRenderer,
     scene: Scene,
-    last_ui_id: u64,
 
     gpu: Arc<WGPUResource>,
 
@@ -79,7 +76,6 @@ impl LooperInner {
             scene,
             ui_camera,
             ui,
-            last_ui_id: u64::MAX,
             size: Size::new(1u32, 1u32),
             ui_materials: Some(HashMap::new()),
             ui_mesh,
@@ -559,9 +555,15 @@ impl Looper {
             },
             _ => {}
         };
-        if ret == ControlFlow::Wait {
-            let (ins, _, _) = self.frame.next_frame();
-            ret = ControlFlow::WaitUntil(ins);
+        match ret {
+            ControlFlow::Wait => {
+                let (ins, _, _) = self.frame.next_frame();
+                ret = ControlFlow::WaitUntil(ins);
+            }
+            ControlFlow::ExitWithCode(_) => {
+                log::warn!("app exit");
+            }
+            _ => {}
         }
         if self.frame.changed() {
             self.window

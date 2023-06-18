@@ -4,6 +4,7 @@ use std::{
     ops::Range,
     sync::{Arc, Mutex},
 };
+use bevy_ecs::prelude::*;
 
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},

@@ -36,4 +36,5 @@ pub fn real_main() {
     looper.register_processor(loader.event_processor());
 
     looper.run();
+    log::warn!("main entry exit");
 }

@@ -1,15 +1,5 @@
-use std::sync::Arc;
-
 use crate::backends::WGPUBackend;
 use crate::types::*;
-// use winit::{
-//     dpi::PhysicalPosition,
-//     event::{
-//         DeviceEvent, DeviceId, ElementState, KeyboardInput, ModifiersState, MouseButton,
-//         MouseScrollDelta, TouchPhase,
-//     },
-//     window::CursorIcon,
-// };
 
 pub trait EventSender: Send {
     fn send_event(&self, ev: Event);

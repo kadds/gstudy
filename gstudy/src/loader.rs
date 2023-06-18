@@ -5,7 +5,6 @@ use core::backends::wgpu_backend::WGPUResource;
 use core::context::{RContext, ResourceRef};
 use core::event::{Event, EventSender};
 use core::render::default_blender;
-// use crate::geometry::axis::{Axis, AxisMesh};
 use crate::taskpool::{TaskPool, TaskPoolBuilder};
 use crate::util::{any_as_u8_slice_array, any_as_x_slice_array};
 use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
@@ -13,10 +12,9 @@ use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
 use core::types::{BoundBox, Size, Vec2f, Vec3f, Vec4f};
-// use core::util::any_as_x_slice_array;
 use core::{
     event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
-    geometry::{Mesh, StaticGeometry},
+    geometry::{StaticGeometry},
 };
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};

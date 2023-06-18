@@ -1,4 +1,4 @@
-use bevy_ecs::prelude::Component;
+use bevy_ecs::prelude::*;
 
 use crate::{
     context::RContextRef,
@@ -27,7 +27,7 @@ pub const LAYER_ALPHA_TEST: u64 = 30000;
 pub const LAYER_NORMAL: u64 = 4000;
 pub const LAYER_UI: u64 = 10_0000;
 
-#[derive(Debug)]
+#[derive(Debug, Resource)]
 pub struct Scene {
     context: RContextRef,
 

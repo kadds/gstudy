@@ -12,4 +12,5 @@ pub mod resource;
 pub mod scene;
 pub mod types;
 pub mod ui;
+pub mod ecs;
 mod util;
