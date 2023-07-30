@@ -24,8 +24,11 @@ pub fn real_main() {
         .with_title("GStudy");
 
     let mut looper = looper::Looper::new(window_builder);
+    let size = looper.window().inner_size();
+    let w = size.width;
+    let h = size.height;
 
-    let backend = Box::new(WGPUBackend::new(looper.window()).unwrap());
+    let backend = Box::new(WGPUBackend::new(looper.window(), w, h).unwrap());
 
     looper.register_processor(backend.event_processor());
     let gpu = backend.gpu();

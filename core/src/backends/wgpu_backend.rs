@@ -79,7 +79,7 @@ impl WGPUResource {
             format,
             width,
             height,
-            present_mode: wgpu::PresentMode::Immediate,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
         }
@@ -374,6 +374,8 @@ impl WGPUBackend {
         S: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
     >(
         surface: &S,
+        width: u32,
+        height: u32,
     ) -> Result<WGPUBackend> {
         let bits = {
             #[cfg(not(target_arch = "wasm32"))]
@@ -496,6 +498,13 @@ impl WGPUBackend {
 
         let default_texture = (default_texture, view);
 
+        // config first time
+
+        surface.configure(
+            &device,
+            &WGPUResource::build_surface_desc(width, height, format),
+        );
+
         Ok(WGPUBackend {
             inner: WGPUResource {
                 context: RContext::new(),
@@ -586,7 +595,7 @@ impl std::fmt::Debug for WGPURenderTarget {
     }
 }
 
-unsafe impl core::marker::Send for WGPURenderTarget {}
+unsafe impl std::marker::Send for WGPURenderTarget {}
 
 impl WGPURenderTarget {
     pub fn new(label: &'static str) -> Self {

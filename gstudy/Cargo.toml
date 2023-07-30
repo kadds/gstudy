@@ -20,7 +20,7 @@ webbrowser = "0.8"
 num_cpus = "1.15"
 urlencoding = "2.1"
 nalgebra = "0.32.2"
-wgpu = { version = "0.16" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 slog = "2.7.0"

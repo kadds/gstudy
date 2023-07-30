@@ -12,7 +12,7 @@ use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, TrackballCameraController};
 use core::scene::{Camera, RenderObject, Scene, LAYER_UI};
-use core::types::{Size, Vec2f, Vec3f, Vec4f};
+use core::types::{Size, Vec2f, Vec3f, Vec4f, Color};
 use core::ui::{UIMesh, UITextures, UI};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -36,6 +36,8 @@ struct LooperInner {
     scene: Scene,
 
     gpu: Arc<WGPUResource>,
+
+    clear_color: Color,
 
     ui_camera: Arc<Camera>,
     ui: UI,
@@ -69,6 +71,7 @@ impl LooperInner {
 
         let ui_mesh = UIMesh::new();
         let ui_textures = UITextures::default();
+        let size = window.inner_size();
 
         Self {
             renderer: HardwareRenderer::new(),
@@ -76,7 +79,8 @@ impl LooperInner {
             scene,
             ui_camera,
             ui,
-            size: Size::new(1u32, 1u32),
+            clear_color: Color::new(0f32, 0f32, 0f32, 0f32),
+            size: Size::new(size.width, size.height),
             ui_materials: Some(HashMap::new()),
             ui_mesh,
             ui_textures: Some(ui_textures),
@@ -138,6 +142,10 @@ impl LooperInner {
 
         if self.scene.material_change() {
             log::warn!("recreate render graph");
+            self.g = None;
+        }
+        if self.clear_color != clear_color {
+            self.clear_color = clear_color;
             self.g = None;
         }
 
@@ -507,6 +515,7 @@ impl Looper {
                 let (ins, d, ok) = self.frame.next_frame();
                 if ok {
                     let _ = event_proxy.send_event(Event::Update(d.as_secs_f64()));
+                    ret = ControlFlow::Poll;
                 }
             }
             WEvent::UserEvent(event) => match event {
@@ -557,8 +566,10 @@ impl Looper {
         };
         match ret {
             ControlFlow::Wait => {
-                let (ins, _, _) = self.frame.next_frame();
-                ret = ControlFlow::WaitUntil(ins);
+                #[cfg(windows)] {
+                    let (ins, _, _) = self.frame.next_frame();
+                    ret = ControlFlow::WaitUntil(ins);
+                }
             }
             ControlFlow::ExitWithCode(_) => {
                 log::warn!("app exit");

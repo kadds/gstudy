@@ -474,8 +474,8 @@ impl UIMesh {
                 Rectu::new(
                     (mesh.clip_rect.left() * ppi) as u32,
                     (mesh.clip_rect.top() * ppi) as u32,
-                    (mesh.clip_rect.right() * ppi) as u32,
-                    (mesh.clip_rect.bottom() * ppi) as u32,
+                    (mesh.clip_rect.width() * ppi) as u32,
+                    (mesh.clip_rect.height() * ppi) as u32,
                 )
             } else {
                 Rectu::new(0, 0, 0, 0)
