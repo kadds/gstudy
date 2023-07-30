@@ -509,7 +509,9 @@ impl Looper {
                 }
             }
             WEvent::MainEventsCleared => {
-                self.window.request_redraw();
+                #[cfg(windows)] {
+                    self.window.request_redraw();
+                }
             }
             WEvent::RedrawEventsCleared => {
                 let (ins, d, ok) = self.frame.next_frame();
@@ -566,10 +568,8 @@ impl Looper {
         };
         match ret {
             ControlFlow::Wait => {
-                #[cfg(windows)] {
-                    let (ins, _, _) = self.frame.next_frame();
-                    ret = ControlFlow::WaitUntil(ins);
-                }
+                let (ins, _, _) = self.frame.next_frame();
+                ret = ControlFlow::WaitUntil(ins);
             }
             ControlFlow::ExitWithCode(_) => {
                 log::warn!("app exit");
