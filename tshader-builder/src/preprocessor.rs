@@ -146,7 +146,7 @@ fn atomic_counter(
             .collect::<String>()
     );
     ctx.insert(hidden_name.clone(), EvalVal::Number(beg));
-    return Ok(EvalVal::ContextFn(Rc::new(move |inputs, ctx| {
+    return Ok(EvalVal::ContextFn(Rc::new(move |_, ctx| {
         let val = ctx.get_mut(&hidden_name).unwrap();
         if let EvalVal::Number(n) = val {
             let val = *n;
@@ -1073,7 +1073,7 @@ fn literal(i: &str) -> IResult<&str, Literal> {
             ),
             map_opt(
                 consumed(tuple((digit1, opt(tuple((tag("."), digit0)))))),
-                |(i, (z, k))| {
+                |(_, (z, k))| {
                     let z_int = i64::from_str(z).ok()?;
 
                     if let Some((_, s)) = k {

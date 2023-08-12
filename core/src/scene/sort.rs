@@ -1,15 +1,14 @@
 use std::{
     any::TypeId,
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::{Arc, Mutex},
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
 
-use dashmap::DashMap;
 use ordered_float::OrderedFloat;
 
-use crate::material::{Material, MaterialId};
+use crate::material::MaterialId;
 
-use super::{Camera, RenderObject, SceneStorage, UNKNOWN_OBJECT};
+use super::{Camera, SceneStorage, UNKNOWN_OBJECT};
 
 pub trait Sorter: Send + Sync {
     fn set_camera(&mut self, camera: Arc<Camera>);
@@ -62,7 +61,7 @@ impl Sorter for UISceneSorter {
         self.object_position.remove(&object);
     }
 
-    fn set_camera(&mut self, camera: Arc<Camera>) {}
+    fn set_camera(&mut self, _camera: Arc<Camera>) {}
 
     fn material_change(&mut self) -> bool {
         if self.new_material {
@@ -106,15 +105,14 @@ impl Sorter for DistanceSorter {
                 .objects
                 .iter()
                 .cloned()
-                .map(|v| {
-                    (
-                        self.storage
-                            .get(&v)
-                            .unwrap()
-                            .o()
-                            .geometry()
-                            .aabb()
-                            .map_or_else(
+                .filter_map(|v| {
+                    let o = self.storage.get(&v).unwrap();
+                    let o = o.o();
+                    if !o.visiable() {
+                        None
+                    } else {
+                        Some((
+                            o.geometry().aabb().map_or_else(
                                 || OrderedFloat(0f32),
                                 |aabb| {
                                     let a = aabb.center().into();
@@ -122,11 +120,12 @@ impl Sorter for DistanceSorter {
                                     OrderedFloat::<f32>(nalgebra::distance_squared(&a, &b))
                                 },
                             ),
-                        v,
-                    )
+                            v,
+                        ))
+                    }
                 })
                 .collect();
-            res.sort_by(|a, b| a.0.cmp(&b.0));
+            res.sort_by(|a, b| b.0.cmp(&a.0));
 
             return res.iter().map(|v| v.1).collect();
         }
@@ -157,15 +156,17 @@ pub struct MaterialSorter<T> {
     storage: SceneStorage,
     materials: HashMap<TypeId, u64>,
     new_material: bool,
+    camera: Option<Arc<Camera>>,
 }
 
 impl<T> MaterialSorter<T> {
-    pub fn new(storage: SceneStorage) -> Self {
+    pub fn new(storage: SceneStorage, camera: Option<Arc<Camera>>) -> Self {
         Self {
             map: HashMap::new(),
             storage,
             materials: HashMap::new(),
             new_material: false,
+            camera,
         }
     }
 }
@@ -175,6 +176,7 @@ where
     T: Sorter + SorterFactory,
 {
     fn set_camera(&mut self, camera: Arc<Camera>) {
+        self.camera = Some(camera.clone());
         for (_, t) in &mut self.map {
             t.0.set_camera(camera.clone());
         }
@@ -183,16 +185,18 @@ where
     fn add(&mut self, object: u64) {
         let obj = self.storage.get(&object).unwrap();
         let obj = obj.o();
-        let ms = obj.material_arc();
 
         let material = obj.material();
         let material_id = material.id();
         let face_id = material.face_id();
 
-        let t = self
-            .map
-            .entry(material_id)
-            .or_insert_with(|| (T::create(self.storage.clone()), material.face().sort_key()));
+        let t = self.map.entry(material_id).or_insert_with(|| {
+            let mut t = T::create(self.storage.clone());
+            if let Some(c) = &self.camera {
+                t.set_camera(c.clone());
+            }
+            (t, material.face().sort_key())
+        });
         t.0.add(object);
 
         let v = self

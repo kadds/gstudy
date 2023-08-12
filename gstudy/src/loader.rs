@@ -1,17 +1,18 @@
+use gltf::texture::Sampler;
 use nalgebra::Unit;
 
 use core::backends::wgpu_backend::WGPUResource;
 
 use crate::taskpool::{TaskPool, TaskPoolBuilder};
 use crate::util::{any_as_u8_slice_array, any_as_x_slice_array};
-use core::context::{RContext, ResourceRef};
+use core::context::{RContext, ResourceRef, TagId};
 use core::event::{Event, EventSender};
 use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
 use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::render::default_blender;
-use core::scene::{Camera, RenderObject, Scene, TagId, Transform, TransformBuilder};
-use core::types::{BoundBox, Size, Vec2f, Vec3f, Vec4f};
+use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
+use core::types::{BoundBox, Color, Size, Vec2f, Vec3f, Vec4f};
 use core::{
     event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
     geometry::StaticGeometry,
@@ -143,7 +144,6 @@ fn parse_mesh(
         bound_box = &bound_box + &bb;
 
         let mut gmesh = MeshBuilder::new();
-        let mut color = Vec4f::new(1.0f32, 1.0f32, 1.0f32, 1.0f32);
         let indices = p.indices().unwrap();
         match indices.dimensions() {
             gltf::accessor::Dimensions::Scalar => {}
@@ -157,7 +157,7 @@ fn parse_mesh(
         let mut no_position = true;
         for (semantic, _) in p.attributes() {
             match semantic {
-                gltf::Semantic::Extras(ext) => {}
+                gltf::Semantic::Extras(_) => {}
                 gltf::Semantic::Positions => {
                     no_position = false;
                 }
@@ -300,7 +300,7 @@ fn parse_mesh(
                 gltf::Semantic::Weights(_index) => {}
             }
         }
-        color = p
+        let color: Color = p
             .material()
             .pbr_metallic_roughness()
             .base_color_factor()
@@ -325,7 +325,7 @@ fn parse_mesh(
 }
 
 fn parse_texture(
-    texture_map: &mut Mutex<HashMap<usize, ResourceRef>>,
+    texture_map: &mut Mutex<HashMap<usize, (Option<usize>, ResourceRef)>>,
     path: &PathBuf,
     gpu: &WGPUResource,
     texture: gltf::Texture,
@@ -361,8 +361,57 @@ fn parse_texture(
     texture_map
         .lock()
         .unwrap()
-        .insert(texture.index(), real_texture);
+        .insert(texture.index(), (texture.sampler().index(), real_texture));
     Ok(())
+}
+
+fn parse_sampler(original: &Sampler, gpu: &WGPUResource) -> ResourceRef {
+    let mut desc = wgpu::SamplerDescriptor::default();
+    if let Some(filter) = original.mag_filter() {
+        desc.mag_filter = match filter {
+            gltf::texture::MagFilter::Nearest => wgpu::FilterMode::Nearest,
+            gltf::texture::MagFilter::Linear => wgpu::FilterMode::Linear,
+        }
+    }
+    if let Some(filter) = original.min_filter() {
+        desc.min_filter = match filter {
+            gltf::texture::MinFilter::Nearest => wgpu::FilterMode::Nearest,
+            gltf::texture::MinFilter::Linear => wgpu::FilterMode::Linear,
+            gltf::texture::MinFilter::NearestMipmapNearest => wgpu::FilterMode::Nearest,
+            gltf::texture::MinFilter::LinearMipmapNearest => wgpu::FilterMode::Nearest,
+            gltf::texture::MinFilter::NearestMipmapLinear => wgpu::FilterMode::Linear,
+            gltf::texture::MinFilter::LinearMipmapLinear => wgpu::FilterMode::Linear,
+        };
+        match filter {
+            gltf::texture::MinFilter::NearestMipmapNearest => {
+                desc.mipmap_filter = desc.min_filter;
+            }
+            gltf::texture::MinFilter::LinearMipmapNearest => {
+                desc.mipmap_filter = desc.min_filter;
+            }
+            gltf::texture::MinFilter::NearestMipmapLinear => {
+                desc.mipmap_filter = desc.min_filter;
+            }
+            gltf::texture::MinFilter::LinearMipmapLinear => {
+                desc.mipmap_filter = desc.min_filter;
+            }
+            _ => {}
+        }
+    }
+
+    desc.address_mode_u = match original.wrap_s() {
+        gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+        gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+        gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+    };
+
+    desc.address_mode_v = match original.wrap_t() {
+        gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+        gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+        gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+    };
+
+    gpu.from_sampler(&desc)
 }
 
 fn parse_node(
@@ -437,6 +486,14 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
     for texture in gltf.textures() {
         batch.execute(|| parse_texture(&mut texture_map, &path, &rm.gpu, texture));
     }
+
+    let mut samplers = vec![];
+
+    for sampler in gltf.samplers() {
+        let sampler = parse_sampler(&sampler, &rm.gpu);
+        samplers.push(sampler);
+    }
+
     batch.wait()?;
 
     let texture_map = texture_map.into_inner()?;
@@ -476,8 +533,14 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
         let texture = material.pbr_metallic_roughness().base_color_texture();
         if let Some(tex) = texture {
             let texture_index = tex.texture().index();
-            let texture = texture_map.get(&texture_index).unwrap();
+            let (sampler_index, texture) = texture_map.get(&texture_index).unwrap();
             basic_material_builder = basic_material_builder.with_texture_data(texture.clone());
+            if let Some(index) = sampler_index {
+                basic_material_builder =
+                    basic_material_builder.with_sampler(samplers[*index].clone());
+            } else {
+                // use default
+            }
         }
 
         match material.alpha_mode() {
@@ -506,7 +569,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     for s in gltf.scenes() {
         let name = s.name().unwrap_or("gltf-scene");
-        let tag_id = gscene.new_tag(name);
+        let tag_id = rm.gpu.context().new_tag(name);
 
         let transform = Transform::default();
         for node in s.nodes() {

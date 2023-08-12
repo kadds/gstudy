@@ -3,24 +3,18 @@ use std::sync::{Arc, Mutex};
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, NullBufferAccessor, WGPUResource},
     graph::rdg::{
-        backend::GraphBackend,
         pass::*,
         resource::{ClearValue, ResourceOps},
-        RenderGraphBuilder, RenderPassBuilder, ResourceRegistry, ResourceStateMap,
+        RenderGraphBuilder, RenderPassBuilder,
     },
     material::{egui::EguiMaterialFace, Material, MaterialId},
     render::{
         common::FramedCache, resolve_pipeline, ColorTargetBuilder, DrawCommands, PassIdent,
         PipelinePassResource, RenderDescriptorObject,
     },
-    types::Vec2f,
 };
 
 use super::{MaterialRenderer, MaterialRendererFactory, SetupResource};
-
-struct ScreeSize {
-    wh: Vec2f,
-}
 
 struct EguiMaterialHardwareRendererInner {
     main_buffers: GpuInputMainBuffers,
@@ -233,7 +227,7 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         r
     }
 
-    fn sort_key(&self, material: &Material, gpu: &WGPUResource) -> u64 {
+    fn sort_key(&self, _material: &Material, _gpu: &WGPUResource) -> u64 {
         0
     }
 }

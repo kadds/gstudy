@@ -1,9 +1,11 @@
 use std::sync::{
-    atomic::{AtomicU32, AtomicU64, Ordering},
-    Arc,
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
 use dashmap::DashMap;
+
+use crate::util::StringIdAllocMap;
 
 pub struct Texture {
     owned: Arc<wgpu::Texture>,
@@ -14,6 +16,7 @@ pub struct Texture {
 pub enum ResourceTy {
     Texture((wgpu::Texture, wgpu::TextureView)),
     SurfaceTexture((Arc<wgpu::SurfaceTexture>, wgpu::TextureView)),
+    Sampler(wgpu::Sampler),
 }
 
 #[derive(Debug)]
@@ -34,12 +37,6 @@ impl Resource {
 pub type ResourceRef = Arc<Resource>;
 
 impl Resource {
-    // pub fn pso_ref(&self) -> &wgpu::RenderPipeline {
-    //     match self {
-    //         Resource::Pso(p) => p,
-    //         _ => panic!("resource type invalid"),
-    //     }
-    // }
     pub fn texture_view(&self) -> &wgpu::TextureView {
         match &self.ty {
             ResourceTy::Texture(p) => &p.1,
@@ -54,13 +51,23 @@ impl Resource {
             _ => panic!("resource type invalid"),
         }
     }
+    pub fn sampler(&self) -> &wgpu::Sampler {
+        match &self.ty {
+            ResourceTy::Sampler(s) => &s,
+            _ => panic!("resource type invalid"),
+        }
+    }
 }
+
+pub type TagId = u32;
+pub const INVALID_TAG_ID: TagId = 0;
 
 pub struct RContext {
     last_res_id: AtomicU64,
     last_object_id: AtomicU64,
     last_material_id: AtomicU64,
     last_camera_id: AtomicU64,
+    tags: Mutex<StringIdAllocMap<TagId>>,
 
     res_map: DashMap<u64, Arc<Resource>>,
 }
@@ -84,6 +91,7 @@ impl RContext {
             last_material_id: AtomicU64::new(1),
             last_camera_id: AtomicU64::new(1),
             res_map: DashMap::default(),
+            tags: Mutex::new(StringIdAllocMap::new_with_begin(1)),
         })
     }
 
@@ -96,16 +104,36 @@ impl RContext {
     pub(crate) fn alloc_camera_id(&self) -> u64 {
         self.last_camera_id.fetch_add(1, Ordering::SeqCst)
     }
-    // pub(crate) fn register_pso(&self, pso: wgpu::RenderPipeline) -> PipelineStateObject {
-    //     let id = self.last_res_id.fetch_add(1, Ordering::SeqCst);
-    //     self.res_map
-    //         .insert(id, (AtomicU64::new(1), Resource::Pso(pso)));
-    //     PipelineStateObject::from_id(id, self.static_self())
-    // }
+
+    pub fn new_tag(&self, name: &str) -> TagId {
+        let mut tags = self.tags.lock().unwrap();
+        let id = tags.alloc_or_get(name);
+        id
+    }
+
+    pub fn delete_tag(&self, id: TagId) {
+        let mut tags = self.tags.lock().unwrap();
+        tags.dealloc(id);
+    }
+
+    pub fn delete_tag_by_name(&self, name: &str) {
+        let mut tags = self.tags.lock().unwrap();
+        if let Some(id) = tags.get_by_name(name) {
+            tags.dealloc(id);
+        }
+    }
+
     pub fn register_texture(&self, texture: wgpu::Texture) -> ResourceRef {
         let id = self.last_res_id.fetch_add(1, Ordering::SeqCst);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let res = Arc::new(Resource::new(ResourceTy::Texture((texture, view)), id));
+        self.res_map.insert(id, res.clone());
+        res
+    }
+
+    pub fn register_sampler(&self, sampler: wgpu::Sampler) -> ResourceRef {
+        let id = self.last_res_id.fetch_add(1, Ordering::SeqCst);
+        let res = Arc::new(Resource::new(ResourceTy::Sampler(sampler), id));
         self.res_map.insert(id, res.clone());
         res
     }

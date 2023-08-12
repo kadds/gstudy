@@ -7,9 +7,9 @@ use crate::{
     backends::wgpu_backend::WGPUResource,
     context::ResourceRef,
     event::{self, *},
-    geometry::{load_default_transformer, Mesh, MeshBuilder},
-    types::{Color, Rectu, Size, Vec4f},
-    util::{self, any_as_u8_slice_array},
+    geometry::{Mesh, MeshBuilder},
+    types::{Color, Rectu, Size},
+    util::any_as_u8_slice_array,
 };
 
 pub trait UILogic {
@@ -241,7 +241,10 @@ impl EventProcessor for UIEventProcessor {
                 _ => (),
             },
             Event::Render => {}
-            Event::Resized { logical, physical } => {
+            Event::Resized {
+                logical,
+                physical: _,
+            } => {
                 let mut inner = self.inner.lock().unwrap();
                 inner.input.screen_rect = Some(egui::Rect::from_min_max(
                     egui::pos2(0f32, 0f32),
@@ -356,7 +359,7 @@ impl EventProcessor for UIEventProcessor {
                 inner.must_render = true;
             }
             Event::Theme(theme) => {
-                let mut inner = self.inner.lock().unwrap();
+                let inner = self.inner.lock().unwrap();
                 match theme {
                     Theme::Light => {
                         inner

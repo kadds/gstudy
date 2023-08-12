@@ -237,7 +237,12 @@ impl ShaderTech {
                 sampling: _,
             } => {
                 let format = Self::to_vertex_format(ty)?;
-                if let naga::TypeInner::Vector { size, kind, width } = ty.inner {
+                if let naga::TypeInner::Vector {
+                    size,
+                    kind: _,
+                    width: _,
+                } = ty.inner
+                {
                     if location == 0
                         && (size == naga::VectorSize::Quad || size == naga::VectorSize::Tri)
                     {

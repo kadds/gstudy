@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Debug, ops::Mul};
+use std::{fmt::Debug, ops::Mul};
 
 use crate::types::*;
 

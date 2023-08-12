@@ -1,5 +1,6 @@
 use core::backends::wgpu_backend::WGPUResource;
 use core::backends::WGPUBackend;
+use core::context::TagId;
 use core::event::{
     CustomEvent, Event, EventProcessor, EventSender, EventSource, InputEvent, ProcessEventResult,
     Theme,
@@ -12,7 +13,7 @@ use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, TrackballCameraController};
 use core::scene::ext::indicator::IndicatorBuilder;
-use core::scene::{Camera, RenderObject, Scene, TagId, LAYER_BACKGROUND, LAYER_UI};
+use core::scene::{Camera, RenderObject, Scene, LAYER_BACKGROUND};
 use core::types::{Color, Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
 use std::cell::RefCell;
@@ -27,7 +28,9 @@ use crate::statistics::Statistics;
 use crate::util;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy, EventLoopWindowTarget};
+use winit::event_loop::{
+    ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget,
+};
 use winit::window::Window;
 use winit::window::{self, WindowBuilder};
 type WEvent<'a> = winit::event::Event<'a, Event>;
@@ -56,10 +59,9 @@ struct LooperInner {
     resource_manager: Arc<ResourceManager>,
     g: Option<RenderGraph>,
 
-    indicator_id: u64,
     indicator_tag: TagId,
 
-    ui_tag_id: TagId,
+    ui_tag: TagId,
 }
 
 impl LooperInner {
@@ -81,16 +83,17 @@ impl LooperInner {
             Vec3f::zeros(),
             Vec3f::y(),
         );
-        let ui_tag_id = scene.new_tag("egui-element");
+        let ui_tag = gpu.context().new_tag("egui-element");
 
         scene.set_main_camera(c);
 
         // indicator
-        let tag = scene.new_tag("indicator");
-        let indicator_id = scene.add_with_tag_id(
+        let indicator_tag = gpu.context().new_tag("indicator");
+
+        scene.add_with_tag(
             IndicatorBuilder::new().build(gpu.context()),
             LAYER_BACKGROUND,
-            tag,
+            indicator_tag,
         );
 
         let ui_mesh = UIMesh::new();
@@ -113,9 +116,8 @@ impl LooperInner {
             window,
             resource_manager: rm,
             g: None,
-            indicator_id,
-            indicator_tag: tag,
-            ui_tag_id,
+            indicator_tag,
+            ui_tag,
         }
     }
 
@@ -125,8 +127,7 @@ impl LooperInner {
     }
 
     fn build_ui_objects(&mut self) {
-        // self.scene.clear_layer_objects(LAYER_UI);
-        self.scene.remove_by_tag(self.ui_tag_id);
+        self.scene.remove_by_tag(self.ui_tag);
 
         let mut ui_materials = self.ui_materials.take().unwrap();
 
@@ -147,7 +148,7 @@ impl LooperInner {
                 Box::new(StaticGeometry::new(Arc::new(mesh))),
                 material.clone(),
             );
-            object.add_tag(self.ui_tag_id);
+            object.add_tag(self.ui_tag);
 
             self.scene.add_ui(object);
         }
@@ -237,7 +238,7 @@ impl EventSender for DetailEventSender {
 }
 
 impl EventProcessor for DefaultProcessor {
-    fn on_event(&mut self, source: &dyn EventSource, event: &Event) -> ProcessEventResult {
+    fn on_event(&mut self, _source: &dyn EventSource, event: &Event) -> ProcessEventResult {
         let mut inner = self.inner.borrow_mut();
         match event {
             Event::CloseRequested => {
@@ -295,13 +296,11 @@ impl EventProcessor for DefaultProcessor {
             core::event::Event::CustomEvent(ev) => match ev {
                 core::event::CustomEvent::Loaded(scene) => {
                     let mut scene = inner.resource_manager.take(*scene);
-                    let indicator_id = scene.add_with(
+                    scene.add_with_tag(
                         IndicatorBuilder::new().build(inner.gpu.context()),
                         LAYER_BACKGROUND,
+                        inner.indicator_tag,
                     );
-                    inner.indicator_id = indicator_id;
-                    inner.indicator_tag = scene.new_tag("indicator");
-                    inner.ui_tag_id = scene.new_tag("egui-element");
 
                     inner.scene = scene;
                     let cam = inner.ui_camera.clone();
@@ -311,15 +310,19 @@ impl EventProcessor for DefaultProcessor {
                     inner.controller = Some(Box::new(TrackballCameraController::new(camera)));
                 }
                 core::event::CustomEvent::UpdateIndicator(show) => {
-                    let i = inner.indicator_id;
-                    let container = inner.scene.get_container();
-                    if let Some(mut o) = container.get_mut(&i) {
-                        o.object.set_visiable(*show);
-                    };
+                    let tag = inner.indicator_tag;
+                    inner.scene.modify_if(|obj| {
+                        if obj.o().has_tag(tag) {
+                            obj.object.set_visiable(*show);
+                        }
+                    });
                 }
                 core::event::CustomEvent::ClearScene => {
                     let tag = inner.indicator_tag;
-                    inner.scene.remove_if(|v| !v.o().has_tag(tag))
+                    let tag2 = inner.ui_tag;
+                    inner
+                        .scene
+                        .remove_if(|v| !v.o().has_tag(tag) && !v.o().has_tag(tag2))
                 }
                 _ => (),
             },
@@ -352,7 +355,7 @@ impl EventSource for Looper {
 
 impl Looper {
     pub fn new(builder: WindowBuilder) -> Self {
-        let event_loop = EventLoop::with_user_event();
+        let event_loop = EventLoopBuilder::with_user_event().build();
         let window = builder.build(&event_loop).unwrap();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -464,9 +467,9 @@ impl Looper {
                     }
                 },
                 WindowEvent::KeyboardInput {
-                    device_id,
+                    device_id: _,
                     input,
-                    is_synthetic,
+                    is_synthetic: _,
                 } => InputEvent::KeyboardInput(core::event::KeyboardInput {
                     state: util::match_state(input.state),
                     vk: util::match_vk(input.virtual_keycode),
@@ -480,7 +483,7 @@ impl Looper {
                     })
                 }
                 WindowEvent::CursorMoved {
-                    device_id,
+                    device_id: _,
                     position,
                     modifiers: _,
                 } => {
@@ -491,12 +494,12 @@ impl Looper {
                         logical: Vec2f::new(logical.x as f32, logical.y as f32),
                     }
                 }
-                WindowEvent::CursorEntered { device_id } => InputEvent::CursorEntered,
-                WindowEvent::CursorLeft { device_id } => InputEvent::CursorLeft,
+                WindowEvent::CursorEntered { device_id: _ } => InputEvent::CursorEntered,
+                WindowEvent::CursorLeft { device_id: _ } => InputEvent::CursorLeft,
                 WindowEvent::MouseWheel {
-                    device_id,
+                    device_id: _,
                     delta,
-                    phase,
+                    phase: _,
                     modifiers: _,
                 } => InputEvent::MouseWheel {
                     delta: match delta {
@@ -509,7 +512,7 @@ impl Looper {
                     },
                 },
                 WindowEvent::MouseInput {
-                    device_id,
+                    device_id: _,
                     state,
                     button,
                     modifiers: _,
@@ -531,7 +534,7 @@ impl Looper {
                 }
                 WindowEvent::ScaleFactorChanged {
                     scale_factor,
-                    new_inner_size,
+                    new_inner_size: _,
                 } => {
                     return Some(Event::ScaleFactorChanged(scale_factor));
                 }
@@ -550,7 +553,10 @@ impl Looper {
     ) -> ControlFlow {
         let mut ret = ControlFlow::Wait;
         match original_event {
-            WEvent::WindowEvent { event, window_id } => {
+            WEvent::WindowEvent {
+                event,
+                window_id: _,
+            } => {
                 let ev = self.map_event(event);
                 if let Some(ev) = ev {
                     ret = self.run_event_processor(&ev)
@@ -563,7 +569,7 @@ impl Looper {
                 }
             }
             WEvent::RedrawEventsCleared => {
-                let (ins, d, ok) = self.frame.next_frame();
+                let (_, d, ok) = self.frame.next_frame();
                 if ok {
                     let _ = event_proxy.send_event(Event::Update(d.as_secs_f64()));
                     ret = ControlFlow::Poll;
@@ -600,8 +606,8 @@ impl Looper {
             },
             WEvent::NewEvents(cause) => match cause {
                 winit::event::StartCause::ResumeTimeReached {
-                    start,
-                    requested_resume,
+                    start: _,
+                    requested_resume: _,
                 } => {
                     self.window.request_redraw();
                     ret = ControlFlow::Poll;

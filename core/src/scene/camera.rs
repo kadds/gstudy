@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
@@ -215,7 +214,10 @@ impl CameraController for TrackballCameraController {
                 event::VirtualKeyCode::D => {}
                 _ => (),
             },
-            crate::event::InputEvent::CursorMoved { logical, physical } => {
+            crate::event::InputEvent::CursorMoved {
+                logical: _,
+                physical,
+            } => {
                 let last_pos = Vec2f::new(physical.x, physical.y);
                 let delta = last_pos - self.last_pos;
                 self.last_pos = last_pos;

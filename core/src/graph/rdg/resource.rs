@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{
-    context::ResourceRef,
-    types::{Color, Vec3u},
-};
+use crate::types::{Color, Vec3u};
 
 #[derive(Debug)]
 pub enum ClearValue {
@@ -87,11 +84,11 @@ pub enum ResourceType {
 impl Debug for ResourceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Texture(arg0) => f.debug_tuple("Texture").finish(),
-            Self::Buffer(arg0) => f.debug_tuple("Buffer").finish(),
-            Self::ImportTexture(arg0) => f.debug_tuple("ImportTexture").finish(),
-            Self::ImportBuffer(arg0) => f.debug_tuple("ImportBuffer").finish(),
-            Self::AliasResource(arg0, arg1) => f.debug_tuple("AliasResource").finish(),
+            Self::Texture(_) => f.debug_tuple("Texture").finish(),
+            Self::Buffer(_) => f.debug_tuple("Buffer").finish(),
+            Self::ImportTexture(_) => f.debug_tuple("ImportTexture").finish(),
+            Self::ImportBuffer(_) => f.debug_tuple("ImportBuffer").finish(),
+            Self::AliasResource(_, _) => f.debug_tuple("AliasResource").finish(),
         }
     }
 }

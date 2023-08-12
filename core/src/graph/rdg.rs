@@ -49,7 +49,7 @@ impl ResourceRegistry {
         self.underlying_map.get(&id).cloned().unwrap()
     }
 
-    pub fn get_underlying(&self, mut id: ResourceId) -> (ResourceRef, Arc<ResourceNode>) {
+    pub fn get_underlying(&self, id: ResourceId) -> (ResourceRef, Arc<ResourceNode>) {
         let underlying = self.underlying_map.get(&id).cloned().unwrap();
         let desc = self.desc_map.get(&id).cloned().unwrap();
         (underlying, desc)
@@ -130,7 +130,7 @@ impl RenderGraph {
                 post_f(node);
             }
         }
-        for (id, res) in &self.registry.underlying_map {
+        for res in self.registry.underlying_map.values() {
             backend.remove_resource(res.clone())
         }
         drop(backend);

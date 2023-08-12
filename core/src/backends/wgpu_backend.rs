@@ -1,19 +1,18 @@
 use std::{
     collections::VecDeque,
-    num::{NonZeroU32, NonZeroU64},
+    num::NonZeroU64,
     ops::{Not, Range},
-    sync::{atomic::AtomicPtr, Arc, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use crate::{
     context::{RContext, RContextRef, ResourceRef},
     event::{Event, EventProcessor, EventSource, ProcessEventResult},
     render::common::BufferAccessor,
-    types::{Rectu, Size, Vec4, Vec4f},
+    types::{Rectu, Size, Vec4},
     util::any_as_u8_slice_array,
 };
 use anyhow::{anyhow, Result};
-use dashmap::DashMap;
 use wgpu::{
     util::{DeviceExt, StagingBelt},
     *,
@@ -67,12 +66,17 @@ pub struct WGPUResource {
     instance: Arc<WGPUInstance>,
     context: Arc<RContext>,
     default_texture: (wgpu::Texture, wgpu::TextureView),
+    default_sampler: wgpu::Sampler,
 }
 
 impl WGPUResource {
-    pub(crate) fn default_texture(&self) -> &wgpu::TextureView {
+    pub fn default_texture(&self) -> &wgpu::TextureView {
         &self.default_texture.1
     }
+    pub fn default_sampler(&self) -> &wgpu::Sampler {
+        &self.default_sampler
+    }
+
     fn build_surface_desc(width: u32, height: u32, format: TextureFormat) -> SurfaceConfiguration {
         SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
@@ -200,6 +204,12 @@ impl WGPUResource {
         });
 
         self.context().register_texture(texture)
+    }
+
+    pub fn from_sampler(&self, desc: &wgpu::SamplerDescriptor) -> ResourceRef {
+        let sampler = self.device().create_sampler(desc);
+
+        self.context().register_sampler(sampler)
     }
 }
 
@@ -497,6 +507,7 @@ impl WGPUBackend {
         });
 
         let default_texture = (default_texture, view);
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // config first time
 
@@ -509,6 +520,7 @@ impl WGPUBackend {
             inner: WGPUResource {
                 context: RContext::new(),
                 default_texture,
+                default_sampler,
                 instance: Arc::new(WGPUInstance {
                     instance,
                     surface,

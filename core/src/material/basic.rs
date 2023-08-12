@@ -1,8 +1,8 @@
-use std::{hash::Hasher, sync::Arc};
+use std::hash::Hasher;
 
 use crate::{
     context::ResourceRef,
-    types::{Vec2f, Vec3f, Vec4f},
+    types::{Vec3f, Vec4f},
 };
 
 use super::MaterialFace;
@@ -25,11 +25,15 @@ pub struct BasicMaterialFace {
     variants: Vec<tshader::Variant>,
     variants_name: String,
     texture: Option<ResourceRef>,
+    sampler: Option<ResourceRef>,
 }
 
 impl BasicMaterialFace {
     pub fn texture(&self) -> Option<&ResourceRef> {
         self.texture.as_ref()
+    }
+    pub fn sampler(&self) -> Option<&ResourceRef> {
+        self.sampler.as_ref()
     }
     pub fn color(&self) -> Vec4f {
         self.color
@@ -67,6 +71,7 @@ pub struct BasicMaterialFaceBuilder {
     has_texture: bool,
     has_alpha_test: bool,
     texture: Option<ResourceRef>,
+    sampler: Option<ResourceRef>,
     color: Vec4f,
 }
 
@@ -77,6 +82,7 @@ impl BasicMaterialFaceBuilder {
             has_texture: false,
             has_alpha_test: false,
             texture: None,
+            sampler: None,
             color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
         }
     }
@@ -94,6 +100,10 @@ impl BasicMaterialFaceBuilder {
     }
     pub fn with_texture_data(mut self, texture: ResourceRef) -> Self {
         self.texture = Some(texture);
+        self
+    }
+    pub fn with_sampler(mut self, sampler: ResourceRef) -> Self {
+        self.sampler = Some(sampler);
         self
     }
     pub fn enable_alpha_test(&mut self) {
@@ -120,6 +130,7 @@ impl BasicMaterialFaceBuilder {
             variants_name: tshader::variants_name(&variants[..]),
             variants,
             texture: self.texture,
+            sampler: self.sampler,
         }
     }
 }

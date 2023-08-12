@@ -1,19 +1,11 @@
-use std::{
-    collections::HashMap,
-    num::NonZeroU64,
-    rc::Rc,
-    sync::{Arc, Mutex, MutexGuard},
-};
-
-use nalgebra::Matrix4;
+use std::sync::{Arc, Mutex};
 
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, GpuInputMainBuffersWithProps, WGPUResource},
-    geometry::Mesh,
     graph::rdg::{
         pass::*,
         resource::{ClearValue, ResourceOps},
-        RenderPassBuilder, ResourceStateMap,
+        RenderPassBuilder,
     },
     material::{basic::*, Material, MaterialId},
     render::{
@@ -26,70 +18,6 @@ use crate::{
 };
 
 use super::{MaterialRenderContext, MaterialRenderer, MaterialRendererFactory, SetupResource};
-
-#[repr(C)]
-struct MVP {
-    mvp: Matrix4<f32>,
-}
-
-#[repr(C)]
-struct Model {
-    model: Mat4x4f,
-}
-
-// fn zip_basic_input(face: &BasicMaterialFace, mesh: &Mesh) -> Vec<u8> {
-//     let mut ret = Vec::new();
-//     match face.shader_ex() {
-//         BasicMaterialShader::None => {
-//             for a in mesh.vertices.iter() {
-//                 let input = BasicInput { vertices: *a };
-//                 ret.extend_from_slice(any_as_u8_slice(&input));
-//             }
-//         }
-//         BasicMaterialShader::Color => {
-//             for (a, b) in mesh
-//                 .vertices
-//                 .iter()
-//                 .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
-//             {
-//                 let input = BasicInputC {
-//                     vertices: *a,
-//                     colors: *b,
-//                 };
-//                 ret.extend_from_slice(any_as_u8_slice(&input));
-//             }
-//         }
-//         BasicMaterialShader::Texture => {
-//             for (a, b) in mesh
-//                 .vertices
-//                 .iter()
-//                 .zip(mesh.coord_vec2f(MeshCoordType::TexCoord).unwrap().iter())
-//             {
-//                 let input = BasicInputT {
-//                     vertices: *a,
-//                     textcoord: *b,
-//                 };
-//                 ret.extend_from_slice(any_as_u8_slice(&input));
-//             }
-//         }
-//         BasicMaterialShader::ColorTexture => {
-//             for ((a, b), c) in mesh
-//                 .vertices
-//                 .iter()
-//                 .zip(mesh.coord_vec4f(MeshCoordType::Color).unwrap().iter())
-//                 .zip(mesh.coord_vec2f(MeshCoordType::TexCoord).unwrap().iter())
-//             {
-//                 let input = BasicInputCT {
-//                     vertices: *a,
-//                     colors: *b,
-//                     texcoord: *c,
-//                 };
-//                 ret.extend_from_slice(any_as_u8_slice(&input));
-//             }
-//         }
-//     }
-//     ret
-// }
 
 pub struct MaterialGpuResource {
     global_bind_group: Arc<wgpu::BindGroup>,
@@ -289,7 +217,11 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
             }];
 
             let sampler = if mat.variants().iter().any(|v| v.need_sampler()) {
-                let sampler = gpu.new_sampler_linear(label);
+                let sampler = if let Some(sampler) = mat.sampler() {
+                    sampler.sampler()
+                } else {
+                    gpu.default_sampler()
+                };
                 Some(sampler)
             } else {
                 None
@@ -407,7 +339,7 @@ pub struct BasicMaterialRendererFactory {}
 impl MaterialRendererFactory for BasicMaterialRendererFactory {
     fn setup(
         &self,
-        pass_ident: crate::render::PassIdent,
+        _pass_ident: crate::render::PassIdent,
         material: &[&Material],
         gpu: &WGPUResource,
         g: &mut crate::graph::rdg::RenderGraphBuilder,

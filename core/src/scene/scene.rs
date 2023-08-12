@@ -1,19 +1,15 @@
 use bevy_ecs::prelude::*;
-use bytes::Bytes;
 use dashmap::DashMap;
 
 use crate::{
-    context::RContextRef,
+    context::{RContextRef, TagId},
     geometry::Geometry,
-    material::{Material, MaterialId},
+    material::Material,
     util::StringIdAllocMap,
 };
 use std::{
-    any::TypeId,
-    cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     fmt::Debug,
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
@@ -44,9 +40,7 @@ impl ObjectWrapper {
     }
 }
 
-pub type TagId = u32;
 pub type SceneStorage = Arc<DashMap<u64, ObjectWrapper>>;
-pub const INVALID_TAG_ID: TagId = 0;
 
 pub struct Scene {
     context: RContextRef,
@@ -58,8 +52,6 @@ pub struct Scene {
 
     cameras: Vec<Arc<Camera>>,
     ui_camera: Option<Arc<Camera>>,
-
-    tags: StringIdAllocMap<TagId>,
 }
 
 impl std::fmt::Debug for Scene {
@@ -83,16 +75,19 @@ impl Scene {
 
             cameras: Vec::new(),
             ui_camera: None,
-
-            tags: StringIdAllocMap::new_with_begin(1),
         }
     }
 
     pub fn set_main_camera(&mut self, camera: Arc<Camera>) {
         if self.cameras.is_empty() {
-            self.cameras.push(camera);
+            self.cameras.push(camera.clone());
         } else {
-            self.cameras[0] = camera;
+            self.cameras[0] = camera.clone();
+        }
+
+        let q = self.queue.lock().unwrap();
+        for sorter in q.values() {
+            sorter.lock().unwrap().set_camera(camera.clone());
         }
     }
 
@@ -116,21 +111,6 @@ impl Scene {
         self.storage.len()
     }
 
-    pub fn new_tag(&mut self, name: &str) -> TagId {
-        let id = self.tags.alloc_or_get(name);
-        id
-    }
-
-    pub fn delete_tag(&mut self, id: TagId) {
-        self.tags.dealloc(id);
-    }
-
-    pub fn delete_tag_by_name(&mut self, name: &str) {
-        if let Some(id) = self.tags.get_by_name(name) {
-            self.tags.dealloc(id);
-        }
-    }
-
     pub fn add(&mut self, object: RenderObject) -> u64 {
         if object.is_alpha_test() {
             self.add_with(object, LAYER_ALPHA_TEST)
@@ -145,19 +125,14 @@ impl Scene {
         self.add_with(object, LAYER_UI)
     }
 
-    pub fn add_with_tag_id(&mut self, mut object: RenderObject, layer: u64, tag_id: TagId) -> u64 {
-        object.add_tag(tag_id);
+    pub fn add_with_tag(&mut self, mut object: RenderObject, layer: u64, tag: TagId) -> u64 {
+        object.add_tag(tag);
         self.add_with(object, layer)
     }
 
-    pub fn add_with_tag_ids(
-        &mut self,
-        mut object: RenderObject,
-        layer: u64,
-        tag_id: &[TagId],
-    ) -> u64 {
-        for id in tag_id {
-            object.add_tag(*id);
+    pub fn add_with_tags(&mut self, mut object: RenderObject, layer: u64, tags: &[TagId]) -> u64 {
+        for tag in tags {
+            object.add_tag(*tag);
         }
         self.add_with(object, layer)
     }
@@ -173,15 +148,18 @@ impl Scene {
 
         let entry = q.entry(layer);
         let entry = entry.or_insert_with(|| {
+            let camera = self.cameras.get(0).cloned();
             if layer >= LAYER_UI {
                 Arc::new(Mutex::new(UISceneSorter::new()))
             } else if layer > LAYER_TRANSPARENT {
                 Arc::new(Mutex::new(MaterialSorter::<DistanceSorter>::new(
                     self.storage.clone(),
+                    camera,
                 )))
             } else {
                 Arc::new(Mutex::new(MaterialSorter::<DistanceSorter>::new(
                     self.storage.clone(),
+                    camera,
                 )))
             }
         });
@@ -222,6 +200,13 @@ impl Scene {
         }
     }
 
+    pub fn modify_if<F: Fn(&mut ObjectWrapper)>(&mut self, f: F) {
+        for mut v in self.storage.iter_mut() {
+            let obj = v.value_mut();
+            f(obj)
+        }
+    }
+
     pub fn get_container(&self) -> SceneStorage {
         self.storage.clone()
     }
@@ -244,12 +229,7 @@ impl Scene {
         }
         change
     }
-
-    // pub fn layer(&self, layer: u64) -> &dyn Sorter {
-    //     self.layers.get(&layer).as_ref().unwrap().borrow()
-    // }
-
-    pub fn update(&self, delta: f64) {}
+    pub fn update(&self, _delta: f64) {}
 
     pub fn clear_objects(&mut self) {
         self.queue.lock().unwrap().clear();
