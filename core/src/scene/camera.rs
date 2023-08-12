@@ -9,7 +9,7 @@ use nalgebra::Unit;
 use crate::{
     context::RContext,
     event::{self, InputEvent},
-    types::{Color, Mat4x4f, Point3, Quaternion, Rotation3, Vec2f, Vec3f, Vec4f},
+    types::{Color, Frustum, Mat4x4f, Point3, Quaternion, Rotation3, Vec2f, Vec3f, Vec4f},
 };
 
 // pub type OptionalTexture = Option<Texture>;
@@ -21,67 +21,14 @@ struct Inner {
     from: Vec3f,
     to: Vec3f,
     up: Vec3f,
+    aspect: f32,
     orthographic: bool,
     ortho_size: Vec2f,
     fovy: f32,
     near: f32,
     far: f32,
     change_id: u64,
-    // attachment: Option<RenderAttachment>,
 }
-
-// #[derive(Debug, Clone)]
-// pub struct RenderAttachment {
-//     texture: Option<(OptionalTexture, OptionalTexture)>,
-//     clear_color: Option<Color>,
-//     clear_depth: Option<f32>,
-//     format: wgpu::TextureFormat,
-//     id: u64,
-// }
-
-// impl RenderAttachment {
-//     pub fn new_with_color_depth(
-//         id: u64,
-//         color_attachment: Texture,
-//         depth_attachment: Texture,
-//         clear_color: Option<Color>,
-//         clear_depth: Option<f32>,
-//         format: wgpu::TextureFormat,
-//     ) -> Self {
-//         Self {
-//             texture: Some((Some(color_attachment), Some(depth_attachment))),
-//             clear_color,
-//             clear_depth,
-//             format,
-//             id,
-//         }
-//     }
-//     pub fn set_clear_color(&mut self, color: Option<Color>) {
-//         self.clear_color = color;
-//     }
-//     pub fn set_depth(&mut self, depth: Option<f32>) {
-//         self.clear_depth = depth;
-//     }
-
-//     pub fn color_attachment(&self) -> Option<&Texture> {
-//         self.texture.as_ref()?.0.as_ref().map(|v| v)
-//     }
-//     pub fn depth_attachment(&self) -> Option<&Texture> {
-//         self.texture.as_ref()?.1.as_ref().map(|v| v)
-//     }
-//     pub fn clear_color(&self) -> Option<Color> {
-//         self.clear_color
-//     }
-//     pub fn clear_depth(&self) -> Option<f32> {
-//         self.clear_depth
-//     }
-//     pub fn format(&self) -> wgpu::TextureFormat {
-//         self.format
-//     }
-//     pub fn id(&self) -> u64 {
-//         self.id
-//     }
-// }
 
 pub struct Camera {
     inner: Mutex<Inner>,
@@ -121,6 +68,7 @@ impl Camera {
                 to: Vec3f::new(0f32, 0f32, 0f32),
                 up: Vec3f::new(0f32, 1f32, 0f32),
                 ortho_size: Vec2f::zeros(),
+                aspect: 0f32,
                 near: 0.01f32,
                 far: f32::MAX,
                 fovy: 0f32,
@@ -133,6 +81,15 @@ impl Camera {
     }
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn frustum_worldspace(&self) -> Frustum {
+        let inner = self.inner.lock().unwrap();
+        let fov = inner.fovy;
+        let asp = inner.aspect;
+        let deg_y = fov.tan();
+        let deg_x = deg_y * asp;
+        todo!()
     }
 
     pub fn change_id(&self) -> u64 {
@@ -159,6 +116,7 @@ impl Camera {
         inner.fovy = fovy;
         inner.near = znear;
         inner.far = zfar;
+        inner.aspect = aspect;
         inner.orthographic = false;
         inner.ortho_size = Vec2f::zeros();
         inner.change_id += 1;
@@ -169,6 +127,7 @@ impl Camera {
             Mat4x4f::new_perspective(aspect, inner.fovy, inner.near, inner.far).into();
         inner.orthographic = false;
         inner.ortho_size = Vec2f::zeros();
+        inner.aspect = aspect;
         inner.change_id += 1;
     }
 

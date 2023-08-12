@@ -78,6 +78,8 @@ pub enum CustomEvent {
 
     Loading(String),
     Loaded(u64),
+    ClearScene,
+    UpdateIndicator(bool),
 }
 
 #[derive(Debug, Clone)]

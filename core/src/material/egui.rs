@@ -1,3 +1,5 @@
+use std::hash::Hasher;
+
 use crate::context::ResourceRef;
 
 use super::MaterialFace;
@@ -14,7 +16,12 @@ impl EguiMaterialFace {
 }
 
 impl MaterialFace for EguiMaterialFace {
-    fn shader_id(&self) -> u64 {
+    fn sort_key(&self) -> u64 {
+        if let Some(texture) = &self.texture {
+            let mut hasher = fxhash::FxHasher64::default();
+            hasher.write_u64(texture.id());
+            return hasher.finish();
+        }
         0
     }
 }

@@ -15,6 +15,7 @@ struct EntryState {
     about_text: String,
     background: [u8; 3],
     has_background: bool,
+    has_xyz_indicator: bool,
 }
 
 impl Default for EntryState {
@@ -30,6 +31,7 @@ impl Default for EntryState {
             about_text: "".to_owned(),
             background: [0, 0, 0],
             has_background: false,
+            has_xyz_indicator: true,
         }
     }
 }
@@ -88,6 +90,10 @@ impl MainLogic {
                     }
                     ui.close_menu();
                 }
+                if ui.button("Clear scene").clicked() {
+                    event_sender.send_event(Event::CustomEvent(CustomEvent::ClearScene));
+                    ui.close_menu();
+                }
             });
             ui.menu_button("Setting", |ui| {
                 ui.checkbox(&mut state.always_redraw, "Always redraw");
@@ -135,6 +141,14 @@ impl MainLogic {
                 }
             });
         });
+        if ui
+            .checkbox(&mut state.has_xyz_indicator, "xyz indicator")
+            .changed()
+        {
+            event_sender.send_event(Event::CustomEvent(CustomEvent::UpdateIndicator(
+                state.has_xyz_indicator,
+            )));
+        }
     }
 
     fn update_impl(

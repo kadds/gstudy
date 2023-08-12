@@ -2,19 +2,19 @@ use nalgebra::Unit;
 
 use core::backends::wgpu_backend::WGPUResource;
 
-use core::context::{RContext, ResourceRef};
-use core::event::{Event, EventSender};
-use core::render::default_blender;
 use crate::taskpool::{TaskPool, TaskPoolBuilder};
 use crate::util::{any_as_u8_slice_array, any_as_x_slice_array};
+use core::context::{RContext, ResourceRef};
+use core::event::{Event, EventSender};
 use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
 use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
-use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
+use core::render::default_blender;
+use core::scene::{Camera, RenderObject, Scene, TagId, Transform, TransformBuilder};
 use core::types::{BoundBox, Size, Vec2f, Vec3f, Vec4f};
 use core::{
     event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
-    geometry::{StaticGeometry},
+    geometry::StaticGeometry,
 };
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
@@ -127,6 +127,7 @@ impl<'a> MaterialMap<'a> {
 
 fn parse_mesh(
     gscene: &mut Scene,
+    tag_id: TagId,
     buf_readers: &mut Vec<GltfBuffer>,
     mesh: gltf::Mesh,
     material_map: &mut MaterialMap,
@@ -232,7 +233,7 @@ fn parse_mesh(
                         data.push(Vec3f::new(block[0], block[1], block[2]));
                     }
 
-                    gmesh.add_position(&data);
+                    gmesh.add_vertices_position(&data);
                 }
                 gltf::Semantic::Normals => {}
                 gltf::Semantic::Tangents => {}
@@ -311,8 +312,12 @@ fn parse_mesh(
         let mut g = StaticGeometry::new(Arc::new(gmesh.build()));
         g.set_attribute(core::geometry::Attribute::ConstantColor, Arc::new(color));
         g = g.with_transform(transform.clone());
+        let mut obj = RenderObject::new(Box::new(g), material);
+        obj.set_name(mesh.name().unwrap_or_default());
 
-        gscene.add_object(RenderObject::new(Box::new(g), material));
+        obj.add_tag(tag_id);
+
+        gscene.add(obj);
     }
     log::info!("mesh {:?} {:?}", mesh.name(), transform);
 
@@ -363,6 +368,7 @@ fn parse_texture(
 fn parse_node(
     gscene: &mut Scene,
     node: gltf::Node,
+    tag_id: TagId,
     buf_readers: &mut Vec<GltfBuffer>,
     material_map: &mut MaterialMap,
     transform: &Transform,
@@ -380,7 +386,14 @@ fn parse_node(
     transform_node.mul_mut(transform);
 
     if let Some(mesh) = node.mesh() {
-        let bb = parse_mesh(gscene, buf_readers, mesh, material_map, &transform_node)?;
+        let bb = parse_mesh(
+            gscene,
+            tag_id,
+            buf_readers,
+            mesh,
+            material_map,
+            &transform_node,
+        )?;
         *bound_box = &*bound_box + &bb;
     }
 
@@ -388,6 +401,7 @@ fn parse_node(
         parse_node(
             gscene,
             node,
+            tag_id,
             buf_readers,
             material_map,
             &transform_node,
@@ -491,11 +505,15 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
     let mut bound_box = BoundBox::default();
 
     for s in gltf.scenes() {
+        let name = s.name().unwrap_or("gltf-scene");
+        let tag_id = gscene.new_tag(name);
+
         let transform = Transform::default();
         for node in s.nodes() {
             parse_node(
                 &mut gscene,
                 node,
+                tag_id,
                 &mut buf_readers,
                 &mut map,
                 &transform,
@@ -599,7 +617,7 @@ fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<Resou
             }
         };
 
-        log::error!("load model {}", name);
+        log::info!("load model {}", name);
         proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(result))));
     }
 }

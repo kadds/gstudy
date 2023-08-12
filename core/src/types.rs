@@ -51,7 +51,11 @@ pub fn to_rgba_u8(vec: &Vec4f) -> [u8; 4] {
     ]
 }
 
-#[derive(Debug, Default)]
+pub trait Bound {
+    fn in_frustum(&self, frustum: &Frustum) -> bool;
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct BoundBox {
     val: Option<(Vec3f, Vec3f)>,
 }
@@ -93,6 +97,12 @@ impl BoundBox {
     }
 }
 
+impl Bound for BoundBox {
+    fn in_frustum(&self, frustum: &Frustum) -> bool {
+        todo!()
+    }
+}
+
 impl Add<&BoundBox> for &BoundBox {
     type Output = BoundBox;
 
@@ -114,4 +124,60 @@ impl Add<&BoundBox> for &BoundBox {
             }
         }
     }
+}
+
+impl Add<&Vec3f> for &BoundBox {
+    type Output = BoundBox;
+
+    fn add(self, rhs: &Vec3f) -> Self::Output {
+        if let Some(val) = self.val {
+            let min = val.0.simd_min(*rhs);
+            let max = val.1.simd_max(*rhs);
+
+            BoundBox::new(min, max)
+        } else {
+            BoundBox::new(*rhs, *rhs)
+        }
+    }
+}
+
+pub struct BoundSphere {
+    radius: f32,
+    center: Vec3f,
+}
+
+impl BoundSphere {
+    pub fn new(center: Vec3f, radius: f32) -> Self {
+        Self { radius, center }
+    }
+}
+
+impl Bound for BoundSphere {
+    fn in_frustum(&self, frustum: &Frustum) -> bool {
+        todo!()
+    }
+}
+
+pub struct Plane {
+    normal: Vec3f,
+    point: Vec3f,
+}
+
+impl Plane {
+    pub fn new(point: Vec3f, normal: Vec3f) -> Self {
+        Self { point, normal }
+    }
+
+    pub fn normal(&self) -> &Vec3f {
+        &self.normal
+    }
+}
+
+pub struct Frustum {
+    near: Plane,
+    far: Plane,
+    left: Plane,
+    right: Plane,
+    top: Plane,
+    bottom: Plane,
 }

@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicU32, AtomicU64, Ordering},
     Arc,
 };
 
@@ -90,7 +90,6 @@ impl RContext {
     pub(crate) fn alloc_object_id(&self) -> u64 {
         self.last_object_id.fetch_add(1, Ordering::SeqCst)
     }
-
     pub(crate) fn alloc_material_id(&self) -> u64 {
         self.last_material_id.fetch_add(1, Ordering::SeqCst)
     }

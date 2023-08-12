@@ -1,15 +1,16 @@
+use bevy_ecs::prelude::*;
+use indexmap::IndexMap;
 use std::{
     any::TypeId,
     collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex},
 };
-use bevy_ecs::prelude::*;
 
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
-    material::{basic::BasicMaterialFace, egui::EguiMaterialFace, MaterialFace},
+    material::{basic::BasicMaterialFace, egui::EguiMaterialFace, Material, MaterialFace},
     render::material::SetupResource,
     scene::{Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
@@ -410,11 +411,6 @@ impl ModuleRenderer for HardwareRenderer {
 
         self.material_renderers.clear();
 
-        scene.sort_all(|layer, m| {
-            let f = self.material_renderer_factory.get(&m.face_id()).unwrap();
-            f.sort_key(m, &gpu)
-        });
-
         let inner = self.inner.as_ref().unwrap();
 
         let setup_resource = SetupResource {
@@ -422,35 +418,28 @@ impl ModuleRenderer for HardwareRenderer {
             main_camera: &inner.main_camera.buffer,
             shader_loader: &self.shader_loader,
         };
+        let container = scene.get_container();
 
-        for (layer, objects) in scene.layers() {
-            let mut last_material_id = TypeId::of::<u32>();
-            let mut mats = Vec::new();
-            let mut ident = PassIdent::new(last_material_id, *layer);
+        for (layer, sorter) in scene.layers() {
+            let mut material_map: IndexMap<TypeId, Vec<Arc<Material>>> = IndexMap::new();
+            let sort_objects = sorter.lock().unwrap().sort_and_cull();
+            log::info!("layer {} object sort {:?}", layer, sort_objects);
 
-            for mat in objects.sorted_objects.values() {
-                let id = mat.face_id();
-                if last_material_id != id {
-                    if !mats.is_empty() {
-                        let f = self
-                            .material_renderer_factory
-                            .get(&last_material_id)
-                            .unwrap();
-                        self.material_renderers
-                            .insert(ident, f.setup(ident, &mats, &gpu, g, &setup_resource));
-                    }
-                    // new material face
-                    last_material_id = id;
-                    mats.clear();
-                }
-                mats.push(&mat);
-                ident = PassIdent::new(last_material_id, *layer);
+            for obj_id in sort_objects {
+                let o = container.get(&obj_id).unwrap();
+                let obj = o.o();
+                let mat_face_id = obj.material().face_id();
+                material_map
+                    .entry(mat_face_id)
+                    .and_modify(|v| v.push(obj.material_arc()))
+                    .or_insert_with(|| vec![obj.material_arc()]);
             }
-            if !mats.is_empty() {
-                let f = self
-                    .material_renderer_factory
-                    .get(&last_material_id)
-                    .unwrap();
+
+            for (mat_face_id, materials) in material_map {
+                let mats: Vec<_> = materials.iter().map(|v| v.as_ref()).collect();
+
+                let ident = PassIdent::new(mat_face_id, layer);
+                let f = self.material_renderer_factory.get(&mat_face_id).unwrap();
                 self.material_renderers
                     .insert(ident, f.setup(ident, &mats, &gpu, g, &setup_resource));
             }
@@ -479,11 +468,6 @@ impl ModuleRenderer for HardwareRenderer {
                 .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
         }
 
-        scene.sort_all(|layer, m| {
-            let f = self.material_renderer_factory.get(&m.face_id()).unwrap();
-            f.sort_key(m, &gpu)
-        });
-
         let g = p.g;
 
         let backend = GraphBackend::new(gpu);
@@ -493,28 +477,34 @@ impl ModuleRenderer for HardwareRenderer {
             let mut r = r.lock().unwrap();
             r.before_render();
         }
+        let container = scene.get_container();
 
-        for (layer, objects) in scene.layers() {
-            let camera_uniform = if *layer >= LAYER_UI {
+        for (layer, sorter) in scene.layers() {
+            let camera_uniform = if layer >= LAYER_UI {
                 &inner.ui_camera.buffer
             } else {
                 &inner.main_camera.buffer
             };
 
-            for (skey, mat) in &objects.sorted_objects {
-                let id = mat.face_id();
-                let ident = PassIdent::new(id, *layer);
-                let layer_objects = scene.layer(ident.layer);
+            let sort_objects = sorter.lock().unwrap().sort_and_cull();
 
-                let objects = &layer_objects.map[&mat.id()];
+            for obj_id in &sort_objects {
+                let o = container.get(&obj_id).unwrap();
+                let obj = o.o();
+                let mat = obj.material();
+                let mat_face_id = mat.face_id();
+
+                let ident = PassIdent::new(mat_face_id, layer);
+                let r = self.material_renderers.get(&ident).unwrap();
+                let mut r = r.lock().unwrap();
+                let o = [*obj_id];
+
                 let mut ctx = MaterialRenderContext {
                     gpu: p.gpu.as_ref(),
                     scene: &scene,
                     main_camera: camera_uniform,
                 };
-                let r = self.material_renderers.get(&ident).unwrap();
-                let mut r = r.lock().unwrap();
-                r.render_material(&mut ctx, objects, mat, encoder.encoder_mut());
+                r.render_material(&mut ctx, &o, mat, encoder.encoder_mut());
             }
         }
         drop(encoder);

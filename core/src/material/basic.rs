@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{hash::Hasher, sync::Arc};
 
 use crate::{
     context::ResourceRef,
@@ -43,15 +43,26 @@ impl BasicMaterialFace {
 }
 
 impl MaterialFace for BasicMaterialFace {
-    fn shader_id(&self) -> u64 {
-        0
+    fn sort_key(&self) -> u64 {
+        let tid = if let Some(texture) = &self.texture {
+            let mut hasher = fxhash::FxHasher64::default();
+            hasher.write_u64(texture.id());
+            hasher.finish()
+        } else {
+            0
+        };
+
+        let mut hasher = fxhash::FxHasher64::default();
+        hasher.write(self.variants_name.as_bytes());
+
+        let sid = hasher.finish();
+
+        (sid & 0xFFFF_FFFF) | (tid >> 32)
     }
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct BasicMaterialFaceBuilder {
-    primitive: wgpu::PrimitiveState,
-    blend: Option<wgpu::BlendState>,
     has_color: bool,
     has_texture: bool,
     has_alpha_test: bool,
@@ -67,8 +78,6 @@ impl BasicMaterialFaceBuilder {
             has_alpha_test: false,
             texture: None,
             color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
-            blend: None,
-            primitive: wgpu::PrimitiveState::default(),
         }
     }
     pub fn with_color(mut self) -> Self {

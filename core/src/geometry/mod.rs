@@ -1,3 +1,5 @@
+use num_traits::Bounded;
+
 use crate::{scene::Transform, types::*, util::any_as_u8_slice_array};
 use std::{
     any::Any,
@@ -142,6 +144,17 @@ impl Mesh {
         }
     }
 
+    pub fn aabb(&self) -> Option<BoundBox> {
+        if self.has_position {
+            let mut aabb = BoundBox::default();
+            for a in &self.vertices {
+                aabb = &aabb + a;
+            }
+            return Some(aabb);
+        }
+        None
+    }
+
     pub fn clip(&self) -> Option<Rectu> {
         self.clip
     }
@@ -179,11 +192,6 @@ pub struct MeshDataBuilder {
 }
 
 impl MeshDataBuilder {
-    pub fn add_vertex_position(&mut self, vertex: Vec3f, prop: &[u8]) {
-        self.mesh.vertices.push(vertex);
-        self.add_vertex(prop)
-    }
-
     pub fn add_indices(&mut self, indices: &[u32]) {
         self.mesh.indices.extend(indices)
     }
@@ -201,7 +209,7 @@ impl MeshDataBuilder {
         self.max_count += 1;
     }
 
-    pub fn add_position(&mut self, pos: &[Vec3f]) {
+    pub fn add_vertices_position(&mut self, pos: &[Vec3f]) {
         self.mesh.vertices.extend_from_slice(pos);
         self.max_count += pos.len() as u64;
     }
@@ -302,6 +310,7 @@ pub trait Geometry: Send + Sync + Debug {
     fn mesh_version(&self) -> u64;
 
     fn transform(&self) -> &Transform;
+    fn aabb(&self) -> Option<BoundBox>;
 }
 
 #[derive(Debug)]
@@ -309,14 +318,17 @@ pub struct StaticGeometry {
     mesh: Arc<Mesh>,
     transform: Transform,
     attributes: HashMap<Attribute, Arc<dyn Any + Send + Sync>>,
+    aabb: Option<BoundBox>,
 }
 
 impl StaticGeometry {
     pub fn new(mesh: Arc<Mesh>) -> Self {
+        let aabb = mesh.aabb();
         Self {
             mesh,
             transform: Transform::default(),
             attributes: HashMap::new(),
+            aabb,
         }
     }
     pub fn with_transform(mut self, transform: Transform) -> Self {
@@ -352,6 +364,10 @@ impl Geometry for StaticGeometry {
 
     fn mesh_version(&self) -> u64 {
         0
+    }
+
+    fn aabb(&self) -> Option<BoundBox> {
+        self.aabb.clone()
     }
 }
 
@@ -423,9 +439,11 @@ where
                 }
             };
             mesh.apply(&self.transform);
+            let aabb = mesh.aabb();
 
             inner.mesh = Some(Arc::new(mesh));
             inner.dirty_flag = false;
+            inner.aabb = aabb;
         }
         inner.mesh.as_ref().unwrap().clone()
     }
@@ -454,6 +472,11 @@ where
         let inner = self.inner.lock().unwrap();
         inner.version
     }
+
+    fn aabb(&self) -> Option<BoundBox> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.aabb.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -461,6 +484,7 @@ struct DirtyMesh {
     dirty_flag: bool,
     version: u64,
     mesh: Option<Arc<Mesh>>,
+    aabb: Option<BoundBox>,
 }
 
 impl Default for DirtyMesh {
@@ -469,6 +493,7 @@ impl Default for DirtyMesh {
             dirty_flag: true,
             version: 0,
             mesh: Default::default(),
+            aabb: None,
         }
     }
 }

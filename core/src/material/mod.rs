@@ -21,8 +21,7 @@ impl MaterialId {
 }
 
 pub trait MaterialFace: Any + Sync + Send + Debug {
-    // instance
-    fn shader_id(&self) -> u64;
+    fn sort_key(&self) -> u64;
 }
 
 #[derive(Debug)]

@@ -1,62 +1,90 @@
 use bevy_ecs::prelude::*;
+use bytes::Bytes;
+use dashmap::DashMap;
 
 use crate::{
     context::RContextRef,
     geometry::Geometry,
     material::{Material, MaterialId},
+    util::StringIdAllocMap,
 };
 use std::{
-    any::{Any, TypeId},
+    any::TypeId,
+    cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{atomic::AtomicBool, Arc},
+    fmt::Debug,
+    rc::Rc,
+    sync::{Arc, Mutex},
 };
 
-use super::Camera;
+use super::{
+    sort::{DistanceSorter, MaterialSorter, Sorter, UISceneSorter},
+    Camera,
+};
 
-#[derive(Debug, Default)]
-pub struct LayerObjects {
-    pub map: HashMap<MaterialId, smallvec::SmallVec<[u64; 2]>>, // material id -> objects
-    dirty: bool,
+pub const LAYER_NORMAL: u64 = 4_000;
+pub const LAYER_BACKGROUND: u64 = 10_000;
+pub const LAYER_TRANSPARENT: u64 = 20_000;
+pub const LAYER_ALPHA_TEST: u64 = 30_000;
+pub const LAYER_UI: u64 = 100_000;
+pub const UNKNOWN_OBJECT: u64 = 0;
 
-    pub sorted_objects: BTreeMap<u64, Arc<Material>>, // sort key -> material id
+#[derive(Debug)]
+pub struct ObjectWrapper {
+    pub layer: u64,
+    pub object: RenderObject,
 }
 
-pub const LAYER_BACKGROUND: u64 = 10000;
-pub const LAYER_TRANSPARENT: u64 = 20000;
-pub const LAYER_ALPHA_TEST: u64 = 30000;
-pub const LAYER_NORMAL: u64 = 4000;
-pub const LAYER_UI: u64 = 10_0000;
+impl ObjectWrapper {
+    pub fn new(layer: u64, object: RenderObject) -> Self {
+        Self { layer, object }
+    }
+    pub fn o(&self) -> &RenderObject {
+        &self.object
+    }
+}
 
-#[derive(Debug, Resource)]
+pub type TagId = u32;
+pub type SceneStorage = Arc<DashMap<u64, ObjectWrapper>>;
+pub const INVALID_TAG_ID: TagId = 0;
+
 pub struct Scene {
     context: RContextRef,
 
-    objects: HashMap<u64, RenderObject>,
+    storage: SceneStorage,
 
     // reader layer -> objects
-    layers: BTreeMap<u64, LayerObjects>,
-
-    drop_objects: Vec<u64>,
+    queue: Mutex<BTreeMap<u64, Arc<Mutex<dyn Sorter>>>>,
 
     cameras: Vec<Arc<Camera>>,
     ui_camera: Option<Arc<Camera>>,
 
-    material_face_map: HashMap<TypeId, i32>,
-    material_face_change_map: HashMap<TypeId, i32>,
+    tags: StringIdAllocMap<TagId>,
+}
+
+impl std::fmt::Debug for Scene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Scene")
+            .field("context", &self.context)
+            .field("objects", &self.storage)
+            .field("cameras", &self.cameras)
+            .field("ui_camera", &self.ui_camera)
+            .finish()
+    }
 }
 
 impl Scene {
     pub fn new(context: RContextRef) -> Self {
         Self {
             context,
-            objects: HashMap::new(),
-            layers: BTreeMap::new(),
-            drop_objects: Vec::new(),
+            storage: SceneStorage::new(DashMap::new()),
+
+            queue: Mutex::new(BTreeMap::new()),
 
             cameras: Vec::new(),
             ui_camera: None,
-            material_face_map: HashMap::new(),
-            material_face_change_map: HashMap::new(),
+
+            tags: StringIdAllocMap::new_with_begin(1),
         }
     }
 
@@ -85,166 +113,147 @@ impl Scene {
     }
 
     pub fn object_size(&self) -> usize {
-        self.objects.len()
+        self.storage.len()
     }
 
-    pub fn add_object(&mut self, object: RenderObject) -> u64 {
+    pub fn new_tag(&mut self, name: &str) -> TagId {
+        let id = self.tags.alloc_or_get(name);
+        id
+    }
+
+    pub fn delete_tag(&mut self, id: TagId) {
+        self.tags.dealloc(id);
+    }
+
+    pub fn delete_tag_by_name(&mut self, name: &str) {
+        if let Some(id) = self.tags.get_by_name(name) {
+            self.tags.dealloc(id);
+        }
+    }
+
+    pub fn add(&mut self, object: RenderObject) -> u64 {
         if object.is_alpha_test() {
-            self.add_object_with(object, LAYER_ALPHA_TEST)
+            self.add_with(object, LAYER_ALPHA_TEST)
         } else if object.is_blend() {
-            self.add_object_with(object, LAYER_TRANSPARENT)
+            self.add_with(object, LAYER_TRANSPARENT)
         } else {
-            self.add_object_with(object, LAYER_NORMAL)
+            self.add_with(object, LAYER_NORMAL)
         }
     }
 
     pub fn add_ui(&mut self, object: RenderObject) -> u64 {
-        self.add_object_with(object, LAYER_UI)
+        self.add_with(object, LAYER_UI)
     }
 
-    pub fn add_object_with(&mut self, object: RenderObject, layer: u64) -> u64 {
+    pub fn add_with_tag_id(&mut self, mut object: RenderObject, layer: u64, tag_id: TagId) -> u64 {
+        object.add_tag(tag_id);
+        self.add_with(object, layer)
+    }
+
+    pub fn add_with_tag_ids(
+        &mut self,
+        mut object: RenderObject,
+        layer: u64,
+        tag_id: &[TagId],
+    ) -> u64 {
+        for id in tag_id {
+            object.add_tag(*id);
+        }
+        self.add_with(object, layer)
+    }
+
+    pub fn add_with(&mut self, mut object: RenderObject, layer: u64) -> u64 {
         let id = self.context.alloc_object_id();
+        if !object.has_name() {
+            object.set_name(&format!("Object {}", id));
+        }
 
-        let material = object.material();
-        let material_id = material.id();
+        self.storage.insert(id, ObjectWrapper::new(layer, object));
+        let mut q = self.queue.lock().unwrap();
 
-        let entry = self.layers.entry(layer);
-        let entry = entry.or_insert_with(LayerObjects::default);
-
-        entry.map.entry(material_id).or_default().push(id);
-        entry.dirty = true;
-        self.material_face_change_map
-            .entry(material.face_id())
-            .and_modify(|v| *v += 1)
-            .or_insert(1);
-
-        self.objects.insert(id, object);
+        let entry = q.entry(layer);
+        let entry = entry.or_insert_with(|| {
+            if layer >= LAYER_UI {
+                Arc::new(Mutex::new(UISceneSorter::new()))
+            } else if layer > LAYER_TRANSPARENT {
+                Arc::new(Mutex::new(MaterialSorter::<DistanceSorter>::new(
+                    self.storage.clone(),
+                )))
+            } else {
+                Arc::new(Mutex::new(MaterialSorter::<DistanceSorter>::new(
+                    self.storage.clone(),
+                )))
+            }
+        });
+        entry.lock().unwrap().add(id);
 
         id
     }
 
-    // pub fn delete_object(&mut self, id: u64) -> bool {
-    //     let object = match self.objects.get(&id) {
-    //         Some(v) => v,
-    //         None => return false,
-    //     };
-    //     let material_id = object.material().id();
+    pub fn remove(&mut self, id: u64) -> bool {
+        if let Some(obj) = self.storage.get(&id) {
+            let q = self.queue.lock().unwrap();
+            let sorter = q.get(&obj.layer).unwrap();
+            sorter.lock().unwrap().remove(id);
 
-    //     self.objects.remove(&id);
-
-    //     if let Some(set) = self.material_objects.get_mut(&typeid) {
-    //         set.remove(&id);
-    //     }
-    //     true
-    // }
-
-    pub fn get_object(&self, id: u64) -> Option<&RenderObject> {
-        self.objects.get(&id)
-    }
-
-    pub fn get_object_mut(&mut self, id: u64) -> Option<&mut RenderObject> {
-        self.objects.get_mut(&id)
-    }
-
-    pub fn layers(&self) -> impl Iterator<Item = (&u64, &LayerObjects)> {
-        self.layers.iter()
-    }
-
-    pub fn material_change(&mut self) -> bool {
-        let m = self.material_face_map.clone();
-
-        for (id, n) in &self.material_face_change_map {
-            let entry = self.material_face_map.entry(*id);
-            entry.or_default();
-            *self.material_face_map.get_mut(id).unwrap() += *n;
-        }
-
-        let mut removal = vec![];
-        for (id, n) in &self.material_face_map {
-            if *n <= 0 {
-                removal.push(*id);
-            }
-        }
-
-        for id in removal {
-            self.material_face_map.remove(&id);
-        }
-
-        self.material_face_change_map.clear();
-
-        if m.len() != self.material_face_map.len() {
+            drop(obj);
+            self.storage.remove(&id);
             return true;
         }
-
-        for (key, _) in m {
-            if !self.material_face_map.contains_key(&key) {
-                return true;
-            }
-        }
-        // log::info!("key {:?} {}", self.material_face_map, self.object_size());
         false
     }
 
-    pub fn layer(&self, layer: u64) -> &LayerObjects {
-        self.layers.get(&layer).as_ref().unwrap()
+    pub fn remove_by_tag(&mut self, tag: TagId) {
+        self.remove_if(|v| v.o().has_tag(tag));
     }
 
-    pub fn sort_all<S: FnMut(u64, &Material) -> u64>(&mut self, mut sorter: S) {
-        for (level, objects) in self.layers.iter_mut() {
-            if !objects.dirty {
-                continue;
+    pub fn remove_if<F: Fn(&ObjectWrapper) -> bool>(&mut self, f: F) {
+        let mut rm_ids = vec![];
+        for v in self.storage.iter() {
+            let id = v.key();
+            let obj = v.value();
+            if f(obj) {
+                rm_ids.push(*id);
             }
+        }
 
-            objects.sorted_objects.clear();
-
-            for (mat_id, id) in &objects.map {
-                let first = id.iter().next().unwrap();
-                let first_obj = self.objects.get(first).unwrap();
-
-                let material = first_obj.material.clone();
-                let key = sorter(*level, &material);
-
-                objects.sorted_objects.insert(key, material);
-            }
-
-            objects.dirty = false;
+        for id in rm_ids {
+            self.remove(id);
         }
     }
+
+    pub fn get_container(&self) -> SceneStorage {
+        self.storage.clone()
+    }
+
+    pub fn layers(&self) -> Vec<(u64, Arc<Mutex<dyn Sorter>>)> {
+        self.queue
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(a, b)| (*a, b.clone()))
+            .collect()
+    }
+
+    pub fn material_change(&mut self) -> bool {
+        let mut change = false;
+        for s in self.queue.lock().unwrap().values() {
+            if s.lock().unwrap().material_change() {
+                change = true;
+            }
+        }
+        change
+    }
+
+    // pub fn layer(&self, layer: u64) -> &dyn Sorter {
+    //     self.layers.get(&layer).as_ref().unwrap().borrow()
+    // }
 
     pub fn update(&self, delta: f64) {}
 
     pub fn clear_objects(&mut self) {
-        for layer in self.layers.values_mut() {
-            layer.sorted_objects.clear();
-            layer.map.clear();
-            layer.dirty = true;
-            self.material_face_change_map.clear();
-            self.material_face_map.clear();
-        }
-        self.objects.clear();
-    }
-
-    pub fn clear_layer_objects(&mut self, layer: u64) {
-        let v = self.layers.get_mut(&layer);
-        if let Some(v) = v {
-            for (_, objs) in &v.map {
-                for obj in objs {
-                    let material = self.objects.get(obj).unwrap().material();
-                    self.material_face_change_map
-                        .entry(material.face_id())
-                        .and_modify(|v| *v -= 1)
-                        .or_insert(-1);
-                    self.objects.remove(obj);
-                }
-            }
-            v.map.clear();
-            v.sorted_objects.clear();
-            v.dirty = true;
-        }
-    }
-
-    pub fn drop_objects(&self) -> &[u64] {
-        &self.drop_objects
+        self.queue.lock().unwrap().clear();
+        self.storage.clear();
     }
 
     pub fn calculate_bytes<'a, I: Iterator<Item = &'a u64>, F: Fn(&RenderObject) -> bool>(
@@ -255,10 +264,11 @@ impl Scene {
         let mut total_bytes = (0, 0, 0);
 
         for id in objects {
-            let object = self.get_object(*id).unwrap();
+            let object = self.storage.get(id).unwrap();
+            let object = object.o();
             let mesh = object.geometry().mesh();
             let indices = mesh.indices();
-            if filter(object) {
+            if filter(&object) {
                 total_bytes = (
                     total_bytes.0 + indices.len() as u64,
                     total_bytes.1 + mesh.vertices().len() as u64,
@@ -279,6 +289,9 @@ pub struct RenderObject {
     geometry: Box<dyn Geometry>,
     material: Arc<Material>,
     z_order: i8,
+    visiable: bool,
+    name: String,
+    tag: HashSet<TagId>,
 }
 
 impl RenderObject {
@@ -287,11 +300,38 @@ impl RenderObject {
             geometry,
             material,
             z_order: 0,
+            name: String::default(),
+            visiable: true,
+            tag: HashSet::default(),
         }
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_owned();
+    }
+
+    pub fn has_name(&self) -> bool {
+        !self.name.is_empty()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn add_tag(&mut self, tag: TagId) {
+        self.tag.insert(tag);
+    }
+
+    pub fn has_tag(&self, tag: TagId) -> bool {
+        self.tag.contains(&tag)
     }
 
     pub fn material(&self) -> &Material {
         self.material.as_ref()
+    }
+
+    pub fn material_arc(&self) -> Arc<Material> {
+        self.material.clone()
     }
 
     pub fn is_alpha_test(&self) -> bool {
@@ -306,11 +346,15 @@ impl RenderObject {
         self.geometry.as_ref()
     }
 
-    pub fn sub_objects(&self) -> usize {
-        0
-    }
-
     pub fn z_order(&self) -> i8 {
         self.z_order
+    }
+
+    pub fn visiable(&self) -> bool {
+        self.visiable
+    }
+
+    pub fn set_visiable(&mut self, show: bool) {
+        self.visiable = show;
     }
 }

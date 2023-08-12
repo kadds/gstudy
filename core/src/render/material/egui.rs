@@ -99,9 +99,12 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
 
         let default_pipeline = inner.commands.add_pipeline(inner.pipeline.pass[0].clone());
 
+        let container = ctx.scene.get_container();
+
         // copy staging buffer
         for id in objects {
-            let object = ctx.scene.get_object(*id).unwrap();
+            let object = container.get(id).unwrap();
+            let object = object.o();
             let mesh = object.geometry().mesh();
             let vertices = mesh.vertices_props();
             let indices = mesh.indices();

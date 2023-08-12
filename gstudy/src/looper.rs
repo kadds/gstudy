@@ -11,8 +11,9 @@ use core::material::egui::EguiMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
 use core::scene::camera::{CameraController, TrackballCameraController};
-use core::scene::{Camera, RenderObject, Scene, LAYER_UI};
-use core::types::{Size, Vec2f, Vec3f, Vec4f, Color};
+use core::scene::ext::indicator::IndicatorBuilder;
+use core::scene::{Camera, RenderObject, Scene, TagId, LAYER_BACKGROUND, LAYER_UI};
+use core::types::{Color, Size, Vec2f, Vec3f, Vec4f};
 use core::ui::{UIMesh, UITextures, UI};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -54,6 +55,11 @@ struct LooperInner {
     window: Arc<Window>,
     resource_manager: Arc<ResourceManager>,
     g: Option<RenderGraph>,
+
+    indicator_id: u64,
+    indicator_tag: TagId,
+
+    ui_tag_id: TagId,
 }
 
 impl LooperInner {
@@ -68,6 +74,24 @@ impl LooperInner {
             Vec3f::new(0f32, 1f32, 0f32),
         );
         scene.set_ui_camera(ui_camera.clone());
+        let c = Arc::new(Camera::new(gpu.context()));
+        c.make_perspective(1.0f32, std::f32::consts::FRAC_PI_3, 0.1f32, 1000f32);
+        c.look_at(
+            Vec3f::new(-1.1f32, 0.8f32, -1.2f32),
+            Vec3f::zeros(),
+            Vec3f::y(),
+        );
+        let ui_tag_id = scene.new_tag("egui-element");
+
+        scene.set_main_camera(c);
+
+        // indicator
+        let tag = scene.new_tag("indicator");
+        let indicator_id = scene.add_with_tag_id(
+            IndicatorBuilder::new().build(gpu.context()),
+            LAYER_BACKGROUND,
+            tag,
+        );
 
         let ui_mesh = UIMesh::new();
         let ui_textures = UITextures::default();
@@ -89,6 +113,9 @@ impl LooperInner {
             window,
             resource_manager: rm,
             g: None,
+            indicator_id,
+            indicator_tag: tag,
+            ui_tag_id,
         }
     }
 
@@ -98,7 +125,8 @@ impl LooperInner {
     }
 
     fn build_ui_objects(&mut self) {
-        self.scene.clear_layer_objects(LAYER_UI);
+        // self.scene.clear_layer_objects(LAYER_UI);
+        self.scene.remove_by_tag(self.ui_tag_id);
 
         let mut ui_materials = self.ui_materials.take().unwrap();
 
@@ -115,10 +143,11 @@ impl LooperInner {
                     .build(self.gpu.context())
             });
 
-            let object = RenderObject::new(
+            let mut object = RenderObject::new(
                 Box::new(StaticGeometry::new(Arc::new(mesh))),
                 material.clone(),
             );
+            object.add_tag(self.ui_tag_id);
 
             self.scene.add_ui(object);
         }
@@ -265,13 +294,32 @@ impl EventProcessor for DefaultProcessor {
             }
             core::event::Event::CustomEvent(ev) => match ev {
                 core::event::CustomEvent::Loaded(scene) => {
-                    let scene = inner.resource_manager.take(*scene);
+                    let mut scene = inner.resource_manager.take(*scene);
+                    let indicator_id = scene.add_with(
+                        IndicatorBuilder::new().build(inner.gpu.context()),
+                        LAYER_BACKGROUND,
+                    );
+                    inner.indicator_id = indicator_id;
+                    inner.indicator_tag = scene.new_tag("indicator");
+                    inner.ui_tag_id = scene.new_tag("egui-element");
+
                     inner.scene = scene;
                     let cam = inner.ui_camera.clone();
                     inner.scene.set_ui_camera(cam);
                     // get camera
                     let camera = inner.scene.main_camera_ref();
                     inner.controller = Some(Box::new(TrackballCameraController::new(camera)));
+                }
+                core::event::CustomEvent::UpdateIndicator(show) => {
+                    let i = inner.indicator_id;
+                    let container = inner.scene.get_container();
+                    if let Some(mut o) = container.get_mut(&i) {
+                        o.object.set_visiable(*show);
+                    };
+                }
+                core::event::CustomEvent::ClearScene => {
+                    let tag = inner.indicator_tag;
+                    inner.scene.remove_if(|v| !v.o().has_tag(tag))
                 }
                 _ => (),
             },
@@ -509,7 +557,8 @@ impl Looper {
                 }
             }
             WEvent::MainEventsCleared => {
-                #[cfg(windows)] {
+                #[cfg(windows)]
+                {
                     self.window.request_redraw();
                 }
             }

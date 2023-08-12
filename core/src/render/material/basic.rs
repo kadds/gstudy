@@ -323,9 +323,12 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
 
         let dynamic_pipeline = mgr.dynamic_commands.add_pipeline(pipeline.clone());
         let static_pipeline = mgr.static_commands.add_pipeline(pipeline);
+        let container = ctx.scene.get_container();
 
         for id in objects {
-            let object = ctx.scene.get_object(*id).unwrap();
+            let object = container.get(id).unwrap();
+            let object = object.o();
+
             let mesh = object.geometry().mesh();
 
             let mut command = if !object.geometry().is_static() {
@@ -458,8 +461,6 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
     // ----------
     // pso_id 32bits
     fn sort_key(&self, material: &Material, gpu: &WGPUResource) -> u64 {
-        let shader_id = material.face().shader_id();
-
-        (material.id().id()) | (shader_id << 48)
+        0
     }
 }
