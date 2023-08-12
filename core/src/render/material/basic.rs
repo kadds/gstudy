@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 
+use indexmap::IndexSet;
+
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, GpuInputMainBuffersWithProps, WGPUResource},
     graph::rdg::{
@@ -42,7 +44,7 @@ struct BasicMaterialHardwareRendererInner {
     merger: Arc<Mutex<MeshMerger>>,
 
     tech: Arc<tshader::ShaderTech>,
-    render_rank: Vec<String>,
+    render_rank: IndexSet<String>,
 }
 
 pub struct BasicMaterialHardwareRenderer {
@@ -55,7 +57,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         let merger = inner.merger.clone();
         let merger = merger.lock().unwrap();
 
-        let mut rank = vec![];
+        let mut rank = IndexSet::new();  
         std::mem::swap(&mut rank, &mut inner.render_rank);
         let mut life = vec![];
         let mut pass = context.new_pass();
@@ -69,7 +71,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
             life.push(mgr.clone());
         }
 
-        for (material_key, mgr) in rank.into_iter().zip(life.iter()) {
+        for (_, mgr) in rank.into_iter().zip(life.iter()) {
             mgr.static_commands.draw(
                 &mut pass,
                 merger.static_mesh_merger.index(),
@@ -175,7 +177,7 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
             return;
         }
 
-        inner.render_rank.push(mat.variants_name().into());
+        inner.render_rank.insert(mat.variants_name().into());
 
         // prepare dynamic buffer
         let (index_bytes, vertex_bytes, vertex_props_bytes) = ctx
@@ -188,7 +190,11 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
         let mgr = self.prepare_material_pipeline(gpu, ctx.main_camera, material);
         let pipeline = mgr.pipeline.pass[0].clone();
         let bind_group = mgr.bind_groups.get_or(material.id(), |key| {
-            let label = format!("basic material {:?}", key);
+            let label = if !material.name().is_empty() {
+                material.name().into()
+            } else {
+                format!("basic material {:?}", key)
+            };
             let label = Some(label.as_str());
             // material uniform buffer
             let material_uniform = if let Some(alpha) = material.alpha_test() {
@@ -359,7 +365,7 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
                     static_mesh_merger: StaticMeshMerger::new(label),
                     dynamic_mesh_buffer: GpuInputMainBuffersWithProps::new(gpu, label),
                 })),
-                render_rank: Vec::new(),
+                render_rank: IndexSet::new(),
             },
         }));
 

@@ -423,7 +423,7 @@ impl ModuleRenderer for HardwareRenderer {
         for (layer, sorter) in scene.layers() {
             let mut material_map: IndexMap<TypeId, Vec<Arc<Material>>> = IndexMap::new();
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
-            log::info!("layer {} object sort {:?}", layer, sort_objects);
+            log::info!("layer {} total {} object sort {:?}", layer, sort_objects.len(), sort_objects);
 
             for obj_id in sort_objects {
                 let o = container.get(&obj_id).unwrap();
@@ -487,6 +487,7 @@ impl ModuleRenderer for HardwareRenderer {
             };
 
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
+            log::info!("layer {} total {} object sort {:?}", layer, sort_objects.len(), sort_objects);
 
             for obj_id in &sort_objects {
                 let o = container.get(&obj_id).unwrap();

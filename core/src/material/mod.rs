@@ -27,6 +27,7 @@ pub trait MaterialFace: Any + Sync + Send + Debug {
 #[derive(Debug)]
 pub struct Material {
     id: MaterialId,
+    name: String,
     primitive: wgpu::PrimitiveState,
     blend: Option<wgpu::BlendState>,
     alpha_test: Option<f32>,
@@ -37,6 +38,10 @@ pub struct Material {
 impl Material {
     pub fn primitive(&self) -> &wgpu::PrimitiveState {
         &self.primitive
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
     pub fn blend(&self) -> Option<&wgpu::BlendState> {
         self.blend.as_ref()
@@ -70,6 +75,7 @@ impl Material {
 
 #[derive(Debug, Default)]
 pub struct MaterialBuilder {
+    name: String,
     primitive: wgpu::PrimitiveState,
     blend: Option<wgpu::BlendState>,
     alpha_test: Option<f32>,
@@ -79,6 +85,7 @@ pub struct MaterialBuilder {
 impl Clone for MaterialBuilder {
     fn clone(&self) -> Self {
         Self {
+            name: "".to_owned(),
             primitive: self.primitive,
             blend: self.blend,
             alpha_test: self.alpha_test,
@@ -88,6 +95,10 @@ impl Clone for MaterialBuilder {
 }
 
 impl MaterialBuilder {
+    pub fn with_name<S: Into<String>>(mut self, name: S) -> Self {
+        self.name = name.into();
+        self
+    }
     pub fn with_blend(mut self, blend: wgpu::BlendState) -> Self {
         self.blend = Some(blend);
         self
@@ -110,6 +121,7 @@ impl MaterialBuilder {
     pub fn build(mut self, context: &RContext) -> Arc<Material> {
         let face = self.face.take().unwrap();
         Arc::new(Material {
+            name: self.name,
             id: MaterialId::new(context.alloc_material_id()),
             primitive: self.primitive,
             alpha_test: self.alpha_test,

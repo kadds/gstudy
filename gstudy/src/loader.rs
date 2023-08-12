@@ -133,7 +133,10 @@ fn parse_mesh(
     mesh: gltf::Mesh,
     material_map: &mut MaterialMap,
     transform: &Transform,
+    result: &mut LoadResult,
 ) -> anyhow::Result<BoundBox> {
+    result.total_meshes += 1;
+
     let mut bound_box = BoundBox::default();
 
     for p in mesh.primitives() {
@@ -187,21 +190,25 @@ fn parse_mesh(
                 for d in any_as_x_slice_array::<u8, _>(&buf) {
                     input.push(*d as u32);
                 }
+                result.total_indices += (buf.len() / std::mem::size_of::<u8>()) as u64;
                 drop(buf);
                 gmesh.add_indices(&input);
             }
             gltf::accessor::DataType::U16 => {
                 let buf = buf_readers[0].read_bytes(&indices);
+
                 let mut input = Vec::new();
                 for d in any_as_x_slice_array::<u16, _>(&buf) {
                     input.push(*d as u32);
                 }
+                result.total_indices += (buf.len() / std::mem::size_of::<u16>()) as u64;
                 drop(buf);
                 gmesh.add_indices(&input);
             }
             gltf::accessor::DataType::U32 => {
                 let buf = buf_readers[0].read_bytes(&indices);
                 gmesh.add_indices(any_as_x_slice_array(&buf));
+                result.total_indices += (buf.len() / std::mem::size_of::<u32>()) as u64;
             }
             t => {
                 anyhow::bail!("data type {:?} for indices is not supported", t)
@@ -234,6 +241,8 @@ fn parse_mesh(
                     }
 
                     gmesh.add_vertices_position(&data);
+
+                    result.total_vertices += data.len() as u64;
                 }
                 gltf::Semantic::Normals => {}
                 gltf::Semantic::Tangents => {}
@@ -421,7 +430,7 @@ fn parse_node(
     buf_readers: &mut Vec<GltfBuffer>,
     material_map: &mut MaterialMap,
     transform: &Transform,
-    bound_box: &mut BoundBox,
+    result: &mut LoadResult,
 ) -> anyhow::Result<()> {
     let d = node.transform().decomposed();
     let q = nalgebra::Quaternion::from(Vec4f::new(d.1[0], d.1[1], d.1[2], d.1[3]));
@@ -442,9 +451,11 @@ fn parse_node(
             mesh,
             material_map,
             &transform_node,
+            result,
         )?;
-        *bound_box = &*bound_box + &bb;
+        result.aabb = &result.aabb + &bb;
     }
+    result.total_nodes+=1;
 
     for node in node.children() {
         parse_node(
@@ -454,13 +465,26 @@ fn parse_node(
             buf_readers,
             material_map,
             &transform_node,
-            bound_box,
+            result,
         )?;
     }
     Ok(())
 }
 
-fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result<Scene> {
+#[derive(Debug, Default)]
+struct LoadResult {
+    total_nodes: u64,
+    total_meshes: u64,
+    total_vertices: u64,
+    total_indices: u64,
+    total_textures: u64,
+    total_samplers: u64,
+    aabb: BoundBox,
+}
+
+fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result<(Scene, LoadResult)> {
+    let mut res = LoadResult::default();
+
     let path = PathBuf::from(name);
     let gltf = gltf::Gltf::open(&path)?;
     let mut buf_readers: Vec<GltfBuffer> = Vec::new();
@@ -485,6 +509,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     for texture in gltf.textures() {
         batch.execute(|| parse_texture(&mut texture_map, &path, &rm.gpu, texture));
+        res.total_textures+=1;
     }
 
     let mut samplers = vec![];
@@ -492,6 +517,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
     for sampler in gltf.samplers() {
         let sampler = parse_sampler(&sampler, &rm.gpu);
         samplers.push(sampler);
+        res.total_samplers+=1;
     }
 
     batch.wait()?;
@@ -503,6 +529,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
         let primitive = wgpu::PrimitiveState::default();
         let mut material_builder = MaterialBuilder::default();
         material_builder = material_builder.with_primitive(primitive);
+        material_builder = material_builder.with_name("default");
 
         let mut basic_material_builder = BasicMaterialFaceBuilder::default();
 
@@ -526,6 +553,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
             primitive.cull_mode = None;
         }
         material_builder = material_builder.with_primitive(primitive);
+        material_builder = material_builder.with_name(material.name().unwrap_or_default());
 
         let mut basic_material_builder = BasicMaterialFaceBuilder::default();
 
@@ -542,7 +570,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                 // use default
             }
         }
-
+        
         match material.alpha_mode() {
             gltf::material::AlphaMode::Opaque => {}
             gltf::material::AlphaMode::Mask => {
@@ -565,7 +593,6 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
             ),
         );
     }
-    let mut bound_box = BoundBox::default();
 
     for s in gltf.scenes() {
         let name = s.name().unwrap_or("gltf-scene");
@@ -580,7 +607,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                 &mut buf_readers,
                 &mut map,
                 &transform,
-                &mut bound_box,
+                &mut res,
             )?;
         }
         log::info!(
@@ -591,6 +618,8 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
     }
     let aspect = rm.gpu.aspect();
     let ctx = rm.gpu.context();
+
+    let bound_box = &mut res.aabb;
 
     let center = bound_box.center();
     let size = bound_box.size();
@@ -661,7 +690,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     gscene.set_main_camera(camera);
 
-    Ok(gscene)
+    Ok((gscene, res))
 }
 
 fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<ResourceManager>) {
@@ -672,16 +701,17 @@ fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<Resou
             break;
         }
         let result = load(&name, &pool, rm.clone());
-        let result = match result {
+        let (scene, result) = match result {
             Ok(val) => val,
             Err(err) => {
                 log::error!("{} in {}", err, name);
                 continue;
             }
         };
+        
 
-        log::info!("load model {}", name);
-        proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(result))));
+        log::info!("load model {} {:?}", name, result);
+        proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(scene))));
     }
 }
 
