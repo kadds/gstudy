@@ -455,7 +455,7 @@ fn parse_node(
         )?;
         result.aabb = &result.aabb + &bb;
     }
-    result.total_nodes+=1;
+    result.total_nodes += 1;
 
     for node in node.children() {
         parse_node(
@@ -482,7 +482,11 @@ struct LoadResult {
     aabb: BoundBox,
 }
 
-fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result<(Scene, LoadResult)> {
+fn load(
+    name: &str,
+    pool: &TaskPool,
+    rm: Arc<ResourceManager>,
+) -> anyhow::Result<(Scene, LoadResult)> {
     let mut res = LoadResult::default();
 
     let path = PathBuf::from(name);
@@ -509,7 +513,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
 
     for texture in gltf.textures() {
         batch.execute(|| parse_texture(&mut texture_map, &path, &rm.gpu, texture));
-        res.total_textures+=1;
+        res.total_textures += 1;
     }
 
     let mut samplers = vec![];
@@ -517,7 +521,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
     for sampler in gltf.samplers() {
         let sampler = parse_sampler(&sampler, &rm.gpu);
         samplers.push(sampler);
-        res.total_samplers+=1;
+        res.total_samplers += 1;
     }
 
     batch.wait()?;
@@ -570,7 +574,7 @@ fn load(name: &str, pool: &TaskPool, rm: Arc<ResourceManager>) -> anyhow::Result
                 // use default
             }
         }
-        
+
         match material.alpha_mode() {
             gltf::material::AlphaMode::Opaque => {}
             gltf::material::AlphaMode::Mask => {
@@ -708,7 +712,6 @@ fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<Resou
                 continue;
             }
         };
-        
 
         log::info!("load model {} {:?}", name, result);
         proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(scene))));

@@ -100,7 +100,7 @@ impl Sorter for DistanceSorter {
     fn sort_and_cull(&mut self) -> Vec<u64> {
         if let Some(c) = &self.camera {
             let camera_pos = c.from();
-            // cull first 
+            // cull first
             let frustum = c.frustum_worldspace();
 
             let mut res: Vec<_> = self

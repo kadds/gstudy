@@ -132,9 +132,13 @@ impl LooperInner {
         let mut ui_materials = self.ui_materials.take().unwrap();
 
         let mut ui_textures = self.ui_textures.take().unwrap();
-        let meshes =
+        let (meshes, rebuild_textures) =
             self.ui_mesh
                 .generate_mesh(&self.ui, self.gpu.clone(), self.size, &mut ui_textures);
+
+        for texture_id in rebuild_textures {
+            ui_materials.remove(&texture_id);
+        }
 
         for (mesh, texture_id) in meshes {
             let material = ui_materials.entry(texture_id).or_insert_with(|| {

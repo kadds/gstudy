@@ -164,7 +164,9 @@ pub struct Plane {
 
 impl Plane {
     pub fn new(normal: Vec3f, distance: f32) -> Self {
-        Self { pos: Vec4f::new(normal.x, normal.y, normal.z, distance) }
+        Self {
+            pos: Vec4f::new(normal.x, normal.y, normal.z, distance),
+        }
     }
 
     pub fn normal(&self) -> Vec3f {
@@ -182,9 +184,7 @@ pub struct Frustum {
     // pub far_rt: Vec3f,
     // pub far_lb: Vec3f,
     // pub far_rb: Vec3f,
-
     pub pos: [Vec3f; 8],
-
     // pub near: Plane,
     // pub far: Plane,
     // pub left: Plane,
@@ -195,9 +195,7 @@ pub struct Frustum {
 
 impl Frustum {
     pub fn new(pos: [Vec3f; 8]) -> Self {
-        // let near = 
-        Self {
-            pos,
-        }
+        // let near =
+        Self { pos }
     }
 }

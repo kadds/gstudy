@@ -57,7 +57,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         let merger = inner.merger.clone();
         let merger = merger.lock().unwrap();
 
-        let mut rank = IndexSet::new();  
+        let mut rank = IndexSet::new();
         std::mem::swap(&mut rank, &mut inner.render_rank);
         let mut life = vec![];
         let mut pass = context.new_pass();

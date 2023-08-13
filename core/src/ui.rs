@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -8,7 +8,7 @@ use crate::{
     context::ResourceRef,
     event::{self, *},
     geometry::{Mesh, MeshBuilder},
-    types::{Color, Rectu, Size},
+    types::{Color, Rectu, Size, Vec2},
     util::any_as_u8_slice_array,
 };
 
@@ -393,9 +393,11 @@ impl EventProcessor for UIEventProcessor {
 
 #[derive(Default)]
 pub struct UITextures {
-    textures: HashMap<egui::TextureId, ResourceRef>,
+    textures: HashMap<egui::TextureId, (ResourceRef, Size)>,
     user_textures: HashMap<egui::TextureId, ResourceRef>,
 }
+
+static mut X: u32 = 0;
 
 impl UITextures {
     fn update_texture(
@@ -403,29 +405,36 @@ impl UITextures {
         gpu: &WGPUResource,
         id: egui::TextureId,
         data: egui::epaint::ImageDelta,
-    ) {
+    ) -> bool {
         let size = data.image.size();
-        let mut rect = Rectu::new(0, 0, size[0] as u32, size[1] as u32);
+
+        let vsize = Size::new(size[0] as u32, size[1] as u32);
+        let mut rect = Rectu::new(0, 0, vsize.x, vsize.y);
+        let mut rebuild = false;
         if let Some(pos) = data.pos {
             rect.x = pos[0] as u32;
             rect.y = pos[1] as u32;
+        } else {
+            if let Some(v) = self.textures.get(&id) {
+                gpu.context().deregister(v.0.clone());
+            }
+            self.textures.remove(&id);
+            rebuild = true;
         }
 
-        if !self.textures.contains_key(&id) {
-            let texture = gpu.new_srgba_2d_texture(
-                Some("ui texture"),
-                Size::new(size[0] as u32, size[1] as u32),
-            );
-            let res = gpu.context().register_texture(texture);
-            self.textures.insert(id, res);
-        }
-
-        let texture = self.textures.get(&id).unwrap();
+        let texture = {
+            if !self.textures.contains_key(&id) {
+                let texture = gpu.new_srgba_2d_texture(Some("ui texture"), vsize);
+                let res = gpu.context().register_texture(texture);
+                self.textures.insert(id, (res, vsize));
+            }
+            self.textures.get(&id).unwrap()
+        };
 
         match &data.image {
             egui::epaint::ImageData::Color(c) => {
                 gpu.copy_texture(
-                    texture.texture_ref(),
+                    texture.0.texture_ref(),
                     4,
                     rect,
                     any_as_u8_slice_array(&c.pixels),
@@ -433,13 +442,19 @@ impl UITextures {
             }
             egui::epaint::ImageData::Font(f) => {
                 let data: Vec<egui::Color32> = f.srgba_pixels(None).collect();
-                gpu.copy_texture(texture.texture_ref(), 4, rect, any_as_u8_slice_array(&data));
+                gpu.copy_texture(
+                    texture.0.texture_ref(),
+                    4,
+                    rect,
+                    any_as_u8_slice_array(&data),
+                );
             }
         }
+        rebuild
     }
 
     pub fn get(&self, texture_id: egui::TextureId) -> ResourceRef {
-        self.textures.get(&texture_id).unwrap().clone()
+        self.textures.get(&texture_id).unwrap().0.clone()
     }
 }
 
@@ -457,14 +472,17 @@ impl UIMesh {
         gpu: Arc<WGPUResource>,
         size: Size,
         ui_textures: &mut UITextures,
-    ) -> Vec<(Mesh, egui::TextureId)> {
+    ) -> (Vec<(Mesh, egui::TextureId)>, HashSet<egui::TextureId>) {
         let mut inner = ui.inner.lock().unwrap();
         let ctx = inner.ctx.take().unwrap();
         let frame = inner.frame.take().unwrap();
         let ppi = ctx.pixels_per_point();
+        let mut rebuild_textures = HashSet::new();
 
         for (id, data) in frame.textures.set {
-            ui_textures.update_texture(&gpu, id, data);
+            if ui_textures.update_texture(&gpu, id, data) {
+                rebuild_textures.insert(id);
+            }
         }
 
         for id in frame.textures.free {
@@ -508,6 +526,6 @@ impl UIMesh {
         }
 
         inner.ctx = Some(ctx);
-        ret
+        (ret, rebuild_textures)
     }
 }

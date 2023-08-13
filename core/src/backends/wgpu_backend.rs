@@ -799,7 +799,6 @@ impl EventProcessor for WGPUEventProcessor {
     }
 }
 
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum ShaderType {
