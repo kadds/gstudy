@@ -6,7 +6,7 @@ use std::{
 
 use ordered_float::OrderedFloat;
 
-use crate::material::MaterialId;
+use crate::{material::MaterialId, types::Bound};
 
 use super::{Camera, SceneStorage, UNKNOWN_OBJECT};
 
@@ -100,6 +100,8 @@ impl Sorter for DistanceSorter {
     fn sort_and_cull(&mut self) -> Vec<u64> {
         if let Some(c) = &self.camera {
             let camera_pos = c.from();
+            // cull first 
+            let frustum = c.frustum_worldspace();
 
             let mut res: Vec<_> = self
                 .objects
@@ -111,6 +113,11 @@ impl Sorter for DistanceSorter {
                     if !o.visiable() {
                         None
                     } else {
+                        if let Some(aabb) = o.geometry().aabb() {
+                            if !aabb.in_frustum(&frustum) {
+                                return None;
+                            }
+                        }
                         Some((
                             o.geometry().aabb().map_or_else(
                                 || OrderedFloat(0f32),

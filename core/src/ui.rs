@@ -127,11 +127,14 @@ fn load_fonts(fd: &mut egui::FontDefinitions) {
         ("Microsoft YaHei UI", FontFamily::Proportional),
         ("Segoe UI", FontFamily::Proportional),
         ("Consolas", FontFamily::Monospace),
+        ("Source code Pro", FontFamily::Monospace),
         ("PingFang SC", FontFamily::Proportional),
+        ("Source Han Sans CN", FontFamily::Proportional),
+        ("WenQuanYi Zen Hei Mono", FontFamily::Proportional),
     ];
     for (name, family) in fonts.into_iter() {
         if let Err(e) = load_font(fd, &mut s, name, family) {
-            log::warn!("load font {} fail with {}", name, e);
+            log::warn!("load font {} fail: {}", name, e);
         }
     }
 }
@@ -407,8 +410,6 @@ impl UITextures {
             rect.x = pos[0] as u32;
             rect.y = pos[1] as u32;
         }
-
-        let size = data.image.size();
 
         if !self.textures.contains_key(&id) {
             let texture = gpu.new_srgba_2d_texture(

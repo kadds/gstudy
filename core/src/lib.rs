@@ -2,8 +2,6 @@
 #![feature(provide_any)]
 pub mod backends;
 pub mod context;
-pub mod ds;
-pub mod ecs;
 pub mod event;
 pub mod geometry;
 pub mod graph;

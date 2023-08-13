@@ -99,7 +99,7 @@ impl BoundBox {
 
 impl Bound for BoundBox {
     fn in_frustum(&self, frustum: &Frustum) -> bool {
-        todo!()
+        true
     }
 }
 
@@ -159,25 +159,45 @@ impl Bound for BoundSphere {
 }
 
 pub struct Plane {
-    normal: Vec3f,
-    point: Vec3f,
+    pos: Vec4f,
 }
 
 impl Plane {
-    pub fn new(point: Vec3f, normal: Vec3f) -> Self {
-        Self { point, normal }
+    pub fn new(normal: Vec3f, distance: f32) -> Self {
+        Self { pos: Vec4f::new(normal.x, normal.y, normal.z, distance) }
     }
 
-    pub fn normal(&self) -> &Vec3f {
-        &self.normal
+    pub fn normal(&self) -> Vec3f {
+        self.pos.xyz()
     }
 }
 
 pub struct Frustum {
-    near: Plane,
-    far: Plane,
-    left: Plane,
-    right: Plane,
-    top: Plane,
-    bottom: Plane,
+    // pub near_lt: Vec3f,
+    // pub near_rt: Vec3f,
+    // pub near_lb: Vec3f,
+    // pub near_rb: Vec3f,
+
+    // pub far_lt: Vec3f,
+    // pub far_rt: Vec3f,
+    // pub far_lb: Vec3f,
+    // pub far_rb: Vec3f,
+
+    pub pos: [Vec3f; 8],
+
+    // pub near: Plane,
+    // pub far: Plane,
+    // pub left: Plane,
+    // pub right: Plane,
+    // pub top: Plane,
+    // pub bottom: Plane,
+}
+
+impl Frustum {
+    pub fn new(pos: [Vec3f; 8]) -> Self {
+        // let near = 
+        Self {
+            pos,
+        }
+    }
 }

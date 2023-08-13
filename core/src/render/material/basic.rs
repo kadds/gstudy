@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use indexmap::IndexSet;
 
 use crate::{
-    backends::wgpu_backend::{GpuInputMainBuffers, GpuInputMainBuffersWithProps, WGPUResource},
+    backends::wgpu_backend::{GpuInputMainBuffersWithProps, WGPUResource},
     graph::rdg::{
         pass::*,
         resource::{ClearValue, ResourceOps},
@@ -16,7 +16,7 @@ use crate::{
         RenderDescriptorObject,
     },
     types::*,
-    util::{any_as_u8_slice, any_as_u8_slice_array},
+    util::any_as_u8_slice,
 };
 
 use super::{MaterialRenderContext, MaterialRenderer, MaterialRendererFactory, SetupResource};

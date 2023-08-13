@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    ops::Mul,
     sync::{Arc, Mutex},
 };
 
@@ -8,7 +9,7 @@ use nalgebra::Unit;
 use crate::{
     context::RContext,
     event::{self, InputEvent},
-    types::{Color, Frustum, Mat4x4f, Point3, Quaternion, Rotation3, Vec2f, Vec3f, Vec4f},
+    types::{Frustum, Mat4x4f, Quaternion, Vec2f, Vec3f, Vec4f},
 };
 
 // pub type OptionalTexture = Option<Texture>;
@@ -84,11 +85,31 @@ impl Camera {
 
     pub fn frustum_worldspace(&self) -> Frustum {
         let inner = self.inner.lock().unwrap();
+        let near = inner.near;
+        let far = inner.far;
         let fov = inner.fovy;
         let asp = inner.aspect;
         let deg_y = fov.tan();
         let deg_x = deg_y * asp;
-        todo!()
+        let world = inner.view;
+
+        let f0 = world * Vec4f::new(-deg_x, -deg_y, 1f32, 1f32);
+        let f1 = world * Vec4f::new(-deg_x, deg_y, 1f32, 1f32);
+        let f2 = world * Vec4f::new(deg_x, -deg_y, 1f32, 1f32);
+        let f3 = world * Vec4f::new(deg_x, deg_y, 1f32, 1f32);
+
+        let pos = inner.from;
+
+        Frustum::new([
+            pos + (near * f1).xyz(),
+            pos + (near * f3).xyz(),
+            pos + (near * f0).xyz(),
+            pos + (near * f2).xyz(),
+            pos + (far * f1).xyz(),
+            pos + (far * f3).xyz(),
+            pos + (far * f0).xyz(),
+            pos + (far * f2).xyz(),
+        ])
     }
 
     pub fn change_id(&self) -> u64 {

@@ -799,9 +799,6 @@ impl EventProcessor for WGPUEventProcessor {
     }
 }
 
-use std::collections::{BTreeMap, HashMap};
-
-use spirq::{EntryPoint, Locator, ReflectConfig, SpirvBinary, Variable};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
