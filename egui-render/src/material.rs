@@ -1,8 +1,5 @@
+use core::{context::ResourceRef, material::MaterialFace};
 use std::hash::Hasher;
-
-use crate::context::ResourceRef;
-
-use super::MaterialFace;
 
 #[derive(Debug)]
 pub struct EguiMaterialFace {
@@ -36,7 +33,7 @@ impl EguiMaterialFaceBuilder {
         self.texture = Some(texture);
         self
     }
-    pub fn build(mut self) -> EguiMaterialFace {
+    pub fn build(self) -> EguiMaterialFace {
         EguiMaterialFace {
             texture: self.texture,
         }

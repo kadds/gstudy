@@ -6,19 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-winit = { version = "0.28", default-features = false, features = ["x11", "wayland"]}
 rfd = "0.11.4"
 core = {path = "../core"}
+winit-surface = {path = "../winit-surface"}
+gltfloader = {path = "../gltfloader"}
+egui-render = {path = "../egui-render"}
 anyhow = "1.0.57"
 log = "0.4"
-egui = "0.22.0"
 # wasm-timer = "0.2"
-instant = "0.1.12"
-gltf = {version = "1.0", features = ["extras", "names"]}
-image = "0.24"
-webbrowser = "0.8"
-num_cpus = "1.15"
-urlencoding = "2.1"
 nalgebra = "0.32.2"
 wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
 bytes = "1.0"

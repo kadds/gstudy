@@ -1,5 +1,6 @@
 #![feature(trait_upcasting)]
 #![feature(provide_any)]
+
 pub mod backends;
 pub mod context;
 pub mod event;
@@ -10,5 +11,4 @@ pub mod render;
 pub mod resource;
 pub mod scene;
 pub mod types;
-pub mod ui;
-mod util;
+pub mod util;

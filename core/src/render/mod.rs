@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use std::{
     any::TypeId,
     collections::HashMap,
+    fmt::Debug,
     ops::Range,
     sync::{Arc, Mutex},
 };
@@ -10,7 +11,7 @@ use std::{
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
-    material::{basic::BasicMaterialFace, egui::EguiMaterialFace, Material, MaterialFace},
+    material::{basic::BasicMaterialFace, Material, MaterialFace},
     render::material::SetupResource,
     scene::{Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
@@ -20,28 +21,23 @@ use crate::{
 use self::material::{MaterialRenderContext, MaterialRenderer};
 use self::{
     common::BufferAccessor,
-    material::{
-        basic::BasicMaterialRendererFactory,
-        // basic::BasicMaterialRendererFactory,
-        egui::EguiMaterialRendererFactory,
-        MaterialRendererFactory,
-    },
+    material::{basic::BasicMaterialRendererFactory, MaterialRendererFactory},
 };
 
 pub struct RenderParameter<'a> {
     pub gpu: Arc<WGPUResource>,
-    pub scene: &'a mut Scene,
+    pub scene: &'a Scene,
     pub g: &'a mut RenderGraph,
 }
 
 pub trait ModuleRenderer {
-    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &mut Scene);
+    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &Scene);
     fn render(&mut self, parameter: RenderParameter);
     fn stop(&mut self);
 }
 
 pub mod common;
-mod material;
+pub mod material;
 
 struct GlobalUniform3d {
     mat: Mat4x4f,
@@ -51,7 +47,7 @@ struct GlobalUniform2d {
     size: Vec2f,
 }
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct PassIdent {
     type_id: TypeId,
     layer: u64,
@@ -70,7 +66,16 @@ impl PassIdent {
     }
 }
 
-struct DrawCommands {
+impl Debug for PassIdent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PassIdent")
+            .field("type_id", &self.type_id)
+            .field("layer", &self.layer)
+            .finish()
+    }
+}
+
+pub struct DrawCommands {
     commands: Vec<DrawCommand>,
     push_constant_buffer: Vec<u8>,
     bind_groups: Vec<Arc<wgpu::BindGroup>>,
@@ -81,7 +86,7 @@ struct DrawCommands {
     global_bind_group: u32,
 }
 
-struct DrawCommandBuilder<'a> {
+pub struct DrawCommandBuilder<'a> {
     inner: &'a mut DrawCommands,
     command: DrawCommand,
 }
@@ -148,7 +153,7 @@ impl<'a> DrawCommandBuilder<'a> {
 }
 
 impl DrawCommands {
-    fn new(constant_buffer_size: usize, bind_group_count: usize) -> Self {
+    pub fn new(constant_buffer_size: usize, bind_group_count: usize) -> Self {
         let constant_buffer_size = constant_buffer_size as u16;
         let bind_group_count = bind_group_count as u8;
         Self {
@@ -212,13 +217,13 @@ impl DrawCommands {
         }
     }
 
-    fn add_pipeline(&mut self, pipeline: Arc<Pipeline>) -> u32 {
+    pub fn add_pipeline(&mut self, pipeline: Arc<Pipeline>) -> u32 {
         let offset = self.pipelines.len() as u32;
         self.pipelines.push(pipeline);
         offset
     }
 
-    fn set_global_bind_group(&mut self, bind_group: Arc<wgpu::BindGroup>) {
+    pub fn set_global_bind_group(&mut self, bind_group: Arc<wgpu::BindGroup>) {
         if self.global_bind_group != u32::MAX {
             return;
         }
@@ -354,10 +359,6 @@ impl HardwareRenderer {
             HashMap::<TypeId, Box<dyn MaterialRendererFactory>>::new();
 
         let material_renderers = HashMap::new();
-        material_renderer_factory.insert(
-            TypeId::of::<EguiMaterialFace>(),
-            Box::<EguiMaterialRendererFactory>::default(),
-        );
 
         material_renderer_factory.insert(
             TypeId::of::<BasicMaterialFace>(),
@@ -372,10 +373,15 @@ impl HardwareRenderer {
             inner: None,
         }
     }
+
+    pub fn add_factory(&mut self, face_id: TypeId, factory: Box<dyn MaterialRendererFactory>) {
+        log::info!("install factory {:?}", face_id);
+        self.material_renderer_factory.insert(face_id, factory);
+    }
 }
 
 impl ModuleRenderer for HardwareRenderer {
-    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &mut Scene) {
+    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &Scene) {
         log::info!("hardware setup");
         self.inner.get_or_insert_with(|| {
             let bind_layout =
@@ -424,7 +430,7 @@ impl ModuleRenderer for HardwareRenderer {
             let mut material_map: IndexMap<TypeId, Vec<Arc<Material>>> = IndexMap::new();
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
             log::info!(
-                "layer {} total {} object sort {:?}",
+                "setup layer {} total {} object sort {:?}",
                 layer,
                 sort_objects.len(),
                 sort_objects
@@ -444,7 +450,13 @@ impl ModuleRenderer for HardwareRenderer {
                 let mats: Vec<_> = materials.iter().map(|v| v.as_ref()).collect();
 
                 let ident = PassIdent::new(mat_face_id, layer);
-                let f = self.material_renderer_factory.get(&mat_face_id).unwrap();
+                let f = match self.material_renderer_factory.get(&mat_face_id) {
+                    Some(v) => v,
+                    None => {
+                        log::error!("material {:?} renderer factory not exist", mat_face_id);
+                        continue;
+                    }
+                };
                 self.material_renderers
                     .insert(ident, f.setup(ident, &mats, &gpu, g, &setup_resource));
             }
@@ -457,21 +469,19 @@ impl ModuleRenderer for HardwareRenderer {
 
         // prepare camera uniform buffer
         let inner = self.inner.as_ref().unwrap();
-        if let Some(camera) = scene.main_camera() {
+        if let Some(camera) = scene.main_camera_ref() {
             let vp = camera.vp();
             let data = GlobalUniform3d { mat: vp };
             p.gpu
                 .queue()
                 .write_buffer(&inner.main_camera.buffer, 0, any_as_u8_slice(&data));
         }
-        if let Some(camera) = scene.ui_camera() {
-            let size = camera.width_height();
+        let size = scene.ui_camera_ref().width_height();
 
-            let data = GlobalUniform2d { size };
-            p.gpu
-                .queue()
-                .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
-        }
+        let data = GlobalUniform2d { size };
+        p.gpu
+            .queue()
+            .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
 
         let g = p.g;
 
@@ -506,7 +516,14 @@ impl ModuleRenderer for HardwareRenderer {
                 let mat_face_id = mat.face_id();
 
                 let ident = PassIdent::new(mat_face_id, layer);
-                let r = self.material_renderers.get(&ident).unwrap();
+                let r = match self.material_renderers.get(&ident) {
+                    Some(v) => v,
+                    None => {
+                        log::error!("material {:?} not found", ident.type_id);
+                        continue;
+                    }
+                };
+
                 let mut r = r.lock().unwrap();
                 let o = [*obj_id];
 
@@ -532,7 +549,7 @@ impl ModuleRenderer for HardwareRenderer {
 }
 
 #[derive(Debug)]
-enum Pipeline {
+pub enum Pipeline {
     Render(wgpu::RenderPipeline),
     Compute(wgpu::ComputePipeline),
 }
@@ -555,11 +572,11 @@ impl Pipeline {
 #[derive(Debug)]
 pub struct PipelinePassResource {
     #[allow(unused)]
-    inner: Arc<Vec<tshader::Pass>>,
-    pass: Vec<Arc<Pipeline>>,
+    pub inner: Arc<Vec<tshader::Pass>>,
+    pub pass: Vec<Arc<Pipeline>>,
 }
 
-struct ColorTargetBuilder {
+pub struct ColorTargetBuilder {
     target: wgpu::ColorTargetState,
 }
 

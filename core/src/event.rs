@@ -1,8 +1,12 @@
+use std::any::Any;
+use std::fmt::Debug;
+
 use crate::backends::WGPUBackend;
+use crate::context::ResourceRef;
 use crate::types::*;
 
 pub trait EventSender: Send {
-    fn send_event(&self, ev: Event);
+    fn send_event(&self, ev: Box<dyn Any + Send>);
 }
 
 #[derive(Debug, Clone)]
@@ -73,13 +77,6 @@ pub enum CustomEvent {
     Exit,
 
     CanvasResize(Size),
-    ModuleChanged(&'static str),
-    ClearColor(Option<Color>),
-
-    Loading(String),
-    Loaded(u64),
-    ClearScene,
-    UpdateIndicator(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -115,44 +112,48 @@ pub enum InputEvent {
     },
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum Theme {
-    Light,
-    Dark,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
 pub enum Event {
     JustRenderOnce,
 
+    PreUpdate(f64),
     // need update window
     Update(f64),
-    // render window
-    Render,
+    PostUpdate(f64),
 
-    CustomEvent(CustomEvent),
+    // render window
+    PreRender,
+    Render(ResourceRef),
+    PostRender,
 
     Input(InputEvent),
 
-    Theme(Theme),
-
     Resized { logical: Size, physical: Size },
-
-    Moved(Size),
-
-    CloseRequested,
-
-    Focused(bool),
-
-    UpdateCursor(egui::CursorIcon),
-
-    UpdateImePosition((u32, u32)),
 
     FullScreen(bool),
 
-    ScaleFactorChanged(f64),
+    RebuildMaterial,
+}
+
+impl Debug for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JustRenderOnce => write!(f, "JustRenderOnce"),
+            Self::PreUpdate(arg0) => f.debug_tuple("PreUpdate").field(arg0).finish(),
+            Self::Update(arg0) => f.debug_tuple("Update").field(arg0).finish(),
+            Self::PostUpdate(arg0) => f.debug_tuple("PostUpdate").field(arg0).finish(),
+            Self::PreRender => write!(f, "PreRender"),
+            Self::Render(_) => write!(f, "Render"),
+            Self::PostRender => write!(f, "PostRender"),
+            Self::Input(arg0) => f.debug_tuple("Input").field(arg0).finish(),
+            Self::Resized { logical, physical } => f
+                .debug_struct("Resized")
+                .field("logical", logical)
+                .field("physical", physical)
+                .finish(),
+            Self::FullScreen(arg0) => f.debug_tuple("FullScreen").field(arg0).finish(),
+            Self::RebuildMaterial => write!(f, "RebuildMaterial"),
+        }
+    }
 }
 
 pub enum ProcessEventResult {
@@ -162,14 +163,16 @@ pub enum ProcessEventResult {
 }
 
 pub trait EventSource {
-    // fn window(&self) -> &winit::window::Window;
-    fn backend(&self) -> &WGPUBackend;
     fn event_sender(&self) -> &dyn EventSender;
     fn new_event_sender(&self) -> Box<dyn EventSender>;
 }
 
+pub trait EventRegistry {
+    fn register_processor(&mut self, processor: Box<dyn EventProcessor>);
+}
+
 pub trait EventProcessor {
-    fn on_event(&mut self, source: &dyn EventSource, event: &Event) -> ProcessEventResult;
+    fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult;
 }
 
 #[derive(Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Clone, Copy)]
@@ -377,73 +380,3 @@ pub enum VirtualKeyCode {
 }
 
 type WK = VirtualKeyCode;
-type EK = egui::Key;
-
-pub fn match_egui_key(k: WK) -> Option<EK> {
-    Some(match k {
-        WK::Key1 => EK::Num1,
-        WK::Key2 => EK::Num2,
-        WK::Key3 => EK::Num3,
-        WK::Key4 => EK::Num4,
-        WK::Key5 => EK::Num5,
-        WK::Key6 => EK::Num6,
-        WK::Key7 => EK::Num7,
-        WK::Key8 => EK::Num8,
-        WK::Key9 => EK::Num9,
-        WK::Key0 => EK::Num0,
-        WK::A => EK::A,
-        WK::B => EK::B,
-        WK::C => EK::C,
-        WK::D => EK::D,
-        WK::E => EK::E,
-        WK::F => EK::F,
-        WK::G => EK::G,
-        WK::H => EK::H,
-        WK::I => EK::I,
-        WK::J => EK::J,
-        WK::K => EK::K,
-        WK::L => EK::L,
-        WK::M => EK::M,
-        WK::N => EK::N,
-        WK::O => EK::O,
-        WK::P => EK::P,
-        WK::Q => EK::Q,
-        WK::R => EK::R,
-        WK::S => EK::S,
-        WK::T => EK::T,
-        WK::U => EK::U,
-        WK::V => EK::V,
-        WK::W => EK::W,
-        WK::X => EK::X,
-        WK::Y => EK::Y,
-        WK::Z => EK::Z,
-        WK::Escape => EK::Escape,
-        WK::Insert => EK::Insert,
-        WK::Home => EK::Home,
-        WK::Delete => EK::Delete,
-        WK::Back => EK::Backspace,
-        WK::Return => EK::Enter,
-        WK::Space => EK::Space,
-        WK::End => EK::End,
-        WK::PageDown => EK::PageDown,
-        WK::PageUp => EK::PageUp,
-        WK::Left => EK::ArrowLeft,
-        WK::Up => EK::ArrowUp,
-        WK::Right => EK::ArrowRight,
-        WK::Down => EK::ArrowDown,
-        WK::Numpad0 => EK::Num0,
-        WK::Numpad1 => EK::Num1,
-        WK::Numpad2 => EK::Num2,
-        WK::Numpad3 => EK::Num3,
-        WK::Numpad4 => EK::Num4,
-        WK::Numpad5 => EK::Num5,
-        WK::Numpad6 => EK::Num6,
-        WK::Numpad7 => EK::Num7,
-        WK::Numpad8 => EK::Num8,
-        WK::Numpad9 => EK::Num9,
-        WK::Tab => EK::Tab,
-        _ => {
-            return None;
-        }
-    })
-}

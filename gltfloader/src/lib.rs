@@ -1,10 +1,10 @@
 use gltf::texture::Sampler;
 use nalgebra::Unit;
+mod taskpool;
 
 use core::backends::wgpu_backend::WGPUResource;
+use std::any::Any;
 
-use crate::taskpool::{TaskPool, TaskPoolBuilder};
-use crate::util::{any_as_u8_slice_array, any_as_x_slice_array};
 use core::context::{RContext, ResourceRef, TagId};
 use core::event::{Event, EventSender};
 use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
@@ -13,6 +13,7 @@ use core::material::{Material, MaterialBuilder};
 use core::render::default_blender;
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
 use core::types::{BoundBox, Color, Size, Vec2f, Vec3f, Vec4f};
+use core::util::{any_as_u8_slice_array, any_as_x_slice_array};
 use core::{
     event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
     geometry::StaticGeometry,
@@ -25,6 +26,7 @@ use std::{
     io::{BufReader, Read},
     sync::{mpsc, Arc, Mutex},
 };
+use taskpool::{TaskPool, TaskPoolBuilder};
 
 enum GltfBuffer<'a> {
     Cursor(std::io::Cursor<&'a Vec<u8>>),
@@ -714,7 +716,7 @@ fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<Resou
         };
 
         log::info!("load model {} {:?}", name, result);
-        proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(scene))));
+        // proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(scene))));
     }
 }
 
@@ -750,17 +752,18 @@ pub struct LoaderEventProcessor {
 }
 
 impl EventProcessor for LoaderEventProcessor {
-    fn on_event(&mut self, source: &dyn EventSource, event: &Event) -> ProcessEventResult {
-        match event {
-            Event::CustomEvent(e) => match e {
-                CustomEvent::Loading(name) => {
-                    let _ = self.tx.send((name.clone(), source.new_event_sender()));
-                    ProcessEventResult::Consumed
-                }
-                _ => ProcessEventResult::Received,
-            },
-            _ => ProcessEventResult::Received,
-        }
+    fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult {
+        todo!();
+        // match event {
+        // Event::CustomEvent(e) => match e {
+        //     CustomEvent::Loading(name) => {
+        //         let _ = self.tx.send((name.clone(), source.new_event_sender()));
+        //         ProcessEventResult::Consumed
+        //     }
+        //     _ => ProcessEventResult::Received,
+        // },
+        // _ => ProcessEventResult::Received,
+        // }
     }
 }
 

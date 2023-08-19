@@ -1,0 +1,23 @@
+[package]
+name = "egui-render"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+egui = "0.22.0"
+wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+winit = { version = "0.28", default-features = false, features = ["x11", "wayland"]}
+core = {path = "../core"}
+log = "0.4"
+anyhow = "1.0.57"
+fxhash = "0.2.1"
+window = {path = "../window"}
+tshader = {path="../tshader"}
+smallvec = "1.10"
+app = {path = "../app"}
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+arboard = "3.2"
+font-kit = "0.11.0"

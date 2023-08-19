@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::VecDeque,
     num::NonZeroU64,
     ops::{Not, Range},
@@ -59,6 +60,36 @@ impl<'a> Drop for WindowSurfaceFrame<'a> {
     }
 }
 
+pub struct WindowSurfaceFrame2 {
+    texture: Option<ResourceRef>,
+    s: Option<Arc<wgpu::SurfaceTexture>>,
+    gpu: Arc<WGPUResource>,
+}
+
+impl WindowSurfaceFrame2 {
+    pub fn texture(&self) -> ResourceRef {
+        self.texture.as_ref().unwrap().clone()
+    }
+    pub fn surface_texture(&self) -> Arc<wgpu::SurfaceTexture> {
+        self.s.as_ref().unwrap().clone()
+    }
+}
+
+impl Drop for WindowSurfaceFrame2 {
+    fn drop(&mut self) {
+        let t = self.texture.take().unwrap();
+        self.gpu.context.deregister(t);
+        if let Some(s) = self.s.take() {
+            match Arc::try_unwrap(s) {
+                Ok(v) => v.present(),
+                Err(e) => {
+                    log::error!("SurfaceFrame {:?}", e)
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WGPUResource {
     device: Device,
@@ -88,10 +119,10 @@ impl WGPUResource {
             view_formats: vec![],
         }
     }
-    pub(crate) fn device(&self) -> &Device {
+    pub fn device(&self) -> &Device {
         &self.device
     }
-    pub(crate) fn queue(&self) -> &Queue {
+    pub fn queue(&self) -> &Queue {
         &self.queue
     }
     pub(crate) fn surface(&self) -> &Surface {
@@ -106,6 +137,18 @@ impl WGPUResource {
             texture: Some(texture),
             s: Some(c),
             gpu: self,
+        })
+    }
+
+    pub fn current_frame_texture2(self: Arc<Self>) -> anyhow::Result<WindowSurfaceFrame2> {
+        let cp = self.surface().get_current_texture()?;
+        let c = Arc::new(cp);
+        let texture = self.context.register_surface_texture(c.clone());
+
+        Ok(WindowSurfaceFrame2 {
+            texture: Some(texture),
+            s: Some(c),
+            gpu: self.clone(),
         })
     }
 
@@ -214,7 +257,7 @@ impl WGPUResource {
 }
 
 impl WGPUResource {
-    pub(crate) fn copy_texture(
+    pub fn copy_texture(
         &self,
         texture: &wgpu::Texture,
         bytes_per_pixel: u32,
@@ -250,7 +293,7 @@ impl WGPUResource {
         );
     }
 
-    pub(crate) fn new_2d_texture(&self, label: Option<&'static str>, size: Size) -> wgpu::Texture {
+    pub fn new_2d_texture(&self, label: Option<&'static str>, size: Size) -> wgpu::Texture {
         let device = self.device();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
@@ -269,11 +312,7 @@ impl WGPUResource {
         texture
     }
 
-    pub(crate) fn new_srgba_2d_texture(
-        &self,
-        label: Option<&'static str>,
-        size: Size,
-    ) -> wgpu::Texture {
+    pub fn new_srgba_2d_texture(&self, label: Option<&'static str>, size: Size) -> wgpu::Texture {
         let device = self.device();
         device.create_texture(&wgpu::TextureDescriptor {
             label,
@@ -316,7 +355,7 @@ impl WGPUResource {
         texture
     }
 
-    pub(crate) fn new_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
+    pub fn new_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
         self.device.create_sampler(&wgpu::SamplerDescriptor {
             label,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -333,7 +372,7 @@ impl WGPUResource {
         })
     }
 
-    pub(crate) fn new_sampler_linear(&self, label: Option<&str>) -> wgpu::Sampler {
+    pub fn new_sampler_linear(&self, label: Option<&str>) -> wgpu::Sampler {
         self.device.create_sampler(&wgpu::SamplerDescriptor {
             label,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -386,6 +425,7 @@ impl WGPUBackend {
         surface: &S,
         width: u32,
         height: u32,
+        context: RContextRef,
     ) -> Result<WGPUBackend> {
         let bits = {
             #[cfg(not(target_arch = "wasm32"))]
@@ -518,7 +558,7 @@ impl WGPUBackend {
 
         Ok(WGPUBackend {
             inner: WGPUResource {
-                context: RContext::new(),
+                context,
                 default_texture,
                 default_sampler,
                 instance: Arc::new(WGPUInstance {
@@ -778,23 +818,26 @@ pub trait Renderer {
 }
 
 impl EventProcessor for WGPUEventProcessor {
-    fn on_event(&mut self, source: &dyn EventSource, event: &Event) -> ProcessEventResult {
-        match event {
-            Event::Resized { physical, logical } => {
-                let width = u32::max(physical.x, 16);
-                let height = u32::max(physical.y, 16);
-                let format = self.format;
+    fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult {
+        if let Some(event) = event.downcast_ref::<Event>() {
+            match event {
+                Event::Resized { physical, logical } => {
+                    let width = u32::max(physical.x, 16);
+                    let height = u32::max(physical.y, 16);
+                    let format = self.format;
 
-                self.inner.surface().configure(
-                    &self.inner.device,
-                    &WGPUResource::build_surface_desc(width, height, format),
-                );
-                self.inner.set_width_height(width, height);
-                let _ = source.event_sender().send_event(Event::JustRenderOnce);
-            }
-            Event::Render => {}
-            _ => (),
-        };
+                    self.inner.surface().configure(
+                        &self.inner.device,
+                        &WGPUResource::build_surface_desc(width, height, format),
+                    );
+                    self.inner.set_width_height(width, height);
+                    let _ = source
+                        .event_sender()
+                        .send_event(Box::new(Event::JustRenderOnce));
+                }
+                _ => (),
+            };
+        }
         ProcessEventResult::Received
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "window"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winit = { version = "0.28", default-features = false, features = ["x11", "wayland"]}
+core = {path = "../core"}
+wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+anyhow = "1.0.57"
+log = "0.4"
+webbrowser = "0.8"
+instant = "0.1.12"
+app = {path = "../app"}

@@ -182,7 +182,7 @@ impl RenderPassBuilder {
         self.render_targets = Some(desc);
     }
 
-    pub(crate) fn build(self) -> RenderPass {
+    pub fn build(self) -> RenderPass {
         RenderPass {
             inner: self.inner.unwrap(),
             name: self.name,

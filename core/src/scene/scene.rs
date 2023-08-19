@@ -2,9 +2,10 @@ use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 
 use crate::{
-    context::{RContextRef, TagId},
+    context::{RContext, RContextRef, TagId},
     geometry::Geometry,
     material::Material,
+    types::{Vec3f, Vec4f},
     util::StringIdAllocMap,
 };
 use std::{
@@ -42,6 +43,12 @@ impl ObjectWrapper {
 
 pub type SceneStorage = Arc<DashMap<u64, ObjectWrapper>>;
 
+#[derive(Debug, Default)]
+struct SceneCamera {
+    cameras: Vec<Arc<Camera>>,
+    ui_camera: Option<Arc<Camera>>,
+}
+
 pub struct Scene {
     context: RContextRef,
 
@@ -50,8 +57,7 @@ pub struct Scene {
     // reader layer -> objects
     queue: Mutex<BTreeMap<u64, Arc<Mutex<dyn Sorter>>>>,
 
-    cameras: Vec<Arc<Camera>>,
-    ui_camera: Option<Arc<Camera>>,
+    cameras: Mutex<SceneCamera>,
 }
 
 impl std::fmt::Debug for Scene {
@@ -60,29 +66,50 @@ impl std::fmt::Debug for Scene {
             .field("context", &self.context)
             .field("objects", &self.storage)
             .field("cameras", &self.cameras)
-            .field("ui_camera", &self.ui_camera)
             .finish()
     }
 }
 
 impl Scene {
     pub fn new(context: RContextRef) -> Self {
-        Self {
+        let mut s = Self {
             context,
             storage: SceneStorage::new(DashMap::new()),
 
             queue: Mutex::new(BTreeMap::new()),
 
-            cameras: Vec::new(),
-            ui_camera: None,
-        }
+            cameras: Mutex::new(SceneCamera::default()),
+        };
+        s.add_default_ui_camera();
+        s
     }
 
-    pub fn set_main_camera(&mut self, camera: Arc<Camera>) {
-        if self.cameras.is_empty() {
-            self.cameras.push(camera.clone());
+    fn add_default_ui_camera(&mut self) {
+        let ui_camera = Arc::new(Camera::new(&self.context));
+        ui_camera.make_orthographic(Vec4f::new(0f32, 0f32, 1f32, 1f32), 0.1f32, 10f32);
+        ui_camera.look_at(
+            Vec3f::new(0f32, 0f32, 1f32),
+            Vec3f::zeros(),
+            Vec3f::new(0f32, 1f32, 0f32),
+        );
+        self.cameras.lock().unwrap().ui_camera = Some(ui_camera);
+    }
+
+    pub fn context(&self) -> RContextRef {
+        self.context.clone()
+    }
+
+    // pub fn context_ref(&self) -> &RContext {
+    //     &self.context
+    // }
+
+    pub fn set_main_camera(&self, camera: Arc<Camera>) {
+        let mut c = self.cameras.lock().unwrap();
+
+        if c.cameras.is_empty() {
+            c.cameras.push(camera.clone());
         } else {
-            self.cameras[0] = camera.clone();
+            c.cameras[0] = camera.clone();
         }
 
         let q = self.queue.lock().unwrap();
@@ -91,27 +118,30 @@ impl Scene {
         }
     }
 
-    pub fn main_camera(&self) -> Option<&Camera> {
-        self.cameras.get(0).map(|v| v.as_ref())
-    }
+    // pub fn main_camera(&self) -> Option<&Camera> {
+    //     c.cameras.get(0).map(|v| v.as_ref())
+    // }
 
-    pub fn main_camera_ref(&self) -> Arc<Camera> {
-        self.cameras[0].clone()
+    pub fn main_camera_ref(&self) -> Option<Arc<Camera>> {
+        let c = self.cameras.lock().unwrap();
+        c.cameras.get(0).cloned()
     }
 
     pub fn set_ui_camera(&mut self, camera: Arc<Camera>) {
-        self.ui_camera = Some(camera);
+        let mut c = self.cameras.lock().unwrap();
+        c.ui_camera = Some(camera);
     }
 
-    pub fn ui_camera(&self) -> Option<&Camera> {
-        self.ui_camera.as_ref().map(|v| v.as_ref())
+    pub fn ui_camera_ref(&self) -> Arc<Camera> {
+        let c = self.cameras.lock().unwrap();
+        c.ui_camera.clone().unwrap()
     }
 
     pub fn object_size(&self) -> usize {
         self.storage.len()
     }
 
-    pub fn add(&mut self, object: RenderObject) -> u64 {
+    pub fn add(&self, object: RenderObject) -> u64 {
         if object.is_alpha_test() {
             self.add_with(object, LAYER_ALPHA_TEST)
         } else if object.is_blend() {
@@ -121,23 +151,23 @@ impl Scene {
         }
     }
 
-    pub fn add_ui(&mut self, object: RenderObject) -> u64 {
+    pub fn add_ui(&self, object: RenderObject) -> u64 {
         self.add_with(object, LAYER_UI)
     }
 
-    pub fn add_with_tag(&mut self, mut object: RenderObject, layer: u64, tag: TagId) -> u64 {
+    pub fn add_with_tag(&self, mut object: RenderObject, layer: u64, tag: TagId) -> u64 {
         object.add_tag(tag);
         self.add_with(object, layer)
     }
 
-    pub fn add_with_tags(&mut self, mut object: RenderObject, layer: u64, tags: &[TagId]) -> u64 {
+    pub fn add_with_tags(&self, mut object: RenderObject, layer: u64, tags: &[TagId]) -> u64 {
         for tag in tags {
             object.add_tag(*tag);
         }
         self.add_with(object, layer)
     }
 
-    pub fn add_with(&mut self, mut object: RenderObject, layer: u64) -> u64 {
+    pub fn add_with(&self, mut object: RenderObject, layer: u64) -> u64 {
         let id = self.context.alloc_object_id();
         if !object.has_name() {
             object.set_name(&format!("Object {}", id));
@@ -148,7 +178,7 @@ impl Scene {
 
         let entry = q.entry(layer);
         let entry = entry.or_insert_with(|| {
-            let camera = self.cameras.get(0).cloned();
+            let camera = self.main_camera_ref();
             if layer >= LAYER_UI {
                 Arc::new(Mutex::new(UISceneSorter::new()))
             } else if layer > LAYER_TRANSPARENT {
@@ -168,7 +198,7 @@ impl Scene {
         id
     }
 
-    pub fn remove(&mut self, id: u64) -> bool {
+    pub fn remove(&self, id: u64) -> bool {
         if let Some(obj) = self.storage.get(&id) {
             let q = self.queue.lock().unwrap();
             let sorter = q.get(&obj.layer).unwrap();
@@ -181,11 +211,11 @@ impl Scene {
         false
     }
 
-    pub fn remove_by_tag(&mut self, tag: TagId) {
+    pub fn remove_by_tag(&self, tag: TagId) {
         self.remove_if(|v| v.o().has_tag(tag));
     }
 
-    pub fn remove_if<F: Fn(&ObjectWrapper) -> bool>(&mut self, f: F) {
+    pub fn remove_if<F: Fn(&ObjectWrapper) -> bool>(&self, f: F) {
         let mut rm_ids = vec![];
         for v in self.storage.iter() {
             let id = v.key();
@@ -200,7 +230,7 @@ impl Scene {
         }
     }
 
-    pub fn modify_if<F: Fn(&mut ObjectWrapper)>(&mut self, f: F) {
+    pub fn modify_if<F: Fn(&mut ObjectWrapper)>(&self, f: F) {
         for mut v in self.storage.iter_mut() {
             let obj = v.value_mut();
             f(obj)
@@ -220,7 +250,7 @@ impl Scene {
             .collect()
     }
 
-    pub fn material_change(&mut self) -> bool {
+    pub fn material_change(&self) -> bool {
         let mut change = false;
         for s in self.queue.lock().unwrap().values() {
             if s.lock().unwrap().material_change() {
@@ -229,7 +259,7 @@ impl Scene {
         }
         change
     }
-    pub fn update(&self, _delta: f64) {}
+    pub fn update(&self, _delta: f32) {}
 
     pub fn clear_objects(&mut self) {
         self.queue.lock().unwrap().clear();

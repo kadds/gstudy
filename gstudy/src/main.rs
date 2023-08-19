@@ -2,12 +2,7 @@
 #![feature(strict_provenance)]
 #![windows_subsystem = "windows"]
 mod entry;
-mod loader;
 mod logic;
-mod looper;
-mod statistics;
-mod taskpool;
-mod util;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {

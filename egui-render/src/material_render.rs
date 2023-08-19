@@ -1,26 +1,30 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{
+use core::{
     backends::wgpu_backend::{GpuInputMainBuffers, NullBufferAccessor, WGPUResource},
     graph::rdg::{
         pass::*,
         resource::{ClearValue, ResourceOps},
         RenderGraphBuilder, RenderPassBuilder,
     },
-    material::{egui::EguiMaterialFace, Material, MaterialId},
+    material::{Material, MaterialId},
     render::{
-        common::FramedCache, resolve_pipeline, ColorTargetBuilder, DrawCommands, PassIdent,
-        PipelinePassResource, RenderDescriptorObject,
+        common::FramedCache,
+        material::{
+            MaterialRenderContext, MaterialRenderer, MaterialRendererFactory, SetupResource,
+        },
+        resolve_pipeline, ColorTargetBuilder, DrawCommands, PassIdent, PipelinePassResource,
+        RenderDescriptorObject,
     },
 };
 
-use super::{MaterialRenderer, MaterialRendererFactory, SetupResource};
+use crate::material::EguiMaterialFace;
 
 struct EguiMaterialHardwareRendererInner {
     main_buffers: GpuInputMainBuffers,
     sampler: wgpu::Sampler,
-    commands: DrawCommands,
-    pipeline: PipelinePassResource,
+    pub(crate) commands: DrawCommands,
+    pub(crate) pipeline: PipelinePassResource,
     global_bind_group: Arc<wgpu::BindGroup>,
     tech: Arc<tshader::ShaderTech>,
     material_bind_group_cache: FramedCache<MaterialId, Arc<wgpu::BindGroup>>,
@@ -49,7 +53,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
 impl MaterialRenderer for EguiMaterialHardwareRenderer {
     fn render_material<'b>(
         &mut self,
-        ctx: &'b mut super::MaterialRenderContext<'b>,
+        ctx: &'b mut MaterialRenderContext<'b>,
         objects: &'b [u64],
         material: &'b Material,
         encoder: &mut wgpu::CommandEncoder,

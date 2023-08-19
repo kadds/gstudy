@@ -134,4 +134,3 @@ impl MaterialBuilder {
 pub trait MaterialShader: Any + Sync + Send + Debug + 'static {}
 
 pub mod basic;
-pub mod egui;

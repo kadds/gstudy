@@ -55,7 +55,6 @@ pub trait MaterialRendererFactory {
 }
 
 pub mod basic;
-pub mod egui;
 
 pub struct HardwareMaterialShaderResource {
     pub pass: smallvec::SmallVec<[Arc<wgpu::RenderPipeline>; 1]>,
