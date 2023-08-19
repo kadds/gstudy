@@ -2,12 +2,12 @@ mod mesh;
 
 use core::{
     backends::wgpu_backend::WGPUResource,
-    context::{RContext, RContextRef, TagId},
-    event::{EventProcessor, EventSender, EventSource, InputEvent, ProcessEventResult},
+    context::{RContext, TagId},
+    event::{EventSender, EventSource, InputEvent, ProcessEventResult},
     geometry::StaticGeometry,
     material::{Material, MaterialBuilder},
-    scene::{Camera, RenderObject, Scene},
-    types::{Size, Vec3f, Vec4f},
+    scene::{RenderObject, Scene},
+    types::Size,
 };
 use std::{
     any::{Any, TypeId},
@@ -114,7 +114,7 @@ impl EguiRenderer {
         self.ctx.begin_frame(self.input.clone());
     }
 
-    pub fn post_update(&mut self, proxy: &dyn EventSender, scene: &Scene) {
+    pub fn post_update(&mut self, proxy: &dyn EventSender) {
         let output = self.ctx.end_frame();
         if output.platform_output.cursor_icon != self.cursor {
             self.cursor = output.platform_output.cursor_icon;
@@ -170,11 +170,6 @@ impl EguiRenderer {
         scene.remove_by_tag(self.ui_tag);
 
         let mut ui_materials = self.ui_materials.take().unwrap();
-        // let size = self
-        //     .input
-        //     .screen_rect
-        //     .map(|v| Size::new(v.width() as u32, v.height() as u32))
-        //     .unwrap();
 
         let mut ui_textures = self.ui_textures.take().unwrap();
         let (meshes, rebuild_textures) = self.ui_mesh.generate_mesh(
@@ -370,6 +365,7 @@ impl Plugin for EguiPlugin {
                 TypeId::of::<EguiMaterialFace>(),
                 Box::new(EguiMaterialRendererFactory {}),
             )],
+            ..Default::default()
         };
         list
     }
@@ -384,8 +380,7 @@ impl AppEventProcessor for EguiPlugin {
                     self.r.pre_update(*delta as f32, size);
                 }
                 core::event::Event::PostUpdate(_) => {
-                    let scene = context.container.get::<Scene>().unwrap();
-                    self.r.post_update(context.source.event_sender(), &scene);
+                    self.r.post_update(context.source.event_sender());
                 }
                 core::event::Event::PreRender => {
                     let gpu = context.container.get::<WGPUResource>().unwrap();

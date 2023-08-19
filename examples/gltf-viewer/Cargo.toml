@@ -14,4 +14,6 @@ env_logger = "0.10"
 egui-render = {path = "../../egui-render"}
 egui = "0.22.0"
 rfd = "0.11.4"
+nalgebra = "0.32.2"
+log = "0.4"
 

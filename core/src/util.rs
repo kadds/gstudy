@@ -145,3 +145,10 @@ where
         None
     }
 }
+
+pub fn rad2angle(radian: f32) -> f32 {
+    radian * 180f32 / std::f32::consts::PI
+}
+pub fn angle2rad(angle: f32) -> f32 {
+    angle / 180f32 * std::f32::consts::PI
+}

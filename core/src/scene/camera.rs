@@ -1,36 +1,102 @@
-use std::{
-    fmt::Debug,
-    ops::Mul,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
-
-use nalgebra::Unit;
+use std::{fmt::Debug, sync::Mutex};
 
 use crate::{
-    context::RContext,
-    event::{self, InputEvent},
-    types::{Frustum, Mat4x4f, Quaternion, Vec2f, Vec3f, Vec4f},
+    types::{Frustum, Mat4x4f, Vec2f, Vec3f, Vec4f},
+    util::angle2rad,
 };
 
-// pub type OptionalTexture = Option<Texture>;
-
 #[derive(Debug, Clone)]
-struct Inner {
-    projection: Mat4x4f,
-    view: Mat4x4f,
-    from: Vec3f,
-    to: Vec3f,
-    up: Vec3f,
+struct PerspectiveProject {
     aspect: f32,
-    orthographic: bool,
-    ortho_size: Vec2f,
     fovy: f32,
     near: f32,
     far: f32,
-    change_id: u64,
 }
 
+impl Default for PerspectiveProject {
+    fn default() -> Self {
+        Self {
+            aspect: 1f32,
+            fovy: angle2rad(90f32),
+            near: 0.1f32,
+            far: 100f32,
+        }
+    }
+}
+
+impl PerspectiveProject {
+    pub fn gen(&self) -> Mat4x4f {
+        Mat4x4f::new_perspective(self.aspect, self.fovy, self.near, self.far).into()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct OrthographicProject {
+    rect: Vec4f,
+    near: f32,
+    far: f32,
+}
+
+impl Default for OrthographicProject {
+    fn default() -> Self {
+        Self {
+            rect: Vec4f::new(0f32, 0f32, 1f32, 1f32),
+            near: 0.1f32,
+            far: 10f32,
+        }
+    }
+}
+
+impl OrthographicProject {
+    pub fn gen(&self) -> Mat4x4f {
+        Mat4x4f::new_orthographic(
+            self.rect.x,
+            self.rect.z,
+            self.rect.w,
+            self.rect.y,
+            self.near,
+            self.far,
+        )
+        .into()
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Project {
+    Perspective(PerspectiveProject),
+    Orthographic(OrthographicProject),
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self::Perspective(PerspectiveProject::default())
+    }
+}
+
+impl Project {
+    pub fn gen(&self) -> Mat4x4f {
+        match self {
+            Project::Perspective(p) => p.gen(),
+            Project::Orthographic(o) => o.gen(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Inner {
+    project_var: Project,
+    projection: Mat4x4f,
+
+    from: Vec3f,
+    to: Vec3f,
+    up: Vec3f,
+    view: Mat4x4f,
+
+    dirty_project: bool,
+    dirty_view: bool,
+}
+
+#[derive(Debug)]
 pub struct Camera {
     inner: Mutex<Inner>,
 }
@@ -43,119 +109,165 @@ impl Clone for Camera {
     }
 }
 
-impl Debug for Camera {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let d = self.inner.lock().unwrap();
-        let mut sd = f.debug_struct("Camera");
-        if d.orthographic {
-            sd.field("type", &"o")
-                .field("width", &d.ortho_size.x)
-                .field("height", &d.ortho_size.y)
-        } else {
-            sd.field("type", &"p")
-        }
-        .field("from", &d.from)
-        .field("to", &d.to)
-        .field("up", &d.up)
-        .field("fovy", &(d.fovy / std::f32::consts::PI * 180f32))
-        .field("near", &d.near)
-        .field("far", &d.far)
-        .finish()
-    }
-}
-
 impl Camera {
     pub fn new() -> Self {
         Self {
             inner: Inner {
                 projection: Mat4x4f::identity(),
                 view: Mat4x4f::identity(),
-                orthographic: true,
                 from: Vec3f::new(1f32, 1f32, 1f32),
                 to: Vec3f::new(0f32, 0f32, 0f32),
                 up: Vec3f::new(0f32, 1f32, 0f32),
-                ortho_size: Vec2f::zeros(),
-                aspect: 0f32,
-                near: 0.01f32,
-                far: f32::MAX,
-                fovy: 0f32,
-                change_id: 0,
+
+                project_var: Project::default(),
+                dirty_project: true,
+                dirty_view: true,
             }
             .into(),
         }
     }
 
-    pub fn frustum_worldspace(&self) -> Frustum {
-        let inner = self.inner.lock().unwrap();
-        let near = inner.near;
-        let far = inner.far;
-        let fov = inner.fovy;
-        let asp = inner.aspect;
-        let deg_y = fov.tan();
-        let deg_x = deg_y * asp;
-        let world = inner.view;
-
-        let f0 = world * Vec4f::new(-deg_x, -deg_y, 1f32, 1f32);
-        let f1 = world * Vec4f::new(-deg_x, deg_y, 1f32, 1f32);
-        let f2 = world * Vec4f::new(deg_x, -deg_y, 1f32, 1f32);
-        let f3 = world * Vec4f::new(deg_x, deg_y, 1f32, 1f32);
-
-        let pos = inner.from;
-
-        Frustum::new([
-            pos + (near * f1).xyz(),
-            pos + (near * f3).xyz(),
-            pos + (near * f0).xyz(),
-            pos + (near * f2).xyz(),
-            pos + (far * f1).xyz(),
-            pos + (far * f3).xyz(),
-            pos + (far * f0).xyz(),
-            pos + (far * f2).xyz(),
-        ])
+    pub fn copy_from(&self, camera: &Camera) {
+        let mut s = self.inner.lock().unwrap();
+        let u = camera.inner.lock().unwrap();
+        *s = u.clone();
+        s.dirty_project = true;
+        s.dirty_view = true;
     }
 
-    pub fn change_id(&self) -> u64 {
+    pub fn frustum_worldspace(&self) -> Frustum {
         let inner = self.inner.lock().unwrap();
-        inner.change_id
+        match &inner.project_var {
+            Project::Perspective(p) => {
+                let deg_y = p.fovy.tan();
+                let deg_x = deg_y * p.aspect;
+                let world = inner.view;
+
+                let f0 = world * Vec4f::new(-deg_x, -deg_y, 1f32, 1f32);
+                let f1 = world * Vec4f::new(-deg_x, deg_y, 1f32, 1f32);
+                let f2 = world * Vec4f::new(deg_x, -deg_y, 1f32, 1f32);
+                let f3 = world * Vec4f::new(deg_x, deg_y, 1f32, 1f32);
+
+                let pos = inner.from;
+
+                Frustum::new([
+                    pos + (p.near * f1).xyz(),
+                    pos + (p.near * f3).xyz(),
+                    pos + (p.near * f0).xyz(),
+                    pos + (p.near * f2).xyz(),
+                    pos + (p.far * f1).xyz(),
+                    pos + (p.far * f3).xyz(),
+                    pos + (p.far * f0).xyz(),
+                    pos + (p.far * f2).xyz(),
+                ])
+            }
+            Project::Orthographic(o) => {
+                let world = inner.view;
+                let pos = inner.from;
+                let f0 = world * Vec4f::new(-o.rect.x, -o.rect.y, 1f32, 1f32);
+                let f1 = world * Vec4f::new(-o.rect.x, o.rect.y, 1f32, 1f32);
+                let f2 = world * Vec4f::new(o.rect.x, -o.rect.y, 1f32, 1f32);
+                let f3 = world * Vec4f::new(o.rect.x, o.rect.y, 1f32, 1f32);
+                Frustum::new([
+                    pos + (o.near * f1).xyz(),
+                    pos + (o.near * f3).xyz(),
+                    pos + (o.near * f0).xyz(),
+                    pos + (o.near * f2).xyz(),
+                    pos + (o.far * f1).xyz(),
+                    pos + (o.far * f3).xyz(),
+                    pos + (o.far * f0).xyz(),
+                    pos + (o.far * f2).xyz(),
+                ])
+            }
+        }
     }
 
     pub fn vp(&self) -> Mat4x4f {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        if inner.dirty_project {
+            inner.projection = inner.project_var.gen();
+            inner.dirty_project = false;
+        }
+        if inner.dirty_view {
+            let from = inner.from.into();
+            let to = inner.to.into();
+            let up = inner.up.into();
+            inner.view = Mat4x4f::look_at_rh(&from, &to, &up);
+            inner.dirty_view = false;
+        }
         inner.projection * inner.view
     }
 
     pub fn make_orthographic(&self, rect: Vec4f, near: f32, far: f32) {
         let mut inner = self.inner.lock().unwrap();
-        inner.projection =
-            Mat4x4f::new_orthographic(rect.x, rect.z, rect.w, rect.y, near, far).into();
-        inner.orthographic = true;
-        inner.ortho_size = Vec2f::new(rect.z - rect.x, rect.w - rect.y);
-        inner.change_id += 1;
+        inner.dirty_project = true;
+        inner.project_var = Project::Orthographic(OrthographicProject { rect, near, far });
     }
-    pub fn make_perspective(&self, aspect: f32, fovy: f32, znear: f32, zfar: f32) {
+
+    pub fn make_perspective(&self, aspect: f32, fovy: f32, near: f32, far: f32) {
         let mut inner = self.inner.lock().unwrap();
-        inner.projection = Mat4x4f::new_perspective(aspect, fovy, znear, zfar).into();
-        inner.fovy = fovy;
-        inner.near = znear;
-        inner.far = zfar;
-        inner.aspect = aspect;
-        inner.orthographic = false;
-        inner.ortho_size = Vec2f::zeros();
-        inner.change_id += 1;
+        inner.dirty_project = true;
+        inner.project_var = Project::Perspective(PerspectiveProject {
+            fovy,
+            aspect,
+            near,
+            far,
+        });
     }
-    pub fn remake_perspective(&self, aspect: f32) {
+
+    pub fn set_aspect(&self, aspect: f32) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        inner.projection =
-            Mat4x4f::new_perspective(aspect, inner.fovy, inner.near, inner.far).into();
-        inner.orthographic = false;
-        inner.ortho_size = Vec2f::zeros();
-        inner.aspect = aspect;
-        inner.change_id += 1;
+        inner.dirty_project = true;
+        if let Project::Perspective(project) = &mut inner.project_var {
+            project.aspect = aspect;
+            return true;
+        }
+        false
+    }
+
+    pub fn set_fov(&self, fov: f32) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if let Project::Perspective(project) = &mut inner.project_var {
+            project.fovy = fov;
+            inner.dirty_project = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn set_near(&self, near: f32) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.dirty_project = true;
+        match &mut inner.project_var {
+            Project::Perspective(p) => {
+                p.near = near;
+            }
+            Project::Orthographic(o) => {
+                o.near = near;
+            }
+        }
+    }
+
+    pub fn set_far(&self, far: f32) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.dirty_project = true;
+        match &mut inner.project_var {
+            Project::Perspective(p) => {
+                p.far = far;
+            }
+            Project::Orthographic(o) => {
+                o.far = far;
+            }
+        }
     }
 
     pub fn is_perspective(&self) -> bool {
         let inner = self.inner.lock().unwrap();
-        !inner.orthographic
+        if let Project::Orthographic(o) = &inner.project_var {
+            false
+        } else {
+            true
+        }
     }
 
     pub fn look_at(&self, from: Vec3f, to: Vec3f, up: Vec3f) {
@@ -163,10 +275,7 @@ impl Camera {
         inner.from = from;
         inner.to = to;
         inner.up = up;
-        let from = from.into();
-        let to = to.into();
-        inner.view = Mat4x4f::look_at_rh(&from, &to, &up);
-        inner.change_id += 1;
+        inner.dirty_view = true;
     }
     pub fn from(&self) -> Vec3f {
         let inner = self.inner.lock().unwrap();
@@ -184,127 +293,60 @@ impl Camera {
         let inner = self.inner.lock().unwrap();
         (inner.from - inner.to).cross(&inner.up)
     }
+    pub fn far(&self) -> f32 {
+        let mut inner = self.inner.lock().unwrap();
+        match &mut inner.project_var {
+            Project::Perspective(p) => {
+                return p.far;
+            }
+            Project::Orthographic(o) => {
+                return o.far;
+            }
+        }
+    }
+
+    pub fn near(&self) -> f32 {
+        let mut inner = self.inner.lock().unwrap();
+        match &mut inner.project_var {
+            Project::Perspective(p) => {
+                return p.near;
+            }
+            Project::Orthographic(o) => {
+                return o.near;
+            }
+        }
+    }
+
+    pub fn fovy(&self) -> f32 {
+        let mut inner = self.inner.lock().unwrap();
+        match &mut inner.project_var {
+            Project::Perspective(p) => {
+                return p.fovy;
+            }
+            Project::Orthographic(o) => {
+                return 0f32;
+            }
+        }
+    }
+
+    pub fn aspect(&self) -> f32 {
+        let mut inner = self.inner.lock().unwrap();
+        match &mut inner.project_var {
+            Project::Perspective(p) => {
+                return p.aspect;
+            }
+            Project::Orthographic(o) => {
+                return 0f32;
+            }
+        }
+    }
 
     pub fn width_height(&self) -> Vec2f {
         let inner = self.inner.lock().unwrap();
-        inner.ortho_size
-    }
-
-    //     pub fn bind_render_attachment(&self, attachment: RenderAttachment) {
-    //         let mut inner = self.inner.lock().unwrap();
-    //         inner.attachment = Some(attachment);
-    //     }
-
-    //     pub fn take_render_attachment(&self) -> Option<RenderAttachment> {
-    //         let mut inner = self.inner.lock().unwrap();
-    //         inner.attachment.take()
-    //     }
-
-    //     pub fn render_attachment_format(&self) -> wgpu::TextureFormat {
-    //         let inner = self.inner.lock().unwrap();
-    //         inner.attachment.as_ref().unwrap().format()
-    //     }
-    // }
-}
-
-pub trait CameraController {
-    fn on_input(&mut self, event: &InputEvent);
-}
-
-pub struct TrackballCameraController {
-    camera: Arc<Camera>,
-    down_pos: Option<Vec2f>,
-    last_pos: Vec2f,
-    last_move: Instant,
-}
-
-impl TrackballCameraController {
-    pub fn new(camera: Arc<Camera>) -> Self {
-        Self {
-            camera,
-            down_pos: None,
-            last_pos: Vec2f::default(),
-            last_move: Instant::now(),
-        }
-    }
-}
-
-impl CameraController for TrackballCameraController {
-    fn on_input(&mut self, event: &InputEvent) {
-        match event {
-            crate::event::InputEvent::KeyboardInput(input) => match input.vk {
-                event::VirtualKeyCode::W => {}
-                event::VirtualKeyCode::A => {}
-                event::VirtualKeyCode::S => {}
-                event::VirtualKeyCode::D => {}
-                _ => (),
-            },
-            crate::event::InputEvent::CursorMoved {
-                logical: _,
-                physical,
-            } => {
-                // let last_time = self.last_move;
-                // self.last_move = Instant::now();
-                let last_pos = Vec2f::new(physical.x, physical.y);
-                let delta = last_pos - self.last_pos;
-                self.last_pos = last_pos;
-                if self.down_pos.is_none() {
-                    return;
-                }
-                // let dt = (self.last_move - last_time).as_secs_f32();
-                let dt = 0.01f32;
-
-                let from = self.camera.from();
-                let to = self.camera.to();
-                let up = self.camera.up();
-                let right = self.camera.right();
-                let unit_up = Unit::new_unchecked(up.normalize());
-                let unit_right = Unit::new_unchecked(right.normalize());
-                let dist = nalgebra::distance(&from.into(), &to.into());
-
-                let delta_theta_y = delta.y * 0.1 * dt * std::f32::consts::PI;
-
-                let theta = f32::asin((from.y - to.y) / dist);
-                if theta >= (std::f32::consts::FRAC_PI_2 - delta_theta_y) && delta.y > 0f32 {
-                    return;
-                }
-                if theta <= (-std::f32::consts::FRAC_PI_2 - delta_theta_y) && delta.y < 0f32 {
-                    return;
-                }
-
-                let q = Quaternion::from_axis_angle(
-                    &unit_up,
-                    -delta.x * 0.1 * dt * std::f32::consts::PI,
-                );
-                let q2 = Quaternion::from_axis_angle(&unit_right, delta_theta_y);
-                let q = q * q2;
-
-                let target = q * (from - to) + to;
-
-                self.camera.look_at(target, to, up);
-            }
-            crate::event::InputEvent::MouseWheel { delta } => {
-                let from = self.camera.from();
-                let to = self.camera.to();
-                let up = self.camera.up();
-
-                let vector = from - to;
-                let new_offset = delta.y;
-                let dist = (new_offset * 0.05f32).max(-0.5f32).min(0.5f32);
-                let new_from = from - (vector * dist);
-
-                self.camera.look_at(new_from, to, up);
-            }
-            crate::event::InputEvent::MouseInput { state, button } => {
-                if button.is_left() {
-                    if state.is_pressed() {
-                        self.down_pos = Some(self.last_pos);
-                    } else {
-                        self.down_pos = None;
-                    }
-                }
-            }
-            _ => (),
+        if let Project::Orthographic(o) = &inner.project_var {
+            Vec2f::new(o.rect.z - o.rect.x, o.rect.w - o.rect.y)
+        } else {
+            Vec2f::zeros()
         }
     }
 }

@@ -82,7 +82,7 @@ impl App {
         }
 
         for p in &mut plugins {
-            p.install_factory(&mut factory_list);
+            p.install_factory(&self.container, &mut factory_list);
         }
 
         // run looper

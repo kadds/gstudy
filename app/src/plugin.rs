@@ -1,10 +1,12 @@
 use core::{
     event::{EventProcessor, EventSender, EventSource},
     render::material::MaterialRendererFactory,
+    scene::controller::ControllerFactory,
 };
 use std::{
     any::{Any, TypeId},
     cell::RefCell,
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -27,6 +29,7 @@ pub trait PluginFactory {
 #[derive(Default)]
 pub struct CoreFactoryList {
     pub materials: Vec<(TypeId, Box<dyn MaterialRendererFactory>)>,
+    pub camera_controllers: HashMap<String, Box<dyn ControllerFactory>>,
 }
 
 pub trait Runner: EventProcessor {
@@ -37,7 +40,7 @@ pub trait Plugin: AppEventProcessor {
     fn load_factory(&self) -> CoreFactoryList {
         CoreFactoryList::default()
     }
-    fn install_factory(&mut self, factory_list: &mut CoreFactoryList) {}
+    fn install_factory(&mut self, container: &Container, factory_list: &mut CoreFactoryList) {}
 }
 
 pub trait LooperPlugin {

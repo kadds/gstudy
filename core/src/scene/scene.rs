@@ -2,11 +2,10 @@ use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 
 use crate::{
-    context::{RContext, RContextRef, TagId},
+    context::{RContextRef, TagId},
     geometry::Geometry,
     material::Material,
     types::{Size, Vec3f, Vec4f},
-    util::StringIdAllocMap,
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -271,7 +270,6 @@ impl Scene {
         }
         change
     }
-    pub fn update(&self, _delta: f32) {}
 
     pub fn clear_objects(&mut self) {
         self.queue.lock().unwrap().clear();
@@ -306,7 +304,7 @@ impl Scene {
         // self.ui_camera_ref().make_orthographic();
         let c = self.cameras.lock().unwrap();
         for camera in c.cameras.iter() {
-            camera.remake_perspective(aspect);
+            camera.set_aspect(aspect);
         }
     }
 }

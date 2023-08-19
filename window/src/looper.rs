@@ -284,6 +284,10 @@ impl Looper {
             }
             _ => {}
         }
+        if self.frame.changed() {
+            let _ =
+                event_proxy.send_event(Box::new(Event::FpsUpdate(crate::FPS(self.frame.fps()))));
+        }
         ret
     }
 }

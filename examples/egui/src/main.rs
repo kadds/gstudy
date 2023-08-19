@@ -22,7 +22,10 @@ impl AppEventProcessor for MainLogic {
 }
 
 fn draw_egui(ctx: &egui::Context) {
-    egui::Window::new("Setting").show(ctx, |ui| ctx.settings_ui(ui));
+    egui::Window::new("Setting")
+        .resizable(true)
+        .hscroll(true)
+        .show(ctx, |ui| ctx.settings_ui(ui));
     egui::Window::new("Memory").show(ctx, |ui| ctx.memory_ui(ui));
     egui::Window::new("Style").show(ctx, |ui| ctx.style_ui(ui));
     egui::Window::new("Texture").show(ctx, |ui| ctx.texture_ui(ui));

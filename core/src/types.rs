@@ -26,15 +26,6 @@ pub type Rotation3 = nalgebra::geometry::Rotation3<f32>;
 pub type Translation3 = nalgebra::geometry::Translation3<f32>;
 pub type Transform3 = nalgebra::geometry::Transform3<f32>;
 
-// impl Color {
-//     pub fn white() -> Self {
-//         Self::new(1f32, 1f32, 1f32, 1f32)
-//     }
-//     pub fn black() -> Self {
-//         Self::new(0f32, 0f32, 0f32, 1f32)
-//     }
-// }
-
 #[inline]
 fn to_round_u8(res: &Vec4f, idx: usize) -> u8 {
     unsafe { res.vget_unchecked(idx).round() as u8 }

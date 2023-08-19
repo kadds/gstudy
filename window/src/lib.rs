@@ -1,14 +1,16 @@
 use core::backends::wgpu_backend::WGPUResource;
-use core::context::{RContext, RContextRef, ResourceRef};
-use core::event::{EventProcessor, EventSender};
+use core::context::{RContext, ResourceRef};
+use core::event::EventProcessor;
 use core::graph::rdg::resource::RT_COLOR_RESOURCE_ID;
 use core::graph::rdg::{RenderGraph, RenderGraphBuilder};
 use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
+use core::scene::controller::CameraControllerFactory;
 use core::scene::Scene;
 use core::types::{Color, Size, Vec4f};
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub mod looper;
 pub mod statistics;
@@ -28,6 +30,7 @@ pub type CEvent = core::event::Event;
 struct HardwareRenderPlugin {
     rdg: Option<RenderGraph>,
     renderer: HardwareRenderer,
+    cc_factory: Option<Arc<CameraControllerFactory>>,
     first_update: bool,
 }
 
@@ -37,6 +40,7 @@ impl HardwareRenderPlugin {
             rdg: None,
             renderer: HardwareRenderer::new(),
             first_update: true,
+            cc_factory: None,
         }
     }
     fn update(&mut self, delta: f32) {
@@ -93,13 +97,27 @@ impl HardwareRenderPlugin {
 }
 
 impl Plugin for HardwareRenderPlugin {
-    fn install_factory(&mut self, factory_list: &mut app::plugin::CoreFactoryList) {
+    fn install_factory(
+        &mut self,
+        container: &Container,
+        factory_list: &mut app::plugin::CoreFactoryList,
+    ) {
         let mut list = app::plugin::CoreFactoryList::default();
         std::mem::swap(&mut list, factory_list);
 
         for (face_id, factory) in list.materials {
             self.renderer.add_factory(face_id, factory);
         }
+
+        let mut cc = CameraControllerFactory::new();
+
+        for (name, factory) in list.camera_controllers {
+            cc.add(name, factory);
+        }
+
+        container.register(cc);
+
+        self.cc_factory = container.get::<_>();
     }
 }
 
@@ -174,6 +192,8 @@ pub enum Event {
     FullScreen(bool),
 
     OpenUrl(String),
+
+    FpsUpdate(FPS),
 }
 
 pub struct WindowPluginFactory {
@@ -227,6 +247,10 @@ unsafe impl Sync for RawWindow {}
 pub type WindowSize = LockResource<(Size, Size)>;
 pub type ClearColor = LockResource<Color>;
 pub type MainWindowHandle = RawWindow;
+#[derive(Default, Clone, Debug, Copy)]
+pub struct FPS(pub f32);
+
+pub type FPSResource = LockResource<FPS>;
 
 pub struct WindowPlugin;
 
@@ -264,6 +288,7 @@ impl LooperPlugin for WindowLooperPlugin {
             handle: looper.handle().unwrap(),
         });
         container.register_arc(gpu);
+        container.register(FPSResource::new(FPS(0f32)));
 
         struct Process(Rc<RefCell<dyn app::plugin::Runner>>);
 
@@ -286,5 +311,12 @@ impl LooperPlugin for WindowLooperPlugin {
 }
 
 impl AppEventProcessor for WindowPlugin {
-    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {}
+    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {
+        if let Some(ev) = event.downcast_ref::<Event>() {
+            if let Event::FpsUpdate(fps) = ev {
+                let f = context.container.get::<FPSResource>().unwrap();
+                f.set(*fps);
+            }
+        }
+    }
 }

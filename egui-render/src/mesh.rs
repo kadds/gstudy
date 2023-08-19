@@ -124,7 +124,7 @@ impl UIMesh {
                     (mesh.clip_rect.height() * ppi) as u32,
                 )
             } else {
-                Rectu::new(0, 0, 0, 0)
+                Rectu::new(0, 0, view_size.x, view_size.y)
             };
 
             clip.x = clip.x.max(0);

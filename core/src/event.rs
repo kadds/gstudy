@@ -68,6 +68,12 @@ impl MouseButton {
         }
         false
     }
+    pub fn is_middle(&self) -> bool {
+        if let MouseButton::Middle = self {
+            return true;
+        }
+        false
+    }
 }
 
 #[allow(dead_code)]
