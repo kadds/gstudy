@@ -115,6 +115,8 @@ pub enum InputEvent {
 pub enum Event {
     JustRenderOnce,
 
+    FirstSync,
+
     PreUpdate(f64),
     // need update window
     Update(f64),
@@ -138,6 +140,7 @@ impl Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::JustRenderOnce => write!(f, "JustRenderOnce"),
+            Self::FirstSync => write!(f, "FirstSync"),
             Self::PreUpdate(arg0) => f.debug_tuple("PreUpdate").field(arg0).finish(),
             Self::Update(arg0) => f.debug_tuple("Update").field(arg0).finish(),
             Self::PostUpdate(arg0) => f.debug_tuple("PostUpdate").field(arg0).finish(),

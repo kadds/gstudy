@@ -1,3 +1,5 @@
+use app::plugin::{Plugin, PluginFactory};
+use app::AppEventProcessor;
 use gltf::texture::Sampler;
 use nalgebra::Unit;
 mod taskpool;
@@ -5,8 +7,8 @@ mod taskpool;
 use core::backends::wgpu_backend::WGPUResource;
 use std::any::Any;
 
-use core::context::{RContext, ResourceRef, TagId};
-use core::event::{Event, EventSender};
+use core::context::{RContext, RContextRef, ResourceRef, TagId};
+use core::geometry::StaticGeometry;
 use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
 use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
@@ -14,11 +16,7 @@ use core::render::default_blender;
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
 use core::types::{BoundBox, Color, Size, Vec2f, Vec3f, Vec4f};
 use core::util::{any_as_u8_slice_array, any_as_x_slice_array};
-use core::{
-    event::{CustomEvent, EventProcessor, EventSource, ProcessEventResult},
-    geometry::StaticGeometry,
-};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::{
@@ -487,7 +485,8 @@ struct LoadResult {
 fn load(
     name: &str,
     pool: &TaskPool,
-    rm: Arc<ResourceManager>,
+    ctx: RContextRef,
+    gpu: Arc<WGPUResource>,
 ) -> anyhow::Result<(Scene, LoadResult)> {
     let mut res = LoadResult::default();
 
@@ -507,21 +506,21 @@ fn load(
             }
         });
     }
-    let mut gscene = rm.new_scene();
-    let mut map = MaterialMap::new(rm.gpu.context());
+    let mut gscene = Scene::new(ctx.clone());
+    let mut map = MaterialMap::new(&ctx);
     let mut texture_map = Mutex::new(HashMap::new());
 
     let batch = pool.make_batch();
 
     for texture in gltf.textures() {
-        batch.execute(|| parse_texture(&mut texture_map, &path, &rm.gpu, texture));
+        batch.execute(|| parse_texture(&mut texture_map, &path, &gpu, texture));
         res.total_textures += 1;
     }
 
     let mut samplers = vec![];
 
     for sampler in gltf.samplers() {
-        let sampler = parse_sampler(&sampler, &rm.gpu);
+        let sampler = parse_sampler(&sampler, &gpu);
         samplers.push(sampler);
         res.total_samplers += 1;
     }
@@ -602,7 +601,7 @@ fn load(
 
     for s in gltf.scenes() {
         let name = s.name().unwrap_or("gltf-scene");
-        let tag_id = rm.gpu.context().new_tag(name);
+        let tag_id = ctx.new_tag(name);
 
         let transform = Transform::default();
         for node in s.nodes() {
@@ -622,8 +621,7 @@ fn load(
             s.nodes().len()
         );
     }
-    let aspect = rm.gpu.aspect();
-    let ctx = rm.gpu.context();
+    let aspect = gpu.aspect();
 
     let bound_box = &mut res.aabb;
 
@@ -655,7 +653,7 @@ fn load(
             log::info!("scene camera {}", c.name().unwrap_or_default());
             match c.projection() {
                 gltf::camera::Projection::Orthographic(c) => {
-                    let camera = Camera::new(ctx);
+                    let camera = Camera::new(&ctx);
                     camera.make_orthographic(
                         Vec4f::new(c.xmag(), c.ymag(), c.xmag(), c.ymag()),
                         c.znear(),
@@ -664,7 +662,7 @@ fn load(
                     camera
                 }
                 gltf::camera::Projection::Perspective(c) => {
-                    let camera = Camera::new(ctx);
+                    let camera = Camera::new(&ctx);
                     camera.make_perspective(
                         c.aspect_ratio().unwrap_or(aspect),
                         c.yfov(),
@@ -679,7 +677,7 @@ fn load(
             let near = nalgebra::distance(&from.into(), &from_max_point.into());
             let far = nalgebra::distance(&from.into(), &from_min_point.into());
 
-            let camera = Camera::new(ctx);
+            let camera = Camera::new(&ctx);
             camera.make_perspective(aspect, std::f32::consts::FRAC_PI_3, near, far);
             camera
         }
@@ -699,111 +697,136 @@ fn load(
     Ok((gscene, res))
 }
 
-fn loader_main(rx: mpsc::Receiver<(String, Box<dyn EventSender>)>, rm: Arc<ResourceManager>) {
+pub struct LoadRes {
+    pub name: String,
+    pub scene: Option<Arc<Scene>>,
+}
+
+fn loader_main(
+    rx: mpsc::Receiver<(String, Arc<WGPUResource>)>,
+    tx: Arc<Mutex<VecDeque<LoadRes>>>,
+    ctx: RContextRef,
+) {
     let pool = TaskPoolBuilder::new().build();
     loop {
-        let (name, proxy) = rx.recv().unwrap();
+        let (name, gpu) = rx.recv().unwrap();
         if name.is_empty() {
             break;
         }
-        let result = load(&name, &pool, rm.clone());
+        let result = load(&name, &pool, ctx.clone(), gpu);
         let (scene, result) = match result {
             Ok(val) => val,
             Err(err) => {
                 log::error!("{} in {}", err, name);
+                tx.lock().unwrap().push_back(LoadRes { name, scene: None });
                 continue;
             }
         };
 
         log::info!("load model {} {:?}", name, result);
-        // proxy.send_event(Event::CustomEvent(CustomEvent::Loaded(rm.insert(scene))));
+        tx.lock().unwrap().push_back(LoadRes {
+            name,
+            scene: Some(Arc::new(scene)),
+        });
     }
 }
 
 pub struct Loader {
     thread: Option<std::thread::JoinHandle<()>>,
-    tx: mpsc::Sender<(String, Box<dyn EventSender>)>,
-    resource_manager: Arc<ResourceManager>,
+    tx: mpsc::Sender<(String, Arc<WGPUResource>)>,
+    result: Arc<Mutex<VecDeque<LoadRes>>>,
+    gpu: Mutex<Option<Arc<WGPUResource>>>,
 }
 
 impl Loader {
-    pub fn new(resource_manager: Arc<ResourceManager>) -> Self {
+    pub fn new(ctx: RContextRef) -> Self {
         let (tx, rx) = mpsc::channel();
-        let rm = resource_manager.clone();
         let mut this = Self {
             thread: None,
             tx,
-            resource_manager,
+            result: Arc::new(Mutex::new(VecDeque::new())),
+            gpu: Mutex::new(None),
         };
+
+        let res = this.result.clone();
+
         this.thread = Some(std::thread::spawn(move || {
-            loader_main(rx, rm);
+            loader_main(rx, res, ctx.clone());
         }));
         this
     }
-    pub fn event_processor(&self) -> Box<LoaderEventProcessor> {
-        Box::new(LoaderEventProcessor {
-            tx: self.tx.clone(),
-        })
+
+    pub fn load_async<S: Into<String>>(&self, name: S) {
+        let _ = self
+            .tx
+            .send((name.into(), self.gpu.lock().unwrap().clone().unwrap()));
+    }
+
+    fn take_result(&self) -> Vec<LoadRes> {
+        let mut result = self.result.lock().unwrap();
+        if result.is_empty() {
+            return vec![];
+        }
+        let mut tmp = VecDeque::new();
+        std::mem::swap(&mut tmp, &mut *result);
+
+        return tmp.into_iter().collect();
     }
 }
 
-pub struct LoaderEventProcessor {
-    tx: mpsc::Sender<(String, Box<dyn EventSender>)>,
-}
+pub struct GltfPluginFactory;
 
-impl EventProcessor for LoaderEventProcessor {
-    fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult {
-        todo!();
-        // match event {
-        // Event::CustomEvent(e) => match e {
-        //     CustomEvent::Loading(name) => {
-        //         let _ = self.tx.send((name.clone(), source.new_event_sender()));
-        //         ProcessEventResult::Consumed
-        //     }
-        //     _ => ProcessEventResult::Received,
-        // },
-        // _ => ProcessEventResult::Received,
-        // }
+impl PluginFactory for GltfPluginFactory {
+    fn create(&self, container: &app::container::Container) -> Box<dyn Plugin> {
+        let ctx = container.get::<RContext>().unwrap();
+        let loader = Arc::new(Loader::new(ctx));
+        container.register_arc(loader.clone());
+
+        Box::new(GltfPlugin { loader })
     }
-}
 
-#[derive(Debug, Default)]
-struct ResourceManagerInner {
-    scene_map: HashMap<u64, Scene>,
-    last_id: u64,
-}
-
-#[derive(Debug)]
-pub struct ResourceManager {
-    inner: Mutex<ResourceManagerInner>,
-    gpu: Arc<WGPUResource>,
-}
-
-impl ResourceManager {
-    pub fn new(gpu: Arc<WGPUResource>) -> Self {
-        Self {
-            inner: Mutex::new(ResourceManagerInner::default()),
-            gpu,
+    fn info(&self) -> app::plugin::PluginInfo {
+        app::plugin::PluginInfo {
+            name: "gltfloader".into(),
+            version: "0.1.0".into(),
+            has_looper: false,
         }
     }
 }
 
-impl ResourceManager {
-    pub fn insert(&self, scene: Scene) -> u64 {
-        let mut inner = self.inner.lock().unwrap();
-        let id = inner.last_id;
-        inner.last_id += 1;
-        inner.scene_map.insert(id, scene);
+pub struct GltfPlugin {
+    loader: Arc<Loader>,
+}
 
-        id
-    }
+impl Plugin for GltfPlugin {}
 
-    pub fn new_scene(&self) -> Scene {
-        Scene::new(self.gpu.context_ref())
+impl AppEventProcessor for GltfPlugin {
+    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {
+        if let Some(event) = event.downcast_ref::<core::event::Event>() {
+            match event {
+                core::event::Event::FirstSync => {
+                    let mut gpu = self.loader.gpu.lock().unwrap();
+                    if gpu.is_none() {
+                        let g = context.container.get::<WGPUResource>().unwrap();
+                        *gpu = Some(g);
+                    }
+                }
+                core::event::Event::PostRender => {
+                    let res = self.loader.take_result();
+                    for r in res {
+                        context
+                            .source
+                            .event_sender()
+                            .send_event(Box::new(Event::Loaded(r)))
+                    }
+                }
+                _ => (),
+            }
+        }
     }
+}
 
-    pub fn take(&self, id: u64) -> Scene {
-        let mut inner = self.inner.lock().unwrap();
-        inner.scene_map.remove(&id).unwrap()
-    }
+pub enum Event {
+    Loaded(LoadRes),
+    Unknown,
 }

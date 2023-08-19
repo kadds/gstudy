@@ -2,6 +2,7 @@ use std::{
     fmt::Debug,
     ops::Mul,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use nalgebra::Unit;
@@ -14,7 +15,7 @@ use crate::{
 
 // pub type OptionalTexture = Option<Texture>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Inner {
     projection: Mat4x4f,
     view: Mat4x4f,
@@ -32,7 +33,14 @@ struct Inner {
 
 pub struct Camera {
     inner: Mutex<Inner>,
-    id: u64,
+}
+
+impl Clone for Camera {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Mutex::new(self.inner.lock().unwrap().clone()),
+        }
+    }
 }
 
 impl Debug for Camera {
@@ -52,7 +60,6 @@ impl Debug for Camera {
         .field("fovy", &(d.fovy / std::f32::consts::PI * 180f32))
         .field("near", &d.near)
         .field("far", &d.far)
-        .field("id", &self.id)
         .finish()
     }
 }
@@ -73,14 +80,9 @@ impl Camera {
                 far: f32::MAX,
                 fovy: 0f32,
                 change_id: 0,
-                // attachment: None,
             }
             .into(),
-            id: context.alloc_camera_id(),
         }
-    }
-    pub fn id(&self) -> u64 {
-        self.id
     }
 
     pub fn frustum_worldspace(&self) -> Frustum {
@@ -206,13 +208,14 @@ impl Camera {
 }
 
 pub trait CameraController {
-    fn on_input(&mut self, delta: f32, event: InputEvent);
+    fn on_input(&mut self, event: &InputEvent);
 }
 
 pub struct TrackballCameraController {
     camera: Arc<Camera>,
     down_pos: Option<Vec2f>,
     last_pos: Vec2f,
+    last_move: Instant,
 }
 
 impl TrackballCameraController {
@@ -221,12 +224,13 @@ impl TrackballCameraController {
             camera,
             down_pos: None,
             last_pos: Vec2f::default(),
+            last_move: Instant::now(),
         }
     }
 }
 
 impl CameraController for TrackballCameraController {
-    fn on_input(&mut self, dt: f32, event: InputEvent) {
+    fn on_input(&mut self, event: &InputEvent) {
         match event {
             crate::event::InputEvent::KeyboardInput(input) => match input.vk {
                 event::VirtualKeyCode::W => {}
@@ -239,12 +243,16 @@ impl CameraController for TrackballCameraController {
                 logical: _,
                 physical,
             } => {
+                // let last_time = self.last_move;
+                // self.last_move = Instant::now();
                 let last_pos = Vec2f::new(physical.x, physical.y);
                 let delta = last_pos - self.last_pos;
                 self.last_pos = last_pos;
                 if self.down_pos.is_none() {
                     return;
                 }
+                // let dt = (self.last_move - last_time).as_secs_f32();
+                let dt = 0.01f32;
 
                 let from = self.camera.from();
                 let to = self.camera.to();

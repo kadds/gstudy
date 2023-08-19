@@ -1,0 +1,17 @@
+[package]
+name = "gltf-viewer"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+core = {path = "../../core"}
+window = {path = "../../window"}
+gltfloader = {path = "../../gltfloader"}
+app = {path = "../../app"}
+env_logger = "0.10"
+egui-render = {path = "../../egui-render"}
+egui = "0.22.0"
+rfd = "0.11.4"
+

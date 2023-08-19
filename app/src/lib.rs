@@ -6,7 +6,6 @@ use core::{
 use std::{
     any::{Any, TypeId},
     cell::{Ref, RefCell},
-    collections::HashMap,
     rc::Rc,
     sync::{Arc, Mutex},
 };

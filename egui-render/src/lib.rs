@@ -48,7 +48,6 @@ pub struct EguiRenderer {
     frame: Option<EguiRenderFrame>,
     cursor: egui::CursorIcon,
     must_render: bool,
-    // ui_context: Option<Box<UIContext>>,
     ppi: f32,
     has_udpate: bool,
 }

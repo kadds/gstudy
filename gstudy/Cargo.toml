@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rfd = "0.11.4"
 core = {path = "../core"}
 winit-surface = {path = "../winit-surface"}
 gltfloader = {path = "../gltfloader"}

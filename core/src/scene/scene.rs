@@ -99,10 +99,6 @@ impl Scene {
         self.context.clone()
     }
 
-    // pub fn context_ref(&self) -> &RContext {
-    //     &self.context
-    // }
-
     pub fn set_main_camera(&self, camera: Arc<Camera>) {
         let mut c = self.cameras.lock().unwrap();
 
@@ -117,10 +113,6 @@ impl Scene {
             sorter.lock().unwrap().set_camera(camera.clone());
         }
     }
-
-    // pub fn main_camera(&self) -> Option<&Camera> {
-    //     c.cameras.get(0).map(|v| v.as_ref())
-    // }
 
     pub fn main_camera_ref(&self) -> Option<Arc<Camera>> {
         let c = self.cameras.lock().unwrap();
@@ -198,6 +190,22 @@ impl Scene {
         id
     }
 
+    pub fn extend(&self, scene: &Scene) {
+        scene.clear_inner();
+
+        let store = &scene.storage;
+        let keys: Vec<_> = store.iter().map(|k| *k.key()).collect();
+
+        for id in keys {
+            let (_, value) = store.remove(&id).unwrap();
+            self.add_with(value.object, value.layer);
+        }
+    }
+
+    fn clear_inner(&self) {
+        self.queue.lock().unwrap().clear();
+    }
+
     pub fn remove(&self, id: u64) -> bool {
         if let Some(obj) = self.storage.get(&id) {
             let q = self.queue.lock().unwrap();
@@ -213,6 +221,10 @@ impl Scene {
 
     pub fn remove_by_tag(&self, tag: TagId) {
         self.remove_if(|v| v.o().has_tag(tag));
+    }
+
+    pub fn remove_all(&self) {
+        self.remove_if(|v| true);
     }
 
     pub fn remove_if<F: Fn(&ObjectWrapper) -> bool>(&self, f: F) {

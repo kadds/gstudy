@@ -9,9 +9,7 @@ use core::types::{Color, Size, Vec4f};
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
-pub mod container;
 pub mod looper;
 pub mod statistics;
 pub mod window;

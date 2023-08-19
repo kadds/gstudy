@@ -32,6 +32,7 @@ pub struct Looper {
 
     auto_exit: bool,
     has_render_event: bool,
+    is_first_update: bool,
 }
 
 impl EventSender for LooperEventSource {
@@ -95,6 +96,7 @@ impl Looper {
             event_registry: LoopEventRegistry::default(),
             auto_exit: true,
             has_render_event: false,
+            is_first_update: true,
         }
     }
 
@@ -239,10 +241,15 @@ impl Looper {
                 let (_, d, ok) = self.frame.next_frame();
                 if ok {
                     if !self.has_render_event {
-                        let to_event: Box<dyn Any + Send> =
-                            Box::new(CEvent::PreUpdate(d.as_secs_f64()));
-                        let _ = event_proxy.send_event(to_event);
-                        ret = ControlFlow::Poll;
+                        if self.is_first_update {
+                            self.is_first_update = false;
+                            let _ = event_proxy.send_event(Box::new(CEvent::FirstSync));
+                        } else {
+                            let to_event: Box<dyn Any + Send> =
+                                Box::new(CEvent::PreUpdate(d.as_secs_f64()));
+                            let _ = event_proxy.send_event(to_event);
+                            ret = ControlFlow::Poll;
+                        }
                     }
                 }
             }

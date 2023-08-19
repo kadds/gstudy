@@ -1,4 +1,4 @@
 [workspace]
 members = ["./core", "./app", "./tshader", "./tshader-builder", "./gltfloader", "./window"
-    , "./egui-render", "examples/triangle", "examples/egui"]
+    , "./egui-render", "examples/triangle", "examples/egui", "examples/gltf-viewer"]
 resolver = "2"
