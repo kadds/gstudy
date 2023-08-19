@@ -154,7 +154,7 @@ impl BoundSphere {
 
 impl Bound for BoundSphere {
     fn in_frustum(&self, frustum: &Frustum) -> bool {
-        todo!()
+        true
     }
 }
 

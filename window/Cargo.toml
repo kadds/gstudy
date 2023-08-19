@@ -14,3 +14,4 @@ log = "0.4"
 webbrowser = "0.8"
 instant = "0.1.12"
 app = {path = "../app"}
+raw-window-handle = "0.5.2"

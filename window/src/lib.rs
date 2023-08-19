@@ -17,6 +17,7 @@ use app::container::{Container, LockResource};
 use app::plugin::{LooperPlugin, Plugin, PluginFactory};
 use app::AppEventProcessor;
 pub use looper::Looper;
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 pub use winit;
 mod util;
 
@@ -210,8 +211,22 @@ impl PluginFactory for WindowPluginFactory {
     }
 }
 
+pub struct RawWindow {
+    pub handle: RawWindowHandle,
+}
+
+unsafe impl HasRawWindowHandle for RawWindow {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        self.handle.clone()
+    }
+}
+
+unsafe impl Send for RawWindow {}
+unsafe impl Sync for RawWindow {}
+
 pub type WindowSize = LockResource<(Size, Size)>;
 pub type ClearColor = LockResource<Color>;
+pub type MainWindowHandle = RawWindow;
 
 pub struct WindowPlugin;
 
@@ -245,6 +260,9 @@ impl LooperPlugin for WindowLooperPlugin {
 
         let gpu = looper.create_window(window_builder, context);
 
+        container.register(RawWindow {
+            handle: looper.handle().unwrap(),
+        });
         container.register_arc(gpu);
 
         struct Process(Rc<RefCell<dyn app::plugin::Runner>>);

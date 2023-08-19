@@ -8,7 +8,6 @@ pub mod geometry;
 pub mod graph;
 pub mod material;
 pub mod render;
-pub mod resource;
 pub mod scene;
 pub mod types;
 pub mod util;

@@ -5,7 +5,7 @@ use crate::{
     context::{RContext, RContextRef, TagId},
     geometry::Geometry,
     material::Material,
-    types::{Vec3f, Vec4f},
+    types::{Size, Vec3f, Vec4f},
     util::StringIdAllocMap,
 };
 use std::{
@@ -85,7 +85,7 @@ impl Scene {
     }
 
     fn add_default_ui_camera(&mut self) {
-        let ui_camera = Arc::new(Camera::new(&self.context));
+        let ui_camera = Arc::new(Camera::new());
         ui_camera.make_orthographic(Vec4f::new(0f32, 0f32, 1f32, 1f32), 0.1f32, 10f32);
         ui_camera.look_at(
             Vec3f::new(0f32, 0f32, 1f32),
@@ -299,6 +299,15 @@ impl Scene {
             }
         }
         total_bytes
+    }
+
+    pub fn resize(&self, logical: &Size, view_size: &Size) {
+        let aspect = view_size.x as f32 / view_size.y as f32;
+        // self.ui_camera_ref().make_orthographic();
+        let c = self.cameras.lock().unwrap();
+        for camera in c.cameras.iter() {
+            camera.remake_perspective(aspect);
+        }
     }
 }
 

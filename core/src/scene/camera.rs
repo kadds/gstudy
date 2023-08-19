@@ -65,7 +65,7 @@ impl Debug for Camera {
 }
 
 impl Camera {
-    pub fn new(context: &RContext) -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Inner {
                 projection: Mat4x4f::identity(),

@@ -210,7 +210,7 @@ where
             .materials
             .entry(face_id)
             .and_modify(|v| *v += 1)
-            .or_insert(0);
+            .or_insert(1);
         if *v == 1 {
             self.new_material = true;
         }

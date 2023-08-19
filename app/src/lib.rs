@@ -1,14 +1,9 @@
 use core::{
-    context::{RContext, RContextRef},
+    context::RContextRef,
     event::{EventProcessor, EventSender, EventSource},
     scene::Scene,
 };
-use std::{
-    any::{Any, TypeId},
-    cell::{Ref, RefCell},
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
 use container::Container;
 use plugin::{Plugin, PluginFactory};
@@ -110,7 +105,7 @@ impl App {
                 event: &dyn Any,
             ) -> core::event::ProcessEventResult {
                 let context = &AppEventContext {
-                    source: source,
+                    source,
                     container: &self.container,
                 };
 
@@ -119,6 +114,16 @@ impl App {
                 }
                 for p in self.processors.borrow_mut().iter_mut() {
                     p.on_event(context, event);
+                }
+
+                if let Some(ev) = event.downcast_ref::<core::event::Event>() {
+                    if let core::event::Event::Resized { logical, physical } = ev {
+                        context
+                            .container
+                            .get::<Scene>()
+                            .unwrap()
+                            .resize(logical, physical);
+                    }
                 }
 
                 core::event::ProcessEventResult::Received

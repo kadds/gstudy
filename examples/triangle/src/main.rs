@@ -45,7 +45,7 @@ impl MainLogic {
         let obj = RenderObject::new(Box::new(geometry), material);
         scene.add(obj);
 
-        let camera = Camera::new(&scene.context());
+        let camera = Camera::new();
         camera.make_orthographic(Vec4f::new(1f32, -1f32, -1f32, 1f32), 0.1f32, 7f32);
         // camera.make_perspective(1f32, std::f32::consts::PI / 2f32, 0.01f32, 100f32);
 

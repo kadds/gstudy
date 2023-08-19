@@ -17,8 +17,6 @@ use winit::{
 
 use crate::{util, CEvent, DEvent, Event, Theme, WEvent};
 
-// pub type WindoSurface = LockResource<Option<WindowSurfaceFrame<'static>>>;
-
 pub struct Window {
     pub(crate) inner: winit::window::Window,
     pub(crate) backend: WGPUBackend,
@@ -103,7 +101,7 @@ impl Window {
                     }
                     self.frame = None;
                     log::debug!("post render");
-                    self.before_udpate(proxy);
+                    self.before_update(proxy);
                 }
                 core::event::Event::Resized { logical, physical } => {
                     self.frame = None;
@@ -113,7 +111,7 @@ impl Window {
         }
     }
 
-    fn before_udpate(&mut self, proxy: &dyn EventSender) {
+    fn before_update(&mut self, proxy: &dyn EventSender) {
         if self.has_resize_event {
             let size = self.inner.inner_size();
             let logical: LogicalSize<u32> = size.to_logical(self.inner.scale_factor());
@@ -140,13 +138,6 @@ impl Window {
                 if let WindowEvent::Resized(_) = &event {
                     let size = self.inner.inner_size();
                     self.size = Size::new(size.width.max(1), size.height.max(1));
-                    // let size = w.inner_size();
-                    // let logical: LogicalSize<u32> = size.to_logical(w.scale_factor());
-                    // log::info!("window resize {:?}", size);
-                    // CEvent::Resized {
-                    //     physical: Size::new(size.width.max(1), size.height.max(1)),
-                    //     logical: Size::new(logical.width.max(1), logical.height.max(1)),
-                    // }
                     self.has_resize_event = true;
                 }
 

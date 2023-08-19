@@ -2,7 +2,7 @@
 
 desktop:
 ```bash
-cargo run --bin gstudy
+cargo run --bin egui
 ```
 
 web:

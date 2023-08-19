@@ -163,6 +163,7 @@ impl TaskPoolBuilder {
             }),
             sender: tx,
         };
+        log::info!("create gltf taskpool {} threads", self.n);
 
         for _ in 0..self.n {
             let sd = pool.inner.clone();

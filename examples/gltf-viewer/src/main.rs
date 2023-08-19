@@ -1,19 +1,18 @@
 use core::{
     context::RContext,
-    geometry::{MeshBuilder, StaticGeometry},
-    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder},
     scene::{
         camera::{CameraController, TrackballCameraController},
-        Camera, RenderObject, Scene,
+        Camera, Scene,
     },
-    types::{Size, Vec3f, Vec4f},
+    types::{Size, Vec3f},
 };
 use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{container::Container, App, AppEventProcessor};
 use egui_render::EguiPluginFactory;
 use gltfloader::{GltfPluginFactory, Loader};
-use window::{HardwareRenderPluginFactory, WindowPluginFactory};
+use rfd::{FileDialog, MessageDialog};
+use window::{HardwareRenderPluginFactory, MainWindowHandle, WindowPluginFactory};
 
 #[derive(Default)]
 pub struct MainLogic {
@@ -23,8 +22,7 @@ pub struct MainLogic {
 
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
-        let camera = Camera::new(&scene.context());
-        // camera.make_orthographic(Vec4f::new(1f32, -1f32, -1f32, 1f32), 0.1f32, 7f32);
+        let camera = Camera::new();
         camera.make_perspective(1f32, std::f32::consts::PI / 2f32, 0.01f32, 100f32);
 
         camera.look_at(
@@ -75,6 +73,13 @@ impl AppEventProcessor for MainLogic {
                     s.extend(&scene);
 
                     s.set_main_camera(main_camera);
+                } else {
+                    let main_window = context.container.get::<MainWindowHandle>().unwrap();
+                    MessageDialog::new()
+                        .set_parent(&*main_window)
+                        .set_title(&res.name)
+                        .set_description(&res.error_string)
+                        .show();
                 }
             }
         }
@@ -88,7 +93,9 @@ impl MainLogic {
                 if ui.button("Load scene").clicked() {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
-                        let file = rfd::FileDialog::new()
+                        let main_window = container.get::<MainWindowHandle>().unwrap();
+                        let file = FileDialog::new()
+                            .set_parent(&*main_window)
                             .add_filter("gltf", &["gltf", "glb"])
                             .set_title("load gltf file")
                             .pick_file();

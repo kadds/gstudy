@@ -10,6 +10,7 @@ use std::{
 };
 
 use instant::Duration;
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use winit::{
     event::StartCause,
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
@@ -108,6 +109,12 @@ impl Looper {
         LooperEventSource {
             event_proxy: self.event_proxy.clone(),
         }
+    }
+
+    pub fn handle(&self) -> Option<RawWindowHandle> {
+        self.main_window
+            .as_ref()
+            .map(|v| v.borrow().inner.raw_window_handle())
     }
 
     pub fn create_window(&mut self, b: WindowBuilder, context: RContextRef) -> Arc<WGPUResource> {

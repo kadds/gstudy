@@ -144,7 +144,7 @@ impl UIMesh {
                     gmesh.add_indices(&m.indices);
                     m.texture_id
                 }
-                egui::epaint::Primitive::Callback(_) => todo!(),
+                egui::epaint::Primitive::Callback(_) => panic!("unsupported primitive"),
             };
 
             ret.push((gmesh.build(), texture_id));
