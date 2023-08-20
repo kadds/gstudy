@@ -3,8 +3,8 @@ use dashmap::DashMap;
 
 use crate::{
     context::{RContextRef, TagId},
-    geometry::Geometry,
     material::Material,
+    mesh::Geometry,
     types::{Size, Vec3f, Vec4f},
 };
 use std::{
@@ -287,12 +287,16 @@ impl Scene {
             let object = self.storage.get(id).unwrap();
             let object = object.o();
             let mesh = object.geometry().mesh();
-            let indices = mesh.indices();
+            let indices = mesh.indices_view();
             if filter(&object) {
                 total_bytes = (
-                    total_bytes.0 + indices.len() as u64,
-                    total_bytes.1 + mesh.vertices().len() as u64,
-                    total_bytes.2 + mesh.vertices_props().len() as u64,
+                    total_bytes.0 + indices.map(|v| v.len() as u64).unwrap_or_default(),
+                    total_bytes.1
+                        + mesh
+                            .vertices_view()
+                            .map(|v| v.len() as u64)
+                            .unwrap_or_default(),
+                    total_bytes.2 + mesh.properties_view().len() as u64,
                 );
             }
         }

@@ -4,8 +4,8 @@ use core::{
     backends::wgpu_backend::WGPUResource,
     context::{RContext, TagId},
     event::{EventSender, EventSource, InputEvent, ProcessEventResult},
-    geometry::StaticGeometry,
     material::{Material, MaterialBuilder},
+    mesh::StaticGeometry,
     scene::{RenderObject, Scene},
     types::Size,
 };

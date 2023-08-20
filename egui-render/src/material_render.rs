@@ -96,7 +96,6 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             .prepare(ctx.gpu, index_bytes, vertex_props_bytes);
 
         let default_pipeline = inner.commands.add_pipeline(inner.pipeline.pass[0].clone());
-
         let container = ctx.scene.get_container();
 
         // copy staging buffer
@@ -104,8 +103,8 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
             let object = container.get(id).unwrap();
             let object = object.o();
             let mesh = object.geometry().mesh();
-            let vertices = mesh.vertices_props();
-            let indices = mesh.indices();
+            let vertices = mesh.properties_view();
+            let indices = mesh.indices_view().unwrap();
 
             let (index_range, vertex_range) = inner
                 .main_buffers
@@ -116,7 +115,7 @@ impl MaterialRenderer for EguiMaterialHardwareRenderer {
                 index_range,
                 vertex_range,
                 0..0,
-                mesh.index_count(),
+                mesh.index_count().unwrap(),
             );
             command_builder.set_pipeline(default_pipeline);
             command_builder.set_bind_groups(&[bg.clone()]);

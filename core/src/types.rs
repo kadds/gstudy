@@ -46,6 +46,11 @@ pub trait Bound {
     fn in_frustum(&self, frustum: &Frustum) -> bool;
 }
 
+pub enum Boundary {
+    AABB(BoundBox),
+    OBB,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct BoundBox {
     val: Option<(Vec3f, Vec3f)>,

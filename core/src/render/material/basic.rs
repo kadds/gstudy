@@ -273,16 +273,16 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
                 let (index, vertex, vertex_props) = merger.dynamic_mesh_buffer.copy_stage(
                     encoder,
                     gpu,
-                    mesh.indices(),
-                    mesh.vertices(),
-                    mesh.vertices_props(),
+                    mesh.indices_view().unwrap(),
+                    mesh.vertices_view().unwrap(),
+                    mesh.properties_view(),
                 );
                 let mut cmd = mgr.dynamic_commands.new_index_draw_command(
                     *id,
                     index,
                     vertex,
                     vertex_props,
-                    mesh.index_count(),
+                    mesh.index_count().unwrap(),
                 );
                 cmd.set_pipeline(dynamic_pipeline);
                 cmd
@@ -291,16 +291,16 @@ impl MaterialRenderer for BasicMaterialHardwareRenderer {
                     gpu,
                     *id,
                     object.geometry().mesh_version(),
-                    mesh.indices(),
-                    mesh.vertices(),
-                    mesh.vertices_props(),
+                    mesh.indices_view().unwrap(),
+                    mesh.vertices_view().unwrap(),
+                    mesh.properties_view(),
                 );
                 let mut cmd = mgr.static_commands.new_index_draw_command(
                     *id,
                     index,
                     vertex,
                     vertex_props,
-                    mesh.index_count(),
+                    mesh.index_count().unwrap(),
                 );
                 cmd.set_pipeline(static_pipeline);
                 cmd

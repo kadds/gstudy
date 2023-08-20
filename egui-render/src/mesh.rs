@@ -7,7 +7,7 @@ use std::{
 use core::{
     backends::wgpu_backend::WGPUResource,
     context::ResourceRef,
-    geometry::{Mesh, MeshBuilder},
+    mesh::{builder::MeshBuilder, Mesh},
     types::{Rectu, Size, Vec2},
     util::any_as_u8_slice_array,
 };
@@ -133,21 +133,31 @@ impl UIMesh {
             clip.z = clip.z.min(view_size.x - clip.x);
             clip.w = clip.w.min(view_size.y - clip.y);
 
-            let mut gmesh = MeshBuilder::new();
-            gmesh.set_no_position();
-            let mut gmesh = gmesh.finish_props();
+            let mut mesh_builder = MeshBuilder::new();
+            mesh_builder.add_property(core::mesh::MeshPropertyType::Pos2);
+            mesh_builder.add_property(core::mesh::MeshPropertyType::TexCoord);
+            mesh_builder.add_property(core::mesh::MeshPropertyType::ColorUint);
 
-            gmesh.set_clip(clip);
+            mesh_builder.set_clip(clip);
             let texture_id = match mesh.primitive {
                 egui::epaint::Primitive::Mesh(m) => {
-                    gmesh.set_raw_props(any_as_u8_slice_array(&m.vertices));
-                    gmesh.add_indices(&m.indices);
+                    if m.vertices.len() == 0 {
+                        continue;
+                    }
+                    unsafe {
+                        mesh_builder.add_raw_properties_vertices(
+                            any_as_u8_slice_array(&m.vertices),
+                            m.vertices.len(),
+                        );
+                    }
+                    mesh_builder.add_indices32(&m.indices);
                     m.texture_id
                 }
                 egui::epaint::Primitive::Callback(_) => panic!("unsupported primitive"),
             };
+            mesh_builder.add_position_vertices_none();
 
-            ret.push((gmesh.build(), texture_id));
+            ret.push((mesh_builder.build().unwrap(), texture_id));
         }
 
         (ret, rebuild_textures)

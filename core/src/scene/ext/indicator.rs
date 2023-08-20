@@ -4,11 +4,10 @@ use wgpu::PrimitiveState;
 
 use crate::{
     context::RContext,
-    geometry::{MeshBuilder, StaticGeometry},
     material::{basic::BasicMaterialFaceBuilder, MaterialBuilder},
+    mesh::{builder::MeshBuilder, StaticGeometry},
     scene::RenderObject,
     types::{Vec3f, Vec4f},
-    util::any_as_u8_slice_array,
 };
 
 pub struct IndicatorBuilder {}
@@ -20,8 +19,7 @@ impl IndicatorBuilder {
 
     pub fn build(self, context: &RContext) -> RenderObject {
         let mut mesh_builder = MeshBuilder::new();
-        mesh_builder.add_props(crate::geometry::MeshCoordType::Color);
-        let mut data_builder = mesh_builder.finish_props();
+        mesh_builder.add_property(crate::mesh::MeshPropertyType::Color);
         let r = Vec4f::new(1f32, 0f32, 0f32, 1f32);
         let g = Vec4f::new(0f32, 1f32, 0f32, 1f32);
         let b = Vec4f::new(0f32, 0f32, 1f32, 1f32);
@@ -33,15 +31,14 @@ impl IndicatorBuilder {
         let y = Vec3f::new(0f32, len, 0f32);
         let z = Vec3f::new(0f32, 0f32, len);
 
-        data_builder.add_vertices_position(&[z0, x, z0, y, z0, z]);
-        data_builder.add_indices(&[0, 1, 2, 3, 4, 5]);
-        data_builder.add_vertices_prop(
-            crate::geometry::MeshCoordType::Color,
-            any_as_u8_slice_array(&[r, r, g, g, b, b]),
-            16,
-        );
+        mesh_builder.add_position_vertices3(&[z0, x, z0, y, z0, z]);
+        // mesh_builder.add_indices16(&[0, 1, 2, 3, 4, 5]);
+        mesh_builder.add_indices_none();
+        mesh_builder
+            .add_property_vertices(crate::mesh::MeshPropertyType::Color, &[r, r, g, g, b, b]);
 
-        let mesh = data_builder.build();
+        let mesh = mesh_builder.build().unwrap();
+
         let face = BasicMaterialFaceBuilder::new().with_color().build();
         let m = MaterialBuilder::default()
             .with_face(face)

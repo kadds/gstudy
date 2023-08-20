@@ -1,7 +1,7 @@
 use core::{
     context::RContext,
-    geometry::{MeshBuilder, StaticGeometry},
     material::{basic::BasicMaterialFaceBuilder, MaterialBuilder},
+    mesh::{builder::MeshBuilder, StaticGeometry},
     scene::{Camera, RenderObject, Scene},
     types::{Size, Vec3f, Vec4f},
     util::any_as_u8_slice_array,
@@ -16,25 +16,23 @@ pub struct MainLogic {}
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
         let mut builder = MeshBuilder::new();
-        builder.add_props(core::geometry::MeshCoordType::Color);
-        let mut data_builder = builder.finish_props();
-        data_builder.add_vertices_position(&[
+        builder.add_property(core::mesh::MeshPropertyType::Color);
+        builder.add_position_vertices3(&[
             Vec3f::new(0f32, -0.5f32, 0f32),
             Vec3f::new(-0.7f32, 0.7f32, 0f32),
             Vec3f::new(0.7f32, 0.7f32, 0f32),
         ]);
-        data_builder.add_indices(&[0, 1, 2]);
-        data_builder.add_vertices_prop(
-            core::geometry::MeshCoordType::Color,
-            any_as_u8_slice_array(&[
+        builder.add_indices32(&[0, 1, 2]);
+        builder.add_property_vertices(
+            core::mesh::MeshPropertyType::Color,
+            &[
                 Vec4f::new(1f32, 0f32, 0f32, 1f32),
                 Vec4f::new(0f32, 1f32, 0f32, 1f32),
                 Vec4f::new(0f32, 0f32, 1f32, 1f32),
-            ]),
-            16,
+            ],
         );
 
-        let mesh = data_builder.build();
+        let mesh = builder.build().unwrap();
 
         let geometry = StaticGeometry::new(Arc::new(mesh));
         let basic_material_builder = BasicMaterialFaceBuilder::new().with_color();

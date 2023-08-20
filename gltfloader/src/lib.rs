@@ -5,13 +5,14 @@ use nalgebra::Unit;
 mod taskpool;
 
 use core::backends::wgpu_backend::WGPUResource;
+use core::mesh::builder::MeshBuilder;
 use std::any::Any;
 
 use core::context::{RContext, RContextRef, ResourceRef, TagId};
-use core::geometry::StaticGeometry;
-use core::geometry::{Geometry, MeshBuilder, MeshCoordType};
 use core::material::basic::BasicMaterialFaceBuilder;
 use core::material::{Material, MaterialBuilder};
+use core::mesh::StaticGeometry;
+use core::mesh::{Geometry, MeshPropertyType};
 use core::render::default_blender;
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
 use core::types::{BoundBox, Color, Size, Vec2f, Vec3f, Vec4f};
@@ -252,6 +253,165 @@ pub struct ParseContext<'a> {
     res: LoadResult,
 }
 
+fn parse_primitive_indices(
+    p: &gltf::Primitive,
+    mesh_builder: &mut MeshBuilder,
+    buf_view: &GltfBufferView,
+    res: &mut LoadResult,
+) -> anyhow::Result<()> {
+    if let Some(indices) = p.indices() {
+        match indices.dimensions() {
+            gltf::accessor::Dimensions::Scalar => {}
+            _ => {
+                anyhow::bail!("dimension for indices invalid");
+            }
+        }
+
+        let mut kind = MaterialInputKind::None;
+
+        for (semantic, _) in p.attributes() {
+            match semantic {
+                gltf::Semantic::Colors(_) => {
+                    mesh_builder.add_property(MeshPropertyType::Color);
+                }
+                gltf::Semantic::TexCoords(_) => {
+                    mesh_builder.add_property(MeshPropertyType::TexCoord);
+                }
+                _ => (),
+            }
+        }
+
+        match indices.data_type() {
+            gltf::accessor::DataType::U8 => {
+                let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
+                let mut input = Vec::new();
+                for d in any_as_x_slice_array::<u8, _>(&buf) {
+                    input.push(*d as u32);
+                }
+                res.total_indices += (buf.len() / std::mem::size_of::<u8>()) as u64;
+                mesh_builder.add_indices32(&input);
+            }
+            gltf::accessor::DataType::U16 => {
+                let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
+
+                let mut input = Vec::new();
+                for d in any_as_x_slice_array::<u16, _>(&buf) {
+                    input.push(*d as u32);
+                }
+                res.total_indices += (buf.len() / std::mem::size_of::<u16>()) as u64;
+                mesh_builder.add_indices32(&input);
+            }
+            gltf::accessor::DataType::U32 => {
+                let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
+                mesh_builder.add_indices32(any_as_x_slice_array(&buf));
+                res.total_indices += (buf.len() / std::mem::size_of::<u32>()) as u64;
+            }
+            t => {
+                anyhow::bail!("data type {:?} for indices is not supported", t)
+            }
+        };
+    } else {
+        mesh_builder.add_indices_none();
+    }
+    Ok(())
+}
+
+fn parse_primitive_vertices(
+    p: &gltf::Primitive,
+    mesh_builder: &mut MeshBuilder,
+    buf_view: &GltfBufferView,
+    res: &mut LoadResult,
+) -> anyhow::Result<MaterialInputKind> {
+    let mut kind = MaterialInputKind::None;
+
+    for (semantic, accessor) in p.attributes() {
+        match semantic {
+            gltf::Semantic::Extras(ext) => {
+                log::info!("extra {}", ext);
+            }
+            gltf::Semantic::Positions => {
+                let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
+                match accessor.data_type() {
+                    gltf::accessor::DataType::F32 => {}
+                    _ => {
+                        anyhow::bail!("position invalid data type");
+                    }
+                };
+                match accessor.dimensions() {
+                    gltf::accessor::Dimensions::Vec3 => {
+                        let data: &[Vec3f] = any_as_x_slice_array(buf);
+                        res.total_vertices += data.len() as u64;
+                        mesh_builder.add_position_vertices3(data);
+                    }
+                    _ => {
+                        anyhow::bail!("position should be vec3f");
+                    }
+                };
+            }
+            gltf::Semantic::Normals => {}
+            gltf::Semantic::Tangents => {}
+            gltf::Semantic::Colors(_index) => {
+                kind = kind.add_color().unwrap();
+
+                let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
+                match accessor.data_type() {
+                    gltf::accessor::DataType::F32 => {}
+                    _ => {
+                        anyhow::bail!("color invalid data type");
+                    }
+                };
+                match accessor.dimensions() {
+                    gltf::accessor::Dimensions::Vec4 => {
+                        let data: &[Vec4f] = any_as_x_slice_array(buf);
+                        mesh_builder.add_property_vertices(MeshPropertyType::Color, data);
+                    }
+                    gltf::accessor::Dimensions::Vec3 => {
+                        let data: &[Vec3f] = any_as_x_slice_array(buf);
+                        let mut trans_data = Vec::new();
+                        for block in data {
+                            trans_data.push(Vec4f::new(block[0], block[1], block[2], 1f32));
+                        }
+                        mesh_builder.add_property_vertices(MeshPropertyType::Color, &trans_data);
+                    }
+                    _ => {
+                        anyhow::bail!("color should be vec3f/vec4f");
+                    }
+                };
+            }
+            gltf::Semantic::TexCoords(_index) => {
+                if let Some(v) = kind.add_texture() {
+                    kind = v;
+                }
+
+                let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
+                match accessor.data_type() {
+                    gltf::accessor::DataType::F32 => {}
+                    _ => {
+                        anyhow::bail!("texcoord invalid data type");
+                    }
+                };
+                match accessor.dimensions() {
+                    gltf::accessor::Dimensions::Vec2 => {}
+                    _ => {
+                        anyhow::bail!("texcoord should be vec2f");
+                    }
+                };
+
+                let f = any_as_x_slice_array(&buf);
+                let mut data = Vec::new();
+                for block in f.chunks(2) {
+                    data.push(Vec2f::new(block[0], block[1]));
+                }
+
+                mesh_builder.add_property_vertices(MeshPropertyType::TexCoord, &data);
+            }
+            gltf::Semantic::Joints(_index) => {}
+            gltf::Semantic::Weights(_index) => {}
+        }
+    }
+    Ok(kind)
+}
+
 impl<'a> ParseContext<'a> {
     fn parse_mesh(
         &mut self,
@@ -271,167 +431,11 @@ impl<'a> ParseContext<'a> {
 
             bound_box = &bound_box + &bb;
 
-            let mut gmesh = MeshBuilder::new();
-            let indices = p.indices().unwrap();
-            match indices.dimensions() {
-                gltf::accessor::Dimensions::Scalar => {}
-                _ => {
-                    anyhow::bail!("dimension for indices invalid");
-                }
-            }
+            let mut mesh_builder = MeshBuilder::new();
 
-            let mut kind = MaterialInputKind::None;
+            parse_primitive_indices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
+            let kind = parse_primitive_vertices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
 
-            let mut no_position = true;
-            for (semantic, _) in p.attributes() {
-                match semantic {
-                    gltf::Semantic::Extras(_) => {}
-                    gltf::Semantic::Positions => {
-                        no_position = false;
-                    }
-                    gltf::Semantic::Normals => {
-                        // gmesh.add_props(MeshCoordType::TexNormal);
-                    }
-                    gltf::Semantic::Tangents => {}
-                    gltf::Semantic::Colors(_) => {
-                        gmesh.add_props(MeshCoordType::Color);
-                    }
-                    gltf::Semantic::TexCoords(_) => {
-                        gmesh.add_props(MeshCoordType::TexCoord);
-                    }
-                    gltf::Semantic::Joints(_) => {}
-                    gltf::Semantic::Weights(_) => {}
-                }
-            }
-            if no_position {
-                gmesh.set_no_position();
-            }
-            let mut gmesh = gmesh.finish_props();
-
-            match indices.data_type() {
-                gltf::accessor::DataType::U8 => {
-                    let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
-                    let mut input = Vec::new();
-                    for d in any_as_x_slice_array::<u8, _>(&buf) {
-                        input.push(*d as u32);
-                    }
-                    self.res.total_indices += (buf.len() / std::mem::size_of::<u8>()) as u64;
-                    gmesh.add_indices(&input);
-                }
-                gltf::accessor::DataType::U16 => {
-                    let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
-
-                    let mut input = Vec::new();
-                    for d in any_as_x_slice_array::<u16, _>(&buf) {
-                        input.push(*d as u32);
-                    }
-                    self.res.total_indices += (buf.len() / std::mem::size_of::<u16>()) as u64;
-                    gmesh.add_indices(&input);
-                }
-                gltf::accessor::DataType::U32 => {
-                    let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
-                    gmesh.add_indices(any_as_x_slice_array(&buf));
-                    self.res.total_indices += (buf.len() / std::mem::size_of::<u32>()) as u64;
-                }
-                t => {
-                    anyhow::bail!("data type {:?} for indices is not supported", t)
-                }
-            }
-
-            for (semantic, accessor) in p.attributes() {
-                match semantic {
-                    gltf::Semantic::Extras(ext) => {
-                        log::info!("extra {}", ext);
-                    }
-                    gltf::Semantic::Positions => {
-                        let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
-                        match accessor.data_type() {
-                            gltf::accessor::DataType::F32 => {}
-                            _ => {
-                                anyhow::bail!("position invalid data type");
-                            }
-                        };
-                        match accessor.dimensions() {
-                            gltf::accessor::Dimensions::Vec3 => {}
-                            _ => {
-                                anyhow::bail!("position should be vec3f");
-                            }
-                        };
-                        let f = any_as_x_slice_array(&buf);
-                        let mut data = Vec::new();
-                        for block in f.chunks(3) {
-                            data.push(Vec3f::new(block[0], block[1], block[2]));
-                        }
-
-                        gmesh.add_vertices_position(&data);
-
-                        self.res.total_vertices += data.len() as u64;
-                    }
-                    gltf::Semantic::Normals => {}
-                    gltf::Semantic::Tangents => {}
-                    gltf::Semantic::Colors(_index) => {
-                        kind = kind.add_color().unwrap();
-
-                        let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
-                        match accessor.data_type() {
-                            gltf::accessor::DataType::F32 => {}
-                            _ => {
-                                anyhow::bail!("color invalid data type");
-                            }
-                        };
-                        match accessor.dimensions() {
-                            gltf::accessor::Dimensions::Vec4 => {}
-                            _ => {
-                                anyhow::bail!("color should be vec3f");
-                            }
-                        };
-                        let f = any_as_x_slice_array(&buf);
-                        let mut data = Vec::new();
-                        for block in f.chunks(4) {
-                            data.push(Vec4f::new(block[0], block[1], block[2], block[3]));
-                        }
-
-                        gmesh.add_vertices_prop(
-                            MeshCoordType::Color,
-                            any_as_u8_slice_array(&data),
-                            4 * 4,
-                        );
-                    }
-                    gltf::Semantic::TexCoords(_index) => {
-                        if let Some(v) = kind.add_texture() {
-                            kind = v;
-                        }
-
-                        let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
-                        match accessor.data_type() {
-                            gltf::accessor::DataType::F32 => {}
-                            _ => {
-                                anyhow::bail!("texcoord invalid data type");
-                            }
-                        };
-                        match accessor.dimensions() {
-                            gltf::accessor::Dimensions::Vec2 => {}
-                            _ => {
-                                anyhow::bail!("texcoord should be vec2f");
-                            }
-                        };
-
-                        let f = any_as_x_slice_array(&buf);
-                        let mut data = Vec::new();
-                        for block in f.chunks(2) {
-                            data.push(Vec2f::new(block[0], block[1]));
-                        }
-
-                        gmesh.add_vertices_prop(
-                            MeshCoordType::TexCoord,
-                            any_as_u8_slice_array(&data),
-                            4 * 2,
-                        );
-                    }
-                    gltf::Semantic::Joints(_index) => {}
-                    gltf::Semantic::Weights(_index) => {}
-                }
-            }
             let color: Color = p
                 .material()
                 .pbr_metallic_roughness()
@@ -441,8 +445,8 @@ impl<'a> ParseContext<'a> {
             let idx = p.material().index();
 
             let material = material_map.prepare_kind(idx, kind);
-            let mut g = StaticGeometry::new(Arc::new(gmesh.build()));
-            g.set_attribute(core::geometry::Attribute::ConstantColor, Arc::new(color));
+            let mut g = StaticGeometry::new(Arc::new(mesh_builder.build()?));
+            g.set_attribute(core::mesh::Attribute::ConstantColor, Arc::new(color));
             g = g.with_transform(transform.clone());
             let mut obj = RenderObject::new(Box::new(g), material);
             obj.set_name(mesh.name().unwrap_or_default());
@@ -451,7 +455,7 @@ impl<'a> ParseContext<'a> {
 
             self.scene.add(obj);
         }
-        log::info!("mesh {:?} {:?}", mesh.name(), transform);
+        log::info!("load mesh {:?} transform {:?}", mesh.name(), transform);
 
         Ok(bound_box)
     }
