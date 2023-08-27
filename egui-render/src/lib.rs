@@ -219,7 +219,7 @@ impl EguiRenderer {
             let material = ui_materials.entry(texture_id).or_insert_with(|| {
                 let t = ui_textures.get(texture_id);
                 MaterialBuilder::default()
-                    .with_face(EguiMaterialFaceBuilder::default().with_texture(t).build())
+                    .face(EguiMaterialFaceBuilder::default().with_texture(t).build())
                     .build(&scene.context())
             });
 

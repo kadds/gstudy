@@ -22,6 +22,10 @@ impl MeshBuilder {
         }
     }
 
+    pub fn has_property(&mut self, property: MeshPropertyType) -> bool {
+        self.properties.contains(&property)
+    }
+
     pub fn add_property(&mut self, property: MeshPropertyType) {
         if self.mesh.is_some() {
             panic!("please modify property before add vertex data")

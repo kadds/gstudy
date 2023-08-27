@@ -15,7 +15,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use wgpu::{
-    util::{DeviceExt, StagingBelt},
+    util::{BufferInitDescriptor, DeviceExt, StagingBelt},
     *,
 };
 
@@ -373,6 +373,14 @@ impl WGPUResource {
             size: std::mem::size_of::<T>() as u64,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        })
+    }
+
+    pub(crate) fn new_wvp_buffer_from(&self, label: Option<&str>, data: &[u8]) -> wgpu::Buffer {
+        self.device.create_buffer_init(&BufferInitDescriptor {
+            label,
+            usage: BufferUsages::UNIFORM,
+            contents: data,
         })
     }
 

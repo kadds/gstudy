@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::context::RContext;
+use crate::context::{RContext, ResourceRef};
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub struct MaterialId(u64);
@@ -23,6 +23,8 @@ impl MaterialId {
 pub trait MaterialFace: Any + Sync + Send + Debug {
     fn sort_key(&self) -> u64;
     fn hash_key(&self) -> u64;
+    fn material_data(&self) -> &[u8];
+    fn has_alpha_test(&self) -> bool;
 }
 
 #[derive(Debug)]
@@ -31,7 +33,6 @@ pub struct Material {
     name: String,
     primitive: wgpu::PrimitiveState,
     blend: Option<wgpu::BlendState>,
-    alpha_test: Option<f32>,
 
     face: Box<dyn MaterialFace>, // material face
     cached_hash: u64,
@@ -48,12 +49,13 @@ impl Material {
     pub fn blend(&self) -> Option<&wgpu::BlendState> {
         self.blend.as_ref()
     }
-    pub fn alpha_test(&self) -> Option<f32> {
-        self.alpha_test
-    }
 
     pub fn is_transparent(&self) -> bool {
         self.blend.is_some()
+    }
+
+    pub fn has_alpha_test(&self) -> bool {
+        self.face.has_alpha_test()
     }
 
     pub fn id(&self) -> MaterialId {
@@ -84,7 +86,6 @@ pub struct MaterialBuilder {
     name: String,
     primitive: wgpu::PrimitiveState,
     blend: Option<wgpu::BlendState>,
-    alpha_test: Option<f32>,
     face: Option<Box<dyn MaterialFace>>,
 }
 
@@ -94,33 +95,27 @@ impl Clone for MaterialBuilder {
             name: "".to_owned(),
             primitive: self.primitive,
             blend: self.blend,
-            alpha_test: self.alpha_test,
             face: None,
         }
     }
 }
 
 impl MaterialBuilder {
-    pub fn with_name<S: Into<String>>(mut self, name: S) -> Self {
+    pub fn name<S: Into<String>>(mut self, name: S) -> Self {
         self.name = name.into();
         self
     }
-    pub fn with_blend(mut self, blend: wgpu::BlendState) -> Self {
+    pub fn blend(mut self, blend: wgpu::BlendState) -> Self {
         self.blend = Some(blend);
         self
     }
-    pub fn with_primitive(mut self, primitive: wgpu::PrimitiveState) -> Self {
+    pub fn primitive(mut self, primitive: wgpu::PrimitiveState) -> Self {
         self.primitive = primitive;
         self
     }
 
-    pub fn with_face<MF: MaterialFace>(mut self, face: MF) -> Self {
+    pub fn face<MF: MaterialFace>(mut self, face: MF) -> Self {
         self.face = Some(Box::new(face));
-        self
-    }
-
-    pub fn with_alpha_test(mut self, cut: f32) -> Self {
-        self.alpha_test = Some(cut);
         self
     }
 
@@ -140,7 +135,6 @@ impl MaterialBuilder {
             name: self.name,
             id: MaterialId::new(context.alloc_material_id()),
             primitive: self.primitive,
-            alpha_test: self.alpha_test,
             blend: self.blend,
             face,
             cached_hash,
@@ -151,3 +145,29 @@ impl MaterialBuilder {
 pub trait MaterialShader: Any + Sync + Send + Debug + 'static {}
 
 pub mod basic;
+
+#[derive(Debug, Default, Clone)]
+pub enum MaterialMap<T> {
+    #[default]
+    None,
+    Constant(T),
+    PreVertex,
+    Texture(ResourceRef),
+}
+
+impl<T> MaterialMap<T> {
+    pub fn is_texture(&self) -> bool {
+        if let Self::Texture(_) = self {
+            return true;
+        }
+        false
+    }
+
+    pub fn sort_key(&self) -> u64 {
+        if let Self::Texture(texture) = &self {
+            texture.id()
+        } else {
+            0
+        }
+    }
+}

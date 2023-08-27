@@ -1,6 +1,6 @@
 use core::{
     context::RContext,
-    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder},
+    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
     mesh::{builder::MeshBuilder, StaticGeometry},
     scene::{Camera, RenderObject, Scene},
     types::{Size, Vec3f, Vec4f},
@@ -34,9 +34,11 @@ impl MainLogic {
         let mesh = builder.build().unwrap();
 
         let geometry = StaticGeometry::new(Arc::new(mesh));
-        let basic_material_builder = BasicMaterialFaceBuilder::new().with_color();
+        let basic_material_builder =
+            BasicMaterialFaceBuilder::new().texture(MaterialMap::PreVertex);
+
         let material = MaterialBuilder::default()
-            .with_face(basic_material_builder.build())
+            .face(basic_material_builder.build())
             .build(&scene.context());
 
         let obj = RenderObject::new(Box::new(geometry), material);

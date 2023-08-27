@@ -13,7 +13,7 @@ use crate::{
         pass::*,
         RenderPassBuilder,
     },
-    material::{basic::*, Material, MaterialId},
+    material::{basic::*, Material, MaterialFace, MaterialId},
     mesh::Mesh,
     render::{
         common::FramedCache, resolve_pipeline, ColorTargetBuilder, PipelinePassResource,
@@ -29,7 +29,7 @@ pub struct MaterialGpuResource {
     global_bind_group: wgpu::BindGroup,
 
     material_bind_buffers: FramedCache<MaterialId, wgpu::Buffer>,
-    bind_groups: FramedCache<MaterialId, wgpu::BindGroup>,
+    bind_groups: FramedCache<MaterialId, Option<wgpu::BindGroup>>,
 
     template: Arc<Vec<tshader::Pass>>,
     pipeline: PipelinePassResource,
@@ -57,21 +57,8 @@ pub struct BasicMaterialHardwareRenderer {
 
 fn create_materia_buffer(material: &Material, gpu: &WGPUResource) -> wgpu::Buffer {
     let mat = material.face_by::<BasicMaterialFace>();
-    if let Some(alpha) = material.alpha_test() {
-        let buf = gpu.new_wvp_buffer::<ConstParameterWithAlpha>(Some("basic"));
-        let w = ConstParameterWithAlpha {
-            color: mat.color(),
-            alpha,
-            _pad: Vec3f::zeros(),
-        };
-        gpu.queue().write_buffer(&buf, 0, any_as_u8_slice(&w));
-        buf
-    } else {
-        let buf = gpu.new_wvp_buffer::<ConstParameter>(Some("basic"));
-        let w = ConstParameter { color: mat.color() };
-        gpu.queue().write_buffer(&buf, 0, any_as_u8_slice(&w));
-        buf
-    }
+    let data = mat.material_data();
+    gpu.new_wvp_buffer_from(Some("basic material buffer"), data)
 }
 
 fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> ObjectBuffer {
@@ -175,32 +162,43 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                 mgr.bind_groups.get_or(material.id(), |_| {
                     let b = mgr.material_bind_buffers.get_mut(&material.id()).unwrap();
                     let mut entries = vec![];
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: b,
-                            offset: 0,
-                            size: None,
-                        }),
-                    });
-
-                    if let Some(texture) = mat.texture() {
-                        let sampler = mat.sampler().unwrap();
+                    if b.size() != 0 {
                         entries.push(wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(sampler.sampler()),
-                        });
-                        entries.push(wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: b,
+                                offset: 0,
+                                size: None,
+                            }),
                         });
                     }
 
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    match &mat.texture {
+                        crate::material::MaterialMap::Texture(texture) => {
+                            let sampler = mat.sampler.as_ref().unwrap();
+                            entries.push(wgpu::BindGroupEntry {
+                                binding: entries.len() as u32,
+                                resource: wgpu::BindingResource::Sampler(sampler.sampler()),
+                            });
+                            entries.push(wgpu::BindGroupEntry {
+                                binding: entries.len() as u32,
+                                resource: wgpu::BindingResource::TextureView(
+                                    texture.texture_view(),
+                                ),
+                            });
+                        }
+                        _ => (),
+                    }
+
+                    if entries.len() == 0 {
+                        return None;
+                    }
+
+                    Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("basic material"),
                         layout: &mgr.pipeline.pass[0].get_bind_group_layout(1),
                         entries: &entries,
-                    })
+                    }))
                 });
             }
         }
@@ -224,7 +222,9 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                 pass.set_pipeline(mgr.pipeline.pass[0].render());
 
                 pass.set_bind_group(0, &mgr.global_bind_group, &[]); // camera bind group
-                pass.set_bind_group(1, material_bind_group, &[]); // material bind group
+                if let Some(b) = material_bind_group {
+                    pass.set_bind_group(1, b, &[]); // material bind group
+                }
 
                 // object bind_group
                 for id in objects {
@@ -291,7 +291,7 @@ impl BasicMaterialHardwareRenderer {
 
         let key = material.hash_key();
         inner.material_pipelines_cache.get_mut_or(key, |_| {
-            let variants = material.face_by::<BasicMaterialFace>().variants();
+            let variants = &material.face_by::<BasicMaterialFace>().variants;
             let template = inner.tech.register_variant(gpu.device(), variants).unwrap();
 
             let mut ins = RenderDescriptorObject::new();

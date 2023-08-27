@@ -1,0 +1,14 @@
+[[pass]]
+index = 0
+name = "shadow"
+source = "shadow.wgsl"
+binding = ["pre_camera"]
+camera = "D3"
+shaders = ["vs"]
+variants = { excludes = [], exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"], unit = []}
+
+
+[tech]
+author="kadds"
+name="shadow"
+

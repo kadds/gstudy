@@ -347,6 +347,9 @@ impl<'a> PreprocessorContext<'a> {
                             if enter {
                                 v.1 = true;
                             }
+                        } else {
+                            // donot enter
+                            v.0 = false;
                         }
                     } else {
                         return Err(anyhow::anyhow!("elseif condition is not expected"));
@@ -357,6 +360,9 @@ impl<'a> PreprocessorContext<'a> {
                         if !v.1 {
                             v.0 = true;
                             v.1 = true;
+                        } else {
+                            // donot enter
+                            v.0 = false;
                         }
                     } else {
                         return Err(anyhow::anyhow!("else condition is not expected"));
@@ -475,7 +481,8 @@ impl Preprocessor {
     }
 
     pub fn process<P: Into<PathBuf>>(&self, path: P) -> anyhow::Result<String> {
-        let ctx = PreprocessorContext::new(self.config.clone(), path.into())?;
+        let ctx: PreprocessorContext<'_> =
+            PreprocessorContext::new(self.config.clone(), path.into())?;
         ctx.build()
     }
 }

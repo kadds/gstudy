@@ -24,6 +24,14 @@ impl MaterialFace for EguiMaterialFace {
     fn hash_key(&self) -> u64 {
         0
     }
+
+    fn has_alpha_test(&self) -> bool {
+        false
+    }
+
+    fn material_data(&self) -> &[u8] {
+        &[]
+    }
 }
 
 #[derive(Debug, Default)]

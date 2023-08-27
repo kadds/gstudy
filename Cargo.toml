@@ -1,6 +1,6 @@
 [workspace]
 members = ["./core", "./app", "./tshader", "./tshader-builder"
-    , "./gltfloader", "./window", "./geometry"
+    , "./gltfloader", "./window", "./geometry", "./phong-render"
     , "./egui-render", "examples/triangle", "examples/egui", "examples/gltf-viewer"
     , "examples/empty", "examples/cube"]
 resolver = "2"

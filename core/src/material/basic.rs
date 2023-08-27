@@ -1,60 +1,69 @@
-use std::{hash::Hasher, io::Write};
+use std::{fmt::Debug, hash::Hasher};
 
 use crate::{
     context::ResourceRef,
-    types::{Vec3f, Vec4f},
+    types::{Color, Vec3f, Vec4f},
+    util::any_as_u8_slice,
 };
 
-use super::MaterialFace;
+use super::{MaterialFace, MaterialMap};
 
 #[repr(C)]
+#[derive(Default)]
+pub struct Parameter {}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct ParameterWithAlpha {
+    pub alpha: f32,
+    pub _pad: Vec3f,
+}
+
+#[repr(C)]
+#[derive(Default)]
 pub struct ConstParameter {
     pub color: Vec4f,
 }
 
 #[repr(C)]
+#[derive(Default)]
 pub struct ConstParameterWithAlpha {
     pub color: Vec4f,
     pub alpha: f32,
     pub _pad: Vec3f,
 }
 
-#[derive(Debug)]
-pub struct BasicMaterialFace {
-    color: Vec4f,
-    variants: Vec<tshader::Variant>,
-    variants_name: String,
-    texture: Option<ResourceRef>,
-    sampler: Option<ResourceRef>,
+enum BasicMaterialParameter {
+    Default(Parameter),
+    ConstParameter(ConstParameter),
+    ConstParameterWithAlpha(ConstParameterWithAlpha),
+    Alpha(ParameterWithAlpha),
 }
 
-impl BasicMaterialFace {
-    pub fn texture(&self) -> Option<&ResourceRef> {
-        self.texture.as_ref()
-    }
-    pub fn sampler(&self) -> Option<&ResourceRef> {
-        self.sampler.as_ref()
-    }
-    pub fn color(&self) -> Vec4f {
-        self.color
-    }
-    pub fn variants(&self) -> &[tshader::Variant] {
-        &self.variants
-    }
-    pub fn variants_name(&self) -> &str {
-        &self.variants_name
+pub struct BasicMaterialFace {
+    pub(crate) variants: Vec<tshader::Variant>,
+    pub(crate) variants_name: String,
+    pub(crate) texture: MaterialMap<Color>,
+    pub(crate) sampler: Option<ResourceRef>,
+    pub(crate) alpha_test: Option<f32>,
+
+    parameter: BasicMaterialParameter,
+}
+
+impl Debug for BasicMaterialFace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BasicMaterialFace")
+            .field("variants", &self.variants)
+            .field("variants_name", &self.variants_name)
+            .field("texture", &self.texture)
+            .field("sampler", &self.sampler)
+            .finish()
     }
 }
 
 impl MaterialFace for BasicMaterialFace {
     fn sort_key(&self) -> u64 {
-        let tid = if let Some(texture) = &self.texture {
-            let mut hasher = fxhash::FxHasher64::default();
-            hasher.write_u64(texture.id());
-            hasher.finish()
-        } else {
-            0
-        };
+        let tid = self.texture.sort_key();
 
         let mut hasher = fxhash::FxHasher64::default();
         hasher.write(self.variants_name.as_bytes());
@@ -63,79 +72,113 @@ impl MaterialFace for BasicMaterialFace {
 
         (sid & 0xFFFF_FFFF) | (tid >> 32)
     }
+    fn has_alpha_test(&self) -> bool {
+        self.alpha_test.is_some()
+    }
     fn hash_key(&self) -> u64 {
         let mut h = fxhash::FxHasher::default();
         h.write(self.variants_name.as_bytes());
         h.finish()
     }
+
+    fn material_data(&self) -> &[u8] {
+        match &self.parameter {
+            BasicMaterialParameter::Default(_) => &[],
+            BasicMaterialParameter::ConstParameter(p) => any_as_u8_slice(p),
+            BasicMaterialParameter::ConstParameterWithAlpha(p) => any_as_u8_slice(p),
+            BasicMaterialParameter::Alpha(p) => any_as_u8_slice(p),
+        }
+    }
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct BasicMaterialFaceBuilder {
-    has_color: bool,
-    has_texture: bool,
-    has_alpha_test: bool,
-    texture: Option<ResourceRef>,
+    alpha_test: Option<f32>,
     sampler: Option<ResourceRef>,
-    color: Vec4f,
+    texture: MaterialMap<Color>,
 }
 
 impl BasicMaterialFaceBuilder {
     pub fn new() -> Self {
         Self {
-            has_color: false,
-            has_texture: false,
-            has_alpha_test: false,
-            texture: None,
-            sampler: None,
-            color: Vec4f::new(1f32, 1f32, 1f32, 1f32),
+            alpha_test: None,
+            ..Default::default()
         }
     }
-    pub fn with_color(mut self) -> Self {
-        self.has_color = true;
+    pub fn texture(mut self, texture: MaterialMap<Color>) -> Self {
+        self.texture = texture;
         self
     }
-    pub fn with_texture(mut self) -> Self {
-        self.has_texture = true;
-        self
-    }
-    pub fn with_constant_color(mut self, color: Vec4f) -> Self {
-        self.color = color;
-        self
-    }
-    pub fn with_texture_data(mut self, texture: ResourceRef) -> Self {
-        self.texture = Some(texture);
-        self
-    }
-    pub fn with_sampler(mut self, sampler: ResourceRef) -> Self {
+    pub fn sampler(mut self, sampler: ResourceRef) -> Self {
         self.sampler = Some(sampler);
         self
     }
-    pub fn enable_alpha_test(&mut self) {
-        self.has_alpha_test = true;
+    pub fn alpha_test(&mut self, cut: f32) {
+        self.alpha_test = Some(cut);
     }
 
-    pub fn build(mut self) -> BasicMaterialFace {
+    pub fn build(self) -> BasicMaterialFace {
         let mut variants = vec![];
-        if self.has_texture {
-            variants.push(tshader::Variant::TextureColor);
-        } else {
-            self.texture = None;
-        }
+        let parameter = match self.texture {
+            MaterialMap::None => {
+                if let Some(a) = self.alpha_test {
+                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
+                        alpha: a,
+                        ..Default::default()
+                    })
+                } else {
+                    BasicMaterialParameter::Default(Parameter {})
+                }
+            }
+            MaterialMap::Constant(c) => {
+                variants.push(tshader::Variant::ConstColor);
+                if let Some(a) = self.alpha_test {
+                    BasicMaterialParameter::ConstParameterWithAlpha(ConstParameterWithAlpha {
+                        alpha: a,
+                        color: c,
+                        ..Default::default()
+                    })
+                } else {
+                    BasicMaterialParameter::ConstParameter(ConstParameter { color: c })
+                }
+            }
+            MaterialMap::PreVertex => {
+                variants.push(tshader::Variant::VertexColor);
 
-        if self.has_color {
-            variants.push(tshader::Variant::VertexColor);
-        }
-        if self.has_alpha_test {
+                if let Some(a) = self.alpha_test {
+                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
+                        alpha: a,
+                        ..Default::default()
+                    })
+                } else {
+                    BasicMaterialParameter::Default(Parameter {})
+                }
+            }
+            MaterialMap::Texture(_) => {
+                variants.push(tshader::Variant::TextureColor);
+
+                if let Some(a) = self.alpha_test {
+                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
+                        alpha: a,
+                        ..Default::default()
+                    })
+                } else {
+                    BasicMaterialParameter::Default(Parameter {})
+                }
+            }
+        };
+
+        if self.alpha_test.is_some() {
             variants.push(tshader::Variant::AlphaTest);
         }
 
         BasicMaterialFace {
-            color: self.color,
             variants_name: tshader::variants_name(&variants[..]),
             variants,
             texture: self.texture,
             sampler: self.sampler,
+            alpha_test: self.alpha_test,
+            parameter,
         }
     }
 }

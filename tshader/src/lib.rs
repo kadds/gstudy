@@ -28,9 +28,6 @@ impl ResourcePosition {
     }
 }
 
-#[derive(Debug)]
-pub struct VertexBufferLayout {}
-
 #[derive(Debug, Default)]
 pub struct Pass {
     pub name: String,

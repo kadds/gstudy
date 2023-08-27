@@ -168,7 +168,7 @@ impl Scene {
     }
 
     pub fn add(&self, object: RenderObject) -> u64 {
-        if object.is_alpha_test() {
+        if object.has_alpha_test() {
             self.add_with(object, LAYER_ALPHA_TEST)
         } else if object.is_blend() {
             self.add_with(object, LAYER_TRANSPARENT)
@@ -375,8 +375,8 @@ impl RenderObject {
         self.material.clone()
     }
 
-    pub fn is_alpha_test(&self) -> bool {
-        self.material.alpha_test().is_some()
+    pub fn has_alpha_test(&self) -> bool {
+        self.material.has_alpha_test()
     }
 
     pub fn is_blend(&self) -> bool {

@@ -5,7 +5,7 @@ source = "forward.wgsl"
 binding = ["pre_camera"]
 camera = "D3"
 shaders = ["vs", "fs"]
-variants = { excludes = [], exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"], unit = ["TEXTURE_COLOR", "NORMAL_TEX", "HEIGHT_TEX", "EMISSION_TEX", "VERTEX_COLOR", "ALPHA_TEST"]}
+variants = { excludes = [], exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"], unit = ["TEXTURE_COLOR", "VERTEX_COLOR", "ALPHA_TEST", "CONST_COLOR"]}
 
 
 [tech]

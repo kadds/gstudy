@@ -1,0 +1,13 @@
+[[pass]]
+index = 0
+name = "phong-forward"
+source = "forward.wgsl"
+binding = ["pre_camera"]
+camera = "D3"
+shaders = ["vs", "fs"]
+variants = { excludes = [], exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"], unit = ["TEXTURE_COLOR", "NORMAL_TEX", "HEIGHT_TEX", "EMISSION_TEX", "VERTEX_COLOR", "ALPHA_TEST"]}
+
+
+[tech]
+author="kadds"
+name="phong_forward"

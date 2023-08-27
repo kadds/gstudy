@@ -25,6 +25,8 @@ use std::{
 };
 use taskpool::{TaskPool, TaskPoolBuilder};
 
+pub mod material_loader;
+
 #[derive(Debug, Default)]
 struct SourcePosition {
     size: usize,
@@ -84,39 +86,16 @@ enum MaterialFaceBuilder {
     Basic(BasicMaterialFaceBuilder),
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
-enum MaterialInputKind {
-    None,
-    Color,
-    Texture,
-    ColorTexture,
-}
-
-impl MaterialInputKind {
-    pub fn add_color(self) -> Option<Self> {
-        Some(match self {
-            MaterialInputKind::None => MaterialInputKind::Color,
-            MaterialInputKind::Texture => MaterialInputKind::ColorTexture,
-            _ => {
-                return None;
-            }
-        })
-    }
-    pub fn add_texture(self) -> Option<Self> {
-        Some(match self {
-            MaterialInputKind::None => MaterialInputKind::Texture,
-            MaterialInputKind::Color => MaterialInputKind::ColorTexture,
-            _ => {
-                return None;
-            }
-        })
-    }
+#[derive(Debug, Hash, Eq, PartialEq)]
+enum MaterialMapKey {
+    Gltf(usize),
+    Default,
+    DefaultWithVertexColor,
 }
 
 #[derive(Debug)]
 struct MaterialMap {
-    pub map: HashMap<(Option<usize>, MaterialInputKind), Arc<Material>>,
-    pub part_map: Option<HashMap<Option<usize>, (MaterialFaceBuilder, MaterialBuilder)>>,
+    pub map: HashMap<MaterialMapKey, Arc<Material>>,
     context: Option<RContextRef>,
 }
 
@@ -124,30 +103,8 @@ impl MaterialMap {
     pub fn new(c: RContextRef) -> Self {
         Self {
             map: HashMap::new(),
-            part_map: Some(HashMap::new()),
             context: Some(c),
         }
-    }
-
-    pub fn prepare_kind(&mut self, idx: Option<usize>, kind: MaterialInputKind) -> Arc<Material> {
-        let part_map = self.part_map.take().unwrap();
-        let context = self.context.take().unwrap();
-
-        let k = self.map.entry((idx, kind)).or_insert_with(|| {
-            let (b, m) = part_map.get(&idx).as_ref().unwrap();
-            let b = match b {
-                MaterialFaceBuilder::Basic(b) => match kind {
-                    MaterialInputKind::None => b.clone(),
-                    MaterialInputKind::Color => b.clone().with_color(),
-                    MaterialInputKind::Texture => b.clone().with_texture(),
-                    MaterialInputKind::ColorTexture => b.clone().with_texture().with_color(),
-                },
-            };
-            m.clone().with_face(b.build()).build(&context)
-        });
-        self.part_map = Some(part_map);
-        self.context = Some(context);
-        k.clone()
     }
 }
 
@@ -267,8 +224,6 @@ fn parse_primitive_indices(
             }
         }
 
-        let _kind = MaterialInputKind::None;
-
         for (semantic, _) in p.attributes() {
             match semantic {
                 gltf::Semantic::Colors(_) => {
@@ -321,9 +276,7 @@ fn parse_primitive_vertices(
     mesh_builder: &mut MeshBuilder,
     buf_view: &GltfBufferView,
     res: &mut LoadResult,
-) -> anyhow::Result<MaterialInputKind> {
-    let mut kind = MaterialInputKind::None;
-
+) -> anyhow::Result<()> {
     for (semantic, accessor) in p.attributes() {
         match semantic {
             gltf::Semantic::Extras(ext) => {
@@ -351,8 +304,6 @@ fn parse_primitive_vertices(
             gltf::Semantic::Normals => {}
             gltf::Semantic::Tangents => {}
             gltf::Semantic::Colors(_index) => {
-                kind = kind.add_color().unwrap();
-
                 let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
                 match accessor.data_type() {
                     gltf::accessor::DataType::F32 => {}
@@ -379,10 +330,6 @@ fn parse_primitive_vertices(
                 };
             }
             gltf::Semantic::TexCoords(_index) => {
-                if let Some(v) = kind.add_texture() {
-                    kind = v;
-                }
-
                 let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
                 match accessor.data_type() {
                     gltf::accessor::DataType::F32 => {}
@@ -409,7 +356,7 @@ fn parse_primitive_vertices(
             gltf::Semantic::Weights(_index) => {}
         }
     }
-    Ok(kind)
+    Ok(())
 }
 
 impl<'a> ParseContext<'a> {
@@ -434,21 +381,34 @@ impl<'a> ParseContext<'a> {
             let mut mesh_builder = MeshBuilder::new();
 
             parse_primitive_indices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
-            let kind = parse_primitive_vertices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
-
-            let color: Color = p
-                .material()
-                .pbr_metallic_roughness()
-                .base_color_factor()
-                .into();
+            parse_primitive_vertices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
 
             let idx = p.material().index();
+            let key = if let Some(idx) = idx {
+                MaterialMapKey::Gltf(idx)
+            } else {
+                // query default
+                if mesh_builder.has_property(MeshPropertyType::Color) {
+                    log::info!(
+                        "load mesh {:?} fallback material to default_vertex_color",
+                        mesh.name()
+                    );
+                    MaterialMapKey::DefaultWithVertexColor
+                } else {
+                    log::info!("load mesh {:?} fallback material to default", mesh.name());
+                    MaterialMapKey::Default
+                }
+            };
 
-            let material = material_map.prepare_kind(idx, kind);
+            let material = material_map
+                .map
+                .get(&key)
+                .ok_or(anyhow::anyhow!("material not found {:?}", idx))?;
+
             let mut g = StaticGeometry::new(Arc::new(mesh_builder.build()?));
-            g.set_attribute(core::mesh::Attribute::ConstantColor, Arc::new(color));
+
             g = g.with_transform(transform.clone());
-            let mut obj = RenderObject::new(Box::new(g), material);
+            let mut obj = RenderObject::new(Box::new(g), material.clone());
             obj.set_name(mesh.name().unwrap_or_default());
 
             obj.add_tag(tag_id);
@@ -503,22 +463,28 @@ impl<'a> ParseContext<'a> {
         let mut map = MaterialMap::new(self.ctx.clone());
         // add default material
         {
-            let primitive = wgpu::PrimitiveState::default();
             let mut material_builder = MaterialBuilder::default();
-            material_builder = material_builder.with_primitive(primitive);
-            material_builder = material_builder.with_name("default");
+            material_builder = material_builder.primitive(wgpu::PrimitiveState::default());
+            material_builder = material_builder.name("default");
+            let basic_material_builder = BasicMaterialFaceBuilder::default().texture(
+                core::material::MaterialMap::Constant(Color::new(1f32, 1f32, 0.8f32, 1f32)),
+            );
+            material_builder = material_builder.face(basic_material_builder.build());
 
-            let mut basic_material_builder = BasicMaterialFaceBuilder::default();
+            map.map
+                .insert(MaterialMapKey::Default, material_builder.build(&self.ctx));
+        }
+        {
+            let mut material_builder = MaterialBuilder::default();
+            material_builder = material_builder.primitive(wgpu::PrimitiveState::default());
+            material_builder = material_builder.name("default vertex color");
+            let basic_material_builder =
+                BasicMaterialFaceBuilder::default().texture(core::material::MaterialMap::PreVertex);
+            material_builder = material_builder.face(basic_material_builder.build());
 
-            let color = Vec4f::new(1f32, 1f32, 1f32, 1f32);
-            basic_material_builder = basic_material_builder.with_constant_color(color);
-
-            map.part_map.as_mut().unwrap().insert(
-                None,
-                (
-                    MaterialFaceBuilder::Basic(basic_material_builder),
-                    material_builder,
-                ),
+            map.map.insert(
+                MaterialMapKey::DefaultWithVertexColor,
+                material_builder.build(&self.ctx),
             );
         }
 
@@ -529,48 +495,45 @@ impl<'a> ParseContext<'a> {
             if material.double_sided() {
                 primitive.cull_mode = None;
             }
-            material_builder = material_builder.with_primitive(primitive);
-            material_builder = material_builder.with_name(material.name().unwrap_or_default());
+            material_builder = material_builder
+                .primitive(primitive)
+                .name(material.name().unwrap_or_default());
 
             let mut basic_material_builder = BasicMaterialFaceBuilder::default();
 
-            let color = material.pbr_metallic_roughness().base_color_factor();
             let texture = material.pbr_metallic_roughness().base_color_texture();
             if let Some(tex) = texture {
                 let texture_index = tex.texture().index();
                 let (sampler_index, texture) = texture_map.get(&texture_index).unwrap();
-                basic_material_builder = basic_material_builder.with_texture_data(texture.clone());
+                basic_material_builder = basic_material_builder
+                    .texture(core::material::MaterialMap::Texture(texture.clone()));
                 if let Some(index) = sampler_index {
                     basic_material_builder =
-                        basic_material_builder.with_sampler(samplers[*index].clone());
+                        basic_material_builder.sampler(samplers[*index].clone());
                 } else {
                     // use default
                     basic_material_builder =
-                        basic_material_builder.with_sampler(self.gpu.default_sampler());
+                        basic_material_builder.sampler(self.gpu.default_sampler());
                 }
+            } else {
+                let color = material.pbr_metallic_roughness().base_color_factor();
+                basic_material_builder = basic_material_builder
+                    .texture(core::material::MaterialMap::Constant(color.into()));
             }
 
             match material.alpha_mode() {
                 gltf::material::AlphaMode::Opaque => {}
                 gltf::material::AlphaMode::Mask => {
-                    basic_material_builder.enable_alpha_test();
-                    material_builder =
-                        material_builder.with_alpha_test(material.alpha_cutoff().unwrap_or(0.5f32));
+                    basic_material_builder.alpha_test(material.alpha_cutoff().unwrap_or(0.5f32));
                 }
                 gltf::material::AlphaMode::Blend => {
-                    material_builder = material_builder.with_blend(default_blender());
+                    material_builder = material_builder.blend(default_blender());
                 }
             }
+            material_builder = material_builder.face(basic_material_builder.build());
 
-            basic_material_builder = basic_material_builder.with_constant_color(color.into());
-
-            map.part_map.as_mut().unwrap().insert(
-                Some(idx),
-                (
-                    MaterialFaceBuilder::Basic(basic_material_builder),
-                    material_builder,
-                ),
-            );
+            map.map
+                .insert(MaterialMapKey::Gltf(idx), material_builder.build(&self.ctx));
         }
         Ok(map)
     }

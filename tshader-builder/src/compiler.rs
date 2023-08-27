@@ -49,6 +49,8 @@ pub enum Variant {
     TextureColor,
     #[strum(serialize = "NORMAL_TEX")]
     NormalTex,
+    #[strum(serialize = "VERTEX_NORMAL")]
+    VertexNormal,
     #[strum(serialize = "HEIGHT_TEX")]
     HeightTex,
     #[strum(serialize = "EMISSION_TEX")]
@@ -57,6 +59,8 @@ pub enum Variant {
     VertexColor,
     #[strum(serialize = "ALPHA_TEST")]
     AlphaTest,
+    #[strum(serialize = "CONST_COLOR")]
+    ConstColor,
 }
 
 impl Variant {
@@ -64,10 +68,12 @@ impl Variant {
         match self {
             Variant::TextureColor => true,
             Variant::NormalTex => true,
+            Variant::VertexNormal => false,
+            Variant::VertexColor => false,
             Variant::HeightTex => true,
             Variant::EmissionTex => true,
-            Variant::VertexColor => false,
             Variant::AlphaTest => false,
+            Variant::ConstColor => false,
         }
     }
 }
