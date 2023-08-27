@@ -131,12 +131,6 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         for layer in &rs.list {
             for indirect in &layer.material {
                 let material = indirect.material.as_ref();
-                log::info!(
-                    "[{:?}], material {:?} {}",
-                    &layer.objects(&indirect),
-                    material.id(),
-                    material.is_transparent()
-                );
                 let mgr = self.prepare_material_pipeline(&rs.gpu, &layer.main_camera, material);
                 // create uniform buffer
                 mgr.material_bind_buffers.get_or(material.id(), |_| {

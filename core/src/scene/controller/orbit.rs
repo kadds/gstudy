@@ -8,7 +8,7 @@ use crate::{
     types::{Quaternion, Vec2f},
 };
 
-use super::{CameraController, ControllerFactory};
+use super::{CameraController, ControllerDriver, ControllerFactory};
 
 pub struct OrbitControllerFactory;
 
@@ -34,6 +34,7 @@ pub struct OrbitCameraController {
     down_pos: Option<Vec2f>,
     state: State,
     last_pos: Vec2f,
+    driver: ControllerDriver,
 }
 
 impl OrbitCameraController {
@@ -43,6 +44,7 @@ impl OrbitCameraController {
             down_pos: None,
             state: State::None,
             last_pos: Vec2f::default(),
+            driver: ControllerDriver::default(),
         }
     }
 
@@ -109,6 +111,9 @@ impl OrbitCameraController {
 
 impl CameraController for OrbitCameraController {
     fn on_input(&mut self, event: &InputEvent) {
+        if self.driver.on_input(event).is_none() {
+            return;
+        }
         match event {
             crate::event::InputEvent::CursorMoved {
                 logical: _,

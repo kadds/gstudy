@@ -20,8 +20,6 @@ use core::{
     util::any_as_u8_slice,
 };
 
-use wgpu::util::DrawIndexedIndirect;
-
 use crate::material::EguiMaterialFace;
 
 struct EguiMaterialHardwareRendererInner {
@@ -54,9 +52,6 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         let c = rs.scene.get_container();
 
         // copy vertices and indices
-        let mut index_count = 0;
-        let mut vertex_count = 0;
-        let mut indirect_len = 0;
         let gpu_ref = engine.gpu_ref();
 
         for layer in &rs.list {
@@ -100,7 +95,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         }
         self.inner.main_buffers.finish();
 
-        None
+        Some(())
     }
     fn queue<'b>(&'b mut self, context: RenderPassContext<'b>, device: &wgpu::Device) {
         let inner = &mut self.inner;

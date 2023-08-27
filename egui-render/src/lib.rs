@@ -50,6 +50,8 @@ pub struct EguiRenderer {
     must_render: bool,
     ppi: f32,
     has_udpate: bool,
+    mouse_in_ui: bool,
+    keyboard_in_ui: bool,
 }
 
 impl EguiRenderer {
@@ -70,6 +72,8 @@ impl EguiRenderer {
             must_render: true,
             ppi: 1.0f32,
             has_udpate: false,
+            mouse_in_ui: false,
+            keyboard_in_ui: false,
         };
         s.set_default_fonts();
 
@@ -158,6 +162,38 @@ impl EguiRenderer {
 
         self.input.predicted_dt = 0f32;
         self.has_udpate = true;
+
+        if self.ctx.is_pointer_over_area() {
+            if !self.mouse_in_ui {
+                proxy.send_event(Box::new(core::event::Event::Input(
+                    core::event::InputEvent::CaptureMouseInputIn,
+                )));
+                self.mouse_in_ui = true;
+            }
+        } else {
+            if self.mouse_in_ui {
+                proxy.send_event(Box::new(core::event::Event::Input(
+                    core::event::InputEvent::CaptureMouseInputOut,
+                )));
+                self.mouse_in_ui = false;
+            }
+        }
+
+        if self.ctx.wants_keyboard_input() {
+            if !self.keyboard_in_ui {
+                proxy.send_event(Box::new(core::event::Event::Input(
+                    core::event::InputEvent::CaptureKeyboardInputIn,
+                )));
+                self.keyboard_in_ui = true;
+            }
+        } else {
+            if self.keyboard_in_ui {
+                proxy.send_event(Box::new(core::event::Event::Input(
+                    core::event::InputEvent::CaptureKeyboardInputOut,
+                )));
+                self.keyboard_in_ui = false;
+            }
+        }
     }
 
     pub fn pre_render(&mut self, gpu: Arc<WGPUResource>, scene: &Scene, view_size: Size) {

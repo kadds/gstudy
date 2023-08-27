@@ -116,6 +116,11 @@ pub enum InputEvent {
         state: ElementState,
         button: MouseButton,
     },
+
+    CaptureMouseInputIn,
+    CaptureMouseInputOut,
+    CaptureKeyboardInputIn,
+    CaptureKeyboardInputOut,
 }
 
 pub enum Event {

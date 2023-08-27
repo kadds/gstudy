@@ -545,7 +545,20 @@ impl WGPUBackend {
             any_as_u8_slice_array(&texture_data),
         );
 
-        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("default sampler"),
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::Repeat,
+            address_mode_w: AddressMode::Repeat,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            lod_min_clamp: 0f32,
+            lod_max_clamp: 20f32,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
 
         let default_texture_id = context.register_texture(default_texture);
         let default_sampler_id = context.register_sampler(default_sampler);

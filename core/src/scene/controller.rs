@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
-use crate::event::InputEvent;
+use crate::event::{InputEvent, KeyboardInput};
 
 use self::{
     orbit::{OrbitCameraController, OrbitControllerFactory},
@@ -55,5 +55,66 @@ impl CameraControllerFactory {
 
     pub fn list(&self) -> Vec<String> {
         self.factory.keys().cloned().collect()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ControllerDriver {
+    mouse_enabled: bool,
+    keyboard_enabled: bool,
+    capture_mouse: bool,
+}
+
+impl ControllerDriver {
+    pub fn on_input(&mut self, event: &InputEvent) -> Option<()> {
+        match event {
+            crate::event::InputEvent::CursorMoved {
+                logical: _,
+                physical,
+            } => {
+                if !self.capture_mouse {
+                    if !self.mouse_enabled {
+                        return None;
+                    }
+                }
+            }
+            crate::event::InputEvent::KeyboardInput(i) => {
+                if i.state.is_pressed() {
+                    if !self.keyboard_enabled {
+                        return None;
+                    }
+                }
+            }
+            crate::event::InputEvent::MouseWheel { delta } => {
+                if !self.mouse_enabled {
+                    return None;
+                }
+            }
+            crate::event::InputEvent::MouseInput { state, button } => {
+                if state.is_pressed() {
+                    if !self.mouse_enabled {
+                        return None;
+                    }
+                    self.capture_mouse = true;
+                } else {
+                    self.capture_mouse = false;
+                }
+            }
+            crate::event::InputEvent::CaptureMouseInputIn => {
+                self.mouse_enabled = false;
+            }
+            crate::event::InputEvent::CaptureMouseInputOut => {
+                self.mouse_enabled = true;
+            }
+            crate::event::InputEvent::CaptureKeyboardInputIn => {
+                self.keyboard_enabled = false;
+            }
+            crate::event::InputEvent::CaptureKeyboardInputOut => {
+                self.keyboard_enabled = true;
+            }
+            _ => (),
+        }
+
+        Some(())
     }
 }

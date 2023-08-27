@@ -267,7 +267,9 @@ impl DynPass for RenderPass {
         };
         {
             let mut copy_engine = backend.dispatch_copy(&self.name);
-            c.prepare(context.clone(), &mut copy_engine);
+            if c.prepare(context.clone(), &mut copy_engine).is_none() {
+                return;
+            }
         }
 
         c.queue(context, backend.gpu().device());
