@@ -325,7 +325,8 @@ struct EguiRenderFrame {
     pub shapes: Vec<egui::epaint::ClippedShape>,
 }
 
-pub struct EguiPluginFactory;
+#[derive(Default)]
+pub struct EguiPluginFactory {}
 
 impl PluginFactory for EguiPluginFactory {
     fn create(&self, container: &Container) -> Box<dyn Plugin> {

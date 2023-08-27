@@ -147,6 +147,10 @@ impl Mesh {
         }
     }
 
+    pub fn row_strip_size(&self) -> u32 {
+        self.row_strip_size
+    }
+
     pub fn aabb(&self) -> Option<BoundBox> {
         // if self.has_position {
         //     let mut aabb = BoundBox::default();
@@ -166,6 +170,14 @@ impl Mesh {
         match &self.indices {
             Indices::U32(d) => Some(any_as_u8_slice_array(&d)),
             Indices::U16(d) => Some(any_as_u8_slice_array(&d)),
+            _ => None,
+        }
+    }
+
+    pub fn indices_is_u32(&self) -> Option<bool> {
+        match &self.indices {
+            Indices::U32(d) => Some(true),
+            Indices::U16(d) => Some(false),
             _ => None,
         }
     }

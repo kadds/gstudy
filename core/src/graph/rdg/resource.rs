@@ -1,43 +1,9 @@
 use std::fmt::Debug;
 
-use crate::types::{Color, Vec3u};
-
-#[derive(Debug)]
-pub enum ClearValue {
-    Color(Color),
-    Depth(f32),
-    Stencil(u32),
-    DepthAndStencil((f32, u32)),
-}
-
-impl ClearValue {
-    pub fn depth(&self) -> Option<f32> {
-        match self {
-            ClearValue::Depth(d) => Some(*d),
-            ClearValue::DepthAndStencil((d, s)) => Some(*d),
-            _ => None,
-        }
-    }
-    pub fn stencil(&self) -> Option<u32> {
-        match self {
-            ClearValue::Stencil(s) => Some(*s),
-            ClearValue::DepthAndStencil((d, s)) => Some(*s),
-            _ => None,
-        }
-    }
-    pub fn color(&self) -> Option<Color> {
-        match self {
-            ClearValue::Color(c) => Some(*c),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ResourceOps {
-    pub load: Option<ClearValue>,
-    pub store: bool,
-}
+use crate::{
+    backends::wgpu_backend::ClearValue,
+    types::{Color, Vec3u},
+};
 
 pub type ResourceId = u32;
 pub const RT_COLOR_RESOURCE_ID: ResourceId = 0;

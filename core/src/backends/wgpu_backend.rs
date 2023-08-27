@@ -478,6 +478,7 @@ impl WGPUBackend {
         };
         let mut features = wgpu::Features::empty();
         features.toggle(Features::PUSH_CONSTANTS);
+        features.toggle(Features::MULTI_DRAW_INDIRECT);
 
         let device_fut = adapter.request_device(
             &DeviceDescriptor {
@@ -490,6 +491,7 @@ impl WGPUBackend {
 
         let mut limits2 = wgpu::Limits::downlevel_webgl2_defaults();
         limits2.max_push_constant_size = 64;
+        features.remove(Features::MULTI_DRAW_INDIRECT);
 
         let device_fut2 = adapter.request_device(
             &DeviceDescriptor {
@@ -606,7 +608,7 @@ pub struct WGPURenderTargetInner<'a, 'b> {
 }
 
 impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
-    pub fn new(label: &'static str) -> Self {
+    pub fn new(label: &'a str) -> Self {
         Self {
             color_attachments: Vec::new(),
             render_pass_desc: RenderPassDescriptor {
@@ -638,6 +640,7 @@ impl<'a, 'b> std::fmt::Debug for WGPURenderTargetInner<'a, 'b> {
 
 pub struct WGPURenderTarget {
     inner: std::ptr::NonNull<u8>,
+    label: String,
 }
 
 impl std::fmt::Debug for WGPURenderTarget {
@@ -649,12 +652,50 @@ impl std::fmt::Debug for WGPURenderTarget {
 
 unsafe impl std::marker::Send for WGPURenderTarget {}
 
+#[derive(Debug, Clone)]
+pub enum ClearValue {
+    Color(crate::types::Color),
+    Depth(f32),
+    Stencil(u32),
+    DepthAndStencil((f32, u32)),
+}
+
+impl ClearValue {
+    pub fn depth(&self) -> Option<f32> {
+        match self {
+            ClearValue::Depth(d) => Some(*d),
+            ClearValue::DepthAndStencil((d, s)) => Some(*d),
+            _ => None,
+        }
+    }
+    pub fn stencil(&self) -> Option<u32> {
+        match self {
+            ClearValue::Stencil(s) => Some(*s),
+            ClearValue::DepthAndStencil((d, s)) => Some(*s),
+            _ => None,
+        }
+    }
+    pub fn color(&self) -> Option<crate::types::Color> {
+        match self {
+            ClearValue::Color(c) => Some(*c),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResourceOps {
+    pub load: Option<ClearValue>,
+    pub store: bool,
+}
+
 impl WGPURenderTarget {
-    pub fn new(label: &'static str) -> Self {
+    pub fn new(label: &str) -> Self {
         let inner = Box::new(WGPURenderTargetInner::new(label));
         let ptr = Box::into_raw(inner);
         Self {
             inner: std::ptr::NonNull::new(ptr as *mut u8).unwrap(),
+            label: label.into(),
         }
     }
     fn get<'a, 'b>(&self) -> &mut WGPURenderTargetInner<'a, 'b> {
@@ -665,54 +706,63 @@ impl WGPURenderTarget {
         self.get().desc()
     }
 
-    fn map_ops(color: Option<crate::types::Color>) -> Operations<Color> {
-        Operations {
-            load: match color {
-                Some(v) => LoadOp::Clear(wgpu::Color {
-                    r: v.x as f64,
-                    g: v.y as f64,
-                    b: v.z as f64,
-                    a: v.w as f64,
+    fn map_ops(color: Option<ResourceOps>) -> Operations<wgpu::Color> {
+        if let Some(color) = color {
+            Operations {
+                load: color.load.map_or(LoadOp::Load, |c| {
+                    let c = c.color().unwrap();
+                    LoadOp::Clear(wgpu::Color {
+                        r: c.x as f64,
+                        g: c.y as f64,
+                        b: c.z as f64,
+                        a: c.w as f64,
+                    })
                 }),
-                None => LoadOp::Load,
-            },
-            store: true,
+                store: color.store,
+            }
+        } else {
+            Operations {
+                load: LoadOp::Load,
+                store: false,
+            }
         }
     }
 
     pub fn set_depth_target(
         &mut self,
         view: &TextureView,
-        clear: Option<f32>,
-        clear_stencil: Option<u32>,
+        clear: Option<ResourceOps>,
+        clear_stencil: Option<ResourceOps>,
     ) {
         let inner = self.get();
-        let ops = Operations {
-            load: match clear {
-                Some(v) => LoadOp::Clear(v),
-                None => LoadOp::Load,
-            },
-            store: true,
+        let ops = if let Some(clear) = clear {
+            Some(Operations {
+                load: clear.load.map_or(wgpu::LoadOp::Load, |v| {
+                    wgpu::LoadOp::Clear(v.depth().unwrap())
+                }),
+                store: clear.store,
+            })
+        } else {
+            None
         };
-        let ops_stencil = Operations {
-            load: match clear_stencil {
-                Some(v) => LoadOp::Clear(v),
-                None => LoadOp::Load,
-            },
-            store: true,
+        let ops_stencil = if let Some(clear_stencil) = clear_stencil {
+            Some(Operations {
+                load: clear_stencil.load.map_or(wgpu::LoadOp::Load, |v| {
+                    wgpu::LoadOp::Clear(v.stencil().unwrap())
+                }),
+                store: clear_stencil.store,
+            })
+        } else {
+            None
         };
         inner.depth_attachment = Some(RenderPassDepthStencilAttachment {
             view,
-            depth_ops: Some(ops),
-            stencil_ops: Some(ops_stencil),
+            depth_ops: ops,
+            stencil_ops: ops_stencil,
         });
     }
 
-    pub fn set_render_target(
-        &mut self,
-        texture_view: &TextureView,
-        color: Option<crate::types::Color>,
-    ) {
+    pub fn set_render_target(&mut self, texture_view: &TextureView, color: Option<ResourceOps>) {
         let inner = self.get();
         let ops = Self::map_ops(color);
         if inner.color_attachments.len() == 0 {
@@ -730,11 +780,7 @@ impl WGPURenderTarget {
         }
     }
 
-    pub fn add_render_target(
-        &mut self,
-        texture_view: &TextureView,
-        color: Option<crate::types::Color>,
-    ) {
+    pub fn add_render_target(&mut self, texture_view: &TextureView, color: Option<ResourceOps>) {
         let inner = self.get();
         let ops = Self::map_ops(color);
         inner.color_attachments.push(RenderPassColorAttachment {

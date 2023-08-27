@@ -39,7 +39,7 @@ fn main() {
     let mut app = App::new(context);
     app.register_plugin(WindowPluginFactory::new("egui", Size::new(1300, 900)));
     app.register_plugin(HardwareRenderPluginFactory);
-    app.register_plugin(EguiPluginFactory);
+    app.register_plugin(EguiPluginFactory {});
     app.add_event_processor(Box::new(MainLogic {}));
     app.run();
 }

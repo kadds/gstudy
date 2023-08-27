@@ -370,7 +370,7 @@ fn main() {
         Size::new(1300, 900),
     ));
     app.register_plugin(HardwareRenderPluginFactory);
-    app.register_plugin(EguiPluginFactory);
+    app.register_plugin(EguiPluginFactory {});
     app.register_plugin(GltfPluginFactory);
     app.add_event_processor(Box::new(MainLogic::default()));
     app.run();

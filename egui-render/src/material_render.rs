@@ -1,33 +1,39 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    mem::{size_of, size_of_val},
+    ops::Range,
+    sync::{Arc, Mutex},
+};
 
 use core::{
-    backends::wgpu_backend::{GpuInputMainBuffers, NullBufferAccessor, WGPUResource},
-    graph::rdg::{
-        pass::*,
-        resource::{ClearValue, ResourceOps},
-        RenderGraphBuilder, RenderPassBuilder,
+    backends::wgpu_backend::{
+        ClearValue, GpuInputMainBuffer, GpuInputMainBuffers, NullBufferAccessor, ResourceOps,
+        WGPUResource,
     },
+    graph::rdg::{backend::GraphCopyEngine, pass::*, RenderGraphBuilder, RenderPassBuilder},
     material::{Material, MaterialId},
     render::{
         common::FramedCache,
-        material::{
-            MaterialRenderContext, MaterialRenderer, MaterialRendererFactory, SetupResource,
-        },
-        resolve_pipeline, ColorTargetBuilder, DrawCommands, PassIdent, PipelinePassResource,
-        RenderDescriptorObject,
+        material::{take_rs, MaterialRendererFactory, SetupResource},
+        resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
     },
+    types::Rectu,
+    util::any_as_u8_slice,
 };
+
+use wgpu::util::DrawIndexedIndirect;
 
 use crate::material::EguiMaterialFace;
 
 struct EguiMaterialHardwareRendererInner {
     main_buffers: GpuInputMainBuffers,
+
     sampler: wgpu::Sampler,
-    pub(crate) commands: DrawCommands,
-    pub(crate) pipeline: PipelinePassResource,
-    global_bind_group: Arc<wgpu::BindGroup>,
+    pipeline: PipelinePassResource,
+    global_bind_group: wgpu::BindGroup,
     tech: Arc<tshader::ShaderTech>,
-    material_bind_group_cache: FramedCache<MaterialId, Arc<wgpu::BindGroup>>,
+    material_bind_group_cache: FramedCache<MaterialId, wgpu::BindGroup>,
+
+    draw_index_buffer: Vec<(Range<u32>, i32, Option<Rectu>)>,
 }
 
 pub struct EguiMaterialHardwareRenderer {
@@ -37,110 +43,135 @@ pub struct EguiMaterialHardwareRenderer {
 impl EguiMaterialHardwareRenderer {}
 
 impl RenderPassExecutor for EguiMaterialHardwareRenderer {
-    fn execute<'a>(&'a mut self, mut context: RenderPassContext<'a>) {
+    fn prepare<'a>(
+        &'a mut self,
+        context: RenderPassContext<'a>,
+        engine: &mut GraphCopyEngine,
+    ) -> Option<()> {
         let inner = &mut self.inner;
-        let mut pass = context.new_pass();
+        inner.main_buffers.recall();
+        let rs = take_rs::<EguiMaterialFace>(&context)?;
+        let c = rs.scene.get_container();
 
-        inner.commands.draw(
-            &mut pass,
-            inner.main_buffers.index(),
-            inner.main_buffers.vertex(),
-            NullBufferAccessor,
-        );
-    }
-}
+        // copy vertices and indices
+        let mut index_count = 0;
+        let mut vertex_count = 0;
+        let mut indirect_len = 0;
+        let gpu_ref = engine.gpu_ref();
 
-impl MaterialRenderer for EguiMaterialHardwareRenderer {
-    fn render_material<'b>(
-        &mut self,
-        ctx: &'b mut MaterialRenderContext<'b>,
-        objects: &'b [u64],
-        material: &'b Material,
-        encoder: &mut wgpu::CommandEncoder,
-    ) {
-        let inner = &mut self.inner;
-        let mat = material.face_by::<EguiMaterialFace>();
+        for layer in &rs.list {
+            for indirect in &layer.material {
+                let objects = layer.objects(indirect);
 
-        let (index_bytes, vertex_bytes, vertex_props_bytes) =
-            ctx.scene.calculate_bytes(objects.iter(), |_| true);
+                for id in objects {
+                    let obj = match c.get(id) {
+                        Some(v) => v,
+                        None => continue,
+                    };
+                    let obj = obj.o();
+                    let mesh = obj.geometry().mesh();
+                    let indices = mesh.indices_view().unwrap();
+                    let vertices = mesh.properties_view();
 
-        // material bind group
-        let bg = inner
-            .material_bind_group_cache
-            .get_or(material.id(), |_| {
-                let bg = ctx
-                    .gpu
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("egui"),
-                        layout: &inner.pipeline.pass[0].get_bind_group_layout(1),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    mat.texture().texture_view(),
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&inner.sampler),
-                            },
-                        ],
-                    });
-                Arc::new(bg)
-            })
-            .clone();
+                    inner.main_buffers.prepare(
+                        &gpu_ref,
+                        indices.len() as u64,
+                        vertices.len() as u64,
+                    );
 
-        inner
-            .main_buffers
-            .prepare(ctx.gpu, index_bytes, vertex_props_bytes);
+                    let (is, vs) = inner.main_buffers.copy_stage(
+                        engine.encoder(),
+                        &gpu_ref,
+                        indices,
+                        vertices,
+                    );
 
-        let default_pipeline = inner.commands.add_pipeline(inner.pipeline.pass[0].clone());
-        let container = ctx.scene.get_container();
+                    let index_size = size_of::<u32>() as u64;
+                    let vs_size = mesh.row_strip_size() as u64;
+                    let vs = (vs.start / vs_size) as i32;
 
-        // copy staging buffer
-        for id in objects {
-            let object = container.get(id).unwrap();
-            let object = object.o();
-            let mesh = object.geometry().mesh();
-            let vertices = mesh.properties_view();
-            let indices = mesh.indices_view().unwrap();
-
-            let (index_range, vertex_range) = inner
-                .main_buffers
-                .copy_stage(encoder, ctx.gpu, indices, vertices);
-
-            let mut command_builder = inner.commands.new_index_draw_command(
-                *id,
-                index_range,
-                vertex_range,
-                0..0,
-                mesh.index_count().unwrap(),
-            );
-            command_builder.set_pipeline(default_pipeline);
-            command_builder.set_bind_groups(&[bg.clone()]);
-
-            if let Some(clip) = mesh.clip() {
-                command_builder.set_clip(clip);
+                    inner.draw_index_buffer.push((
+                        (is.start / index_size) as u32..(is.end / index_size) as u32,
+                        vs,
+                        mesh.clip(),
+                    ));
+                }
             }
-            command_builder.build();
+        }
+        self.inner.main_buffers.finish();
+
+        None
+    }
+    fn queue<'b>(&'b mut self, context: RenderPassContext<'b>, device: &wgpu::Device) {
+        let inner = &mut self.inner;
+
+        let rs = take_rs::<EguiMaterialFace>(&context).unwrap();
+        for layer in &rs.list {
+            for indirect in &layer.material {
+                let mat = indirect.material.face_by::<EguiMaterialFace>();
+
+                inner
+                    .material_bind_group_cache
+                    .get_or(indirect.mat_id, |_| {
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("egui"),
+                            layout: &inner.pipeline.pass[0].get_bind_group_layout(1),
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        mat.texture().texture_view(),
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(&inner.sampler),
+                                },
+                            ],
+                        })
+                    });
+            }
         }
     }
 
-    fn before_render(&mut self) {
+    fn render<'b>(
+        &'b mut self,
+        context: RenderPassContext<'b>,
+        engine: &mut core::graph::rdg::backend::GraphRenderEngine,
+    ) {
         let inner = &mut self.inner;
-        inner.main_buffers.recall();
-        inner.material_bind_group_cache.recall();
-        inner.commands.clear();
 
-        inner
-            .commands
-            .set_global_bind_group(inner.global_bind_group.clone());
+        let rs = take_rs::<EguiMaterialFace>(&context).unwrap();
+        for layer in &rs.list {
+            let mut pass = engine.begin(layer.layer);
+
+            pass.set_pipeline(&inner.pipeline.pass[0].render());
+            pass.set_bind_group(0, &inner.global_bind_group, &[]);
+            pass.set_index_buffer(
+                inner.main_buffers.index().buffer().slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.set_vertex_buffer(0, inner.main_buffers.vertex().buffer().slice(..));
+            for indirect in &layer.material {
+                let material = indirect.material.as_ref();
+
+                let material_bind_group =
+                    inner.material_bind_group_cache.get(&material.id()).unwrap();
+
+                pass.set_bind_group(1, &material_bind_group, &[]);
+
+                for (indices, vertices, rect) in &inner.draw_index_buffer {
+                    if let Some(r) = rect {
+                        pass.set_scissor_rect(r.x, r.y, r.z, r.w);
+                    }
+                    pass.draw_indexed(indices.clone(), *vertices, 0..1);
+                }
+            }
+        }
     }
 
-    fn finish_render(&mut self) {
-        let inner = &mut self.inner;
-        inner.main_buffers.finish();
+    fn cleanup<'b>(&'b mut self, context: RenderPassContext<'b>) {
+        self.inner.draw_index_buffer.clear();
     }
 }
 
@@ -150,12 +181,11 @@ pub struct EguiMaterialRendererFactory {}
 impl MaterialRendererFactory for EguiMaterialRendererFactory {
     fn setup(
         &self,
-        ident: PassIdent,
-        material: &[&Material],
+        materials: &[Arc<Material>],
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
-    ) -> Arc<Mutex<dyn MaterialRenderer>> {
+    ) {
         let label = Some("egui");
         let tech = setup_resource.shader_loader.load_tech("egui").unwrap();
         let template = tech.register_variant(gpu.device(), &[]).unwrap();
@@ -196,11 +226,11 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
             inner: EguiMaterialHardwareRendererInner {
                 main_buffers: GpuInputMainBuffers::new(gpu, label),
                 sampler: gpu.new_sampler(label),
-                commands: DrawCommands::new(0, 1),
                 tech,
                 pipeline,
-                global_bind_group: Arc::new(global_bind_group),
+                global_bind_group: global_bind_group,
                 material_bind_group_cache: FramedCache::new(),
+                draw_index_buffer: vec![],
             },
         }));
 
@@ -225,12 +255,6 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
 
         pass.async_execute(r.clone());
 
-        g.add_render_pass(pass.build());
-
-        r
-    }
-
-    fn sort_key(&self, _material: &Material, _gpu: &WGPUResource) -> u64 {
-        0
+        g.add_render_pass(pass);
     }
 }

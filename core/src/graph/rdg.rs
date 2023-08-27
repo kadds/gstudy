@@ -6,30 +6,42 @@ pub use pass::RenderPass;
 pub use pass::RenderPassBuilder;
 use petgraph::dot::Config;
 use petgraph::dot::Dot;
+use petgraph::unionfind::UnionFind;
 use resource::{BufferInfo, ResourceId, ResourceType, ResourceUsage, TextureInfo};
 
-use std::collections::LinkedList;
+use std::any::Any;
 use std::fmt::Debug;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
 use petgraph::stable_graph::NodeIndex;
 
+use crate::backends::wgpu_backend::ClearValue;
+use crate::backends::wgpu_backend::ResourceOps;
 use crate::context::ResourceRef;
+use crate::graph::rdg::pass::ClearPass;
+use crate::graph::rdg::pass::ClearPassBuilder;
+use crate::graph::rdg::pass::ColorRenderTargetDescriptor;
+use crate::graph::rdg::pass::DepthRenderTargetDescriptor;
 use crate::graph::rdg::pass::PreferAttachment;
-use crate::types::{Color, Size, Vec3f, Vec3u};
+use crate::graph::rdg::pass::RenderTargetDescriptor;
+use crate::render::ColorTargetBuilder;
+use crate::types::{Color, Size, Vec3u};
 
 use self::pass::DynPass;
+use self::pass::PassConstraint;
+use self::pass::RenderTargetState;
 use self::resource::ResourceNode;
 use self::{
     backend::GraphBackend,
     present::PresentNode,
-    resource::{ClearValue, ImportTextureInfo, RT_COLOR_RESOURCE_ID, RT_DEPTH_RESOURCE_ID},
+    resource::{ImportTextureInfo, RT_COLOR_RESOURCE_ID, RT_DEPTH_RESOURCE_ID},
 };
 
 type Graph = petgraph::graph::DiGraph<Node, ResourceUsage, u32>;
+type SubGraph = petgraph::graphmap::DiGraphMap<NodeIndex, ()>;
 
 pub type NodeId = u32;
 
@@ -38,10 +50,6 @@ pub trait GraphContext {}
 pub struct ResourceRegistry {
     underlying_map: HashMap<ResourceId, ResourceRef>,
     desc_map: HashMap<ResourceId, Arc<ResourceNode>>,
-}
-
-pub struct ResourceStateMap {
-    has_clear_map: HashSet<ResourceId>,
 }
 
 impl ResourceRegistry {
@@ -60,15 +68,7 @@ impl ResourceRegistry {
     }
 }
 
-impl ResourceStateMap {
-    pub fn has_clear(&mut self, id: ResourceId) -> bool {
-        let res = self.has_clear_map.contains(&id);
-        self.has_clear_map.insert(id);
-        res
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum ResourceLifetimeOperation {
     Create(ResourceId),
     Destroy(ResourceId),
@@ -87,28 +87,31 @@ impl ResourceLifetime {
     }
 }
 
+impl Default for ResourceLifetime {
+    fn default() -> Self {
+        Self {
+            beg: u32::MAX,
+            end: u32::MIN,
+        }
+    }
+}
+
 pub struct RenderGraph {
     name: String,
     g: Graph,
-    passes: Vec<(NodeIndex, Vec<ResourceLifetimeOperation>)>,
+    union_find: UnionFind<NodeIndex>,
+    render_jobs_list: Vec<DependencyRenderJobs>,
+
     registry: ResourceRegistry,
 }
 
 impl RenderGraph {
-    pub fn execute<F: FnMut(&Self, &Node), G: FnMut(&Node)>(
-        &mut self,
-        mut pre_f: F,
-        mut post_f: G,
-        backend: GraphBackend,
-    ) {
-        let mut state = ResourceStateMap {
-            has_clear_map: HashSet::new(),
-        };
+    pub fn execute(&mut self, backend: GraphBackend, context: &dyn Any) {
+        let main_jobs = &self.render_jobs_list[0];
         {
-            for (pass_node, resource_ops) in self.passes.iter() {
-                // create texture/buffer resource
-                for resource_lifetime in resource_ops.iter() {
-                    match resource_lifetime {
+            for job in main_jobs.jobs.iter() {
+                match job {
+                    RenderJob::ResourceOperation(op) => match op {
                         ResourceLifetimeOperation::Create(id) => {
                             let res_desc = self.registry.desc_map.get(&id).unwrap();
                             let underlying = backend.create_resource(&res_desc.inner);
@@ -119,17 +122,23 @@ impl RenderGraph {
                             backend.remove_resource(res.clone());
                             self.registry.underlying_map.remove(id);
                         }
+                    },
+                    RenderJob::PassCall((node_index, render_target_state)) => {
+                        let node = self.g.node_weight(*node_index).unwrap();
+
+                        if let Node::Pass(pass) = node {
+                            pass.execute(
+                                &self.registry,
+                                &backend,
+                                render_target_state.as_ref().unwrap(),
+                                context,
+                            );
+                        }
                     }
                 }
-                let node = self.g.node_weight(*pass_node).unwrap();
-                pre_f(self, node);
-
-                if let Node::Pass(pass) = node {
-                    pass.execute(&self.registry, &backend, &mut state);
-                }
-                post_f(node);
             }
         }
+
         for res in self.registry.underlying_map.values() {
             backend.remove_resource(res.clone())
         }
@@ -148,7 +157,9 @@ pub struct RenderGraphBuilder {
     resource_map: HashMap<ResourceId, Arc<ResourceNode>>,
     last_id: u32,
     pass_nodes: Vec<Node>,
+    pass_name_nodes: HashMap<String, usize>,
     present_node: Option<PresentNode>,
+    constraints: HashMap<String, Vec<PassConstraint>>,
 }
 
 impl RenderGraphBuilder {
@@ -158,12 +169,29 @@ impl RenderGraphBuilder {
             resource_map: HashMap::new(),
             last_id: RT_DEPTH_RESOURCE_ID + 1,
             pass_nodes: Vec::new(),
+            pass_name_nodes: HashMap::new(),
             present_node: None,
+            constraints: HashMap::new(),
         }
     }
 
-    pub fn add_render_pass(&mut self, pass: RenderPass) {
-        self.pass_nodes.push(Node::Pass(Box::new(pass)));
+    pub fn add_constraint<S: Into<String>>(&mut self, pass_node: S, c: PassConstraint) {
+        let cs = self.constraints.entry(pass_node.into()).or_default();
+        cs.push(c);
+    }
+
+    pub fn add_render_pass(&mut self, mut builder: RenderPassBuilder) {
+        let n = self.pass_nodes.len();
+        let mut tmp = vec![];
+        std::mem::swap(&mut tmp, &mut builder.constraints.constraints);
+        let name = builder.name.clone();
+        self.pass_name_nodes.insert(name.clone(), n);
+        self.pass_nodes.push(Node::Pass(Box::new(builder.build())));
+
+        if tmp.len() > 0 {
+            let cs = self.constraints.entry(name).or_default();
+            cs.extend(tmp);
+        }
     }
 
     pub fn set_present_target(
@@ -191,7 +219,7 @@ impl RenderGraphBuilder {
             id: color,
             name: "back_buffer".to_owned(),
             inner: ResourceType::ImportTexture(ImportTextureInfo {
-                clear: clear.map(ClearValue::Color),
+                clear: clear.map(|v| ClearValue::Color(v)),
             }),
         });
 
@@ -224,22 +252,6 @@ impl RenderGraphBuilder {
         id
     }
 
-    // pub fn alias_texture(&mut self, mut to: ResourceId) -> ResourceId {
-    //     let id = self.last_id;
-    //     self.last_id += 1;
-
-    //     if let ResourceType::AliasResource(_, next_to) = self.resource_map.get(&to).unwrap().ty {
-    //         to = next_to;
-    //     }
-
-    //     let resource = Resource {
-    //         refs: 1,
-    //         ty: ResourceType::AliasResource(id, to),
-    //     };
-    //     self.resource_map.insert(id, resource);
-    //     id
-    // }
-
     pub fn allocate_buffer(
         &mut self,
         name: String,
@@ -252,6 +264,18 @@ impl RenderGraphBuilder {
             id,
             name,
             inner: ResourceType::Buffer(BufferInfo { size, usage }),
+        };
+        self.resource_map.insert(id, resource.into());
+        id
+    }
+
+    pub fn alias_resource(&mut self, from: ResourceId) -> ResourceId {
+        let id = self.last_id;
+        self.last_id += 1;
+        let resource = ResourceNode {
+            id,
+            name: "alias".to_owned(),
+            inner: ResourceType::AliasResource(id, from),
         };
         self.resource_map.insert(id, resource.into());
         id
@@ -325,141 +349,335 @@ impl RenderGraphBuilder {
 
     pub fn compile(mut self) -> RenderGraph {
         let present = self.present_node.take().unwrap();
-
-        let mut g = Graph::new();
-
         let mut pass_nodes = Vec::new();
         std::mem::swap(&mut pass_nodes, &mut self.pass_nodes);
         pass_nodes.reverse();
 
+        let mut g = Graph::new();
+
         let present_index = g.add_node(Node::Present(present));
-        let back_buffer_index = g.add_node(Node::Resource(
-            self.resource_map
-                .get(&RT_COLOR_RESOURCE_ID)
-                .cloned()
-                .unwrap(),
-        ));
-        g.add_edge(back_buffer_index, present_index, ResourceUsage::TextureRead);
 
         // build graph
-
         let mut resource_nodes = HashMap::new();
-        let mut has_new = false;
-        let mut passes = LinkedList::new();
+        let mut pass_name_map = HashMap::new();
 
         for node in pass_nodes {
             match node {
                 Node::Pass(pass) => {
-                    let index = if !has_new && pass.is_default_render_target(RT_COLOR_RESOURCE_ID) {
-                        has_new = true;
-                        let index = self.link_pass(pass, &mut g, &mut resource_nodes);
-                        g.add_edge(index, back_buffer_index, ResourceUsage::TextureWrite);
-                        index
-                    } else {
-                        self.link_pass(pass, &mut g, &mut resource_nodes)
-                    };
-                    passes.push_back(index);
+                    let name = pass.name().to_owned();
+                    let index = self.link_pass(pass, &mut g, &mut resource_nodes);
+                    pass_name_map.insert(name, index);
                 }
                 _ => {}
             }
         }
 
-        let mut usage_resources: HashMap<ResourceId, ResourceLifetime> = HashMap::new();
-        for (index, node_index) in passes.iter().enumerate() {
-            let node = g.node_weight(*node_index).unwrap();
+        let mut main_subgraph = SubGraph::new();
+        let first_dummy_node = NodeIndex::new(usize::MAX);
+        let last_dummy_node = NodeIndex::new(usize::MAX - 1);
+        // let first_dummy_node2 = NodeIndex::new(usize::MAX - 2);
+        let last_dummy_node2 = NodeIndex::new(usize::MAX - 3);
+
+        main_subgraph.add_node(first_dummy_node);
+        main_subgraph.add_node(last_dummy_node);
+
+        // main_subgraph.add_node(first_dummy_node2);
+        main_subgraph.add_node(last_dummy_node2);
+
+        // main_subgraph.add_edge(first_dummy_node, first_dummy_node2, ());
+        main_subgraph.add_edge(last_dummy_node, last_dummy_node2, ());
+
+        for node_index in g.node_indices() {
+            let node = g.node_weight(node_index).unwrap();
             match node {
                 Node::Pass(pass) => {
-                    let (inputs, outputs, render_target) = pass.inputs_outputs();
-                    for (resource, _) in inputs.textures.iter().chain(outputs.textures.iter()) {
-                        usage_resources
-                            .entry(*resource)
-                            .and_modify(|value| {
-                                value.add(ResourceLifetime {
-                                    beg: index as u32,
-                                    end: index as u32,
-                                })
-                            })
-                            .or_insert_with(|| ResourceLifetime {
-                                beg: index as u32,
-                                end: index as u32,
-                            });
+                    if !pass.inputs_outputs().2.has_default() {
+                        continue;
                     }
-
-                    for (resource, _) in inputs.buffers.iter().chain(outputs.buffers.iter()) {
-                        usage_resources
-                            .entry(*resource)
-                            .and_modify(|value| {
-                                value.add(ResourceLifetime {
-                                    beg: index as u32,
-                                    end: index as u32,
-                                })
-                            })
-                            .or_insert_with(|| ResourceLifetime {
-                                beg: index as u32,
-                                end: index as u32,
-                            });
-                    }
-
-                    if let Some(depth) = &render_target.depth {
-                        if let PreferAttachment::Default = depth.prefer_attachment {
-                            usage_resources
-                                .entry(RT_DEPTH_RESOURCE_ID)
-                                .and_modify(|value| {
-                                    value.add(ResourceLifetime {
-                                        beg: index as u32,
-                                        end: index as u32,
-                                    })
-                                })
-                                .or_insert_with(|| ResourceLifetime {
-                                    beg: index as u32,
-                                    end: index as u32,
-                                });
+                    if let Some(c) = pass.constraints() {
+                        for c in &c.constraints {
+                            match c {
+                                PassConstraint::Before(name) => {
+                                    if let Some(index) = pass_name_map.get(name) {
+                                        main_subgraph.add_edge(node_index, *index, ());
+                                    }
+                                }
+                                PassConstraint::After(name) => {
+                                    if let Some(index) = pass_name_map.get(name) {
+                                        main_subgraph.add_edge(*index, node_index, ());
+                                    }
+                                }
+                                PassConstraint::First => {
+                                    main_subgraph.add_edge(first_dummy_node, node_index, ());
+                                }
+                                PassConstraint::Last => {
+                                    main_subgraph.add_edge(node_index, last_dummy_node, ());
+                                }
+                            }
                         }
                     }
+                    main_subgraph.add_edge(node_index, last_dummy_node2, ());
                 }
-                _ => {}
+                _ => (),
             }
+        }
+        if petgraph::algo::is_cyclic_directed(&main_subgraph) {
+            let gz = Dot::with_config(&main_subgraph, &[Config::EdgeNoLabel]);
+            panic!("cyclic detected in subgraph {:?}", gz);
+        }
+
+        let mut main_pass_list = petgraph::algo::toposort(&main_subgraph, None).unwrap();
+
+        let mut prev = None;
+        main_pass_list.push(present_index);
+        if main_pass_list.len() == 4 {
+            // add clear pass
+            let b = ClearPassBuilder::new("default clear")
+                .render_target(RenderTargetDescriptor {
+                    colors: smallvec::smallvec![ColorRenderTargetDescriptor {
+                        prefer_attachment: PreferAttachment::Default,
+                        ops: ResourceOps {
+                            load: None,
+                            store: true,
+                        },
+                    }],
+                    depth: None,
+                })
+                .build();
+            let index = g.add_node(Node::Pass(Box::new(b)));
+            main_pass_list.insert(0, index);
+        }
+
+        // add clear pass
+        // for (_, res) in &self.resource_map {
+        //     match &res.inner {
+        //         ResourceType::Texture(t) => {
+        //             if let Some(colors) = &t.clear {
+        //                 let mut desc = RenderTargetDescriptor {
+        //                     colors: smallvec::smallvec![],
+        //                     depth: None,
+        //                 };
+        //                 match colors {
+        //                     ClearValue::Color(c) => desc.colors.push(ColorRenderTargetDescriptor {
+        //                         prefer_attachment: pass::PreferAttachment::Resource(res.id),
+        //                         ops: resource::ResourceOps {
+        //                             load: Some(colors.clone()),
+        //                             store: true,
+        //                         },
+        //                     }),
+        //                     ClearValue::Depth(d) => {
+        //                         desc.depth = Some(DepthRenderTargetDescriptor {
+        //                             prefer_attachment: pass::PreferAttachment::Resource(res.id),
+        //                             depth_ops: Some(resource::ResourceOps {
+        //                                 load: Some(colors.clone()),
+        //                                 store: true,
+        //                             }),
+        //                             stencil_ops: None,
+        //                         })
+        //                     }
+        //                     ClearValue::Stencil(s) => {
+        //                         desc.depth = Some(DepthRenderTargetDescriptor {
+        //                             prefer_attachment: pass::PreferAttachment::Resource(res.id),
+        //                             depth_ops: None,
+        //                             stencil_ops: Some(resource::ResourceOps {
+        //                                 load: Some(colors.clone()),
+        //                                 store: true,
+        //                             }),
+        //                         })
+        //                     }
+        //                     ClearValue::DepthAndStencil((d, s)) => {
+        //                         desc.depth = Some(DepthRenderTargetDescriptor {
+        //                             prefer_attachment: pass::PreferAttachment::Resource(res.id),
+        //                             depth_ops: Some(resource::ResourceOps {
+        //                                 load: Some(colors.clone()),
+        //                                 store: true,
+        //                             }),
+        //                             stencil_ops: Some(resource::ResourceOps {
+        //                                 load: Some(colors.clone()),
+        //                                 store: true,
+        //                             }),
+        //                         })
+        //                     }
+        //                 };
+        //                 let index = g.add_node(Node::Pass(Box::new(
+        //                     ClearPassBuilder::new(format!("clear resource {}", res.id))
+        //                         .render_target(desc)
+        //                         .build(),
+        //                 )));
+        //                 main_pass_list.insert(0, index);
+        //             }
+        //         }
+        //         ResourceType::ImportTexture(t) => {}
+        //         _ => (),
+        //     }
+        // }
+
+        let mut connect = |from: NodeIndex, to: NodeIndex| {
+            // create resource
+            let resource_id = RT_COLOR_RESOURCE_ID;
+            let resource_id2 = RT_DEPTH_RESOURCE_ID;
+
+            let resource_color = g.add_node(Node::Resource(
+                self.resource_map.get(&resource_id).cloned().unwrap(),
+            ));
+            let resource_depth = g.add_node(Node::Resource(
+                self.resource_map.get(&resource_id2).cloned().unwrap(),
+            ));
+
+            g.add_edge(
+                from,
+                resource_color,
+                ResourceUsage::RenderTargetTextureWrite,
+            );
+            g.add_edge(
+                from,
+                resource_depth,
+                ResourceUsage::RenderTargetTextureWrite,
+            );
+
+            g.add_edge(resource_color, to, ResourceUsage::RenderTargetTextureRead);
+            g.add_edge(resource_depth, to, ResourceUsage::RenderTargetTextureRead);
+        };
+
+        for node_index in &main_pass_list {
+            if *node_index == first_dummy_node
+                || *node_index == last_dummy_node
+                || *node_index == last_dummy_node2
+            {
+                continue;
+            }
+            if prev.is_none() {
+                prev = Some(*node_index);
+                continue;
+            }
+            connect(prev.unwrap(), *node_index);
+            prev = Some(*node_index);
         }
 
         if petgraph::algo::is_cyclic_directed(&g) {
             let gz = Dot::with_config(&g, &[Config::EdgeNoLabel]);
             panic!("cyclic detected in render graph {:?}", gz);
         }
-        // log::info!("{:?}", usage_resources);
 
-        let mut passes_vec = vec![];
-        passes_vec.push((present_index, vec![]));
+        let mut union_find = UnionFind::new(g.node_count());
+        for node_index in g.node_indices() {
+            for n in g.neighbors(node_index) {
+                union_find.union(node_index, n);
+            }
+        }
 
-        for (index, node_index) in passes.iter().enumerate() {
-            let node = g.node_weight(*node_index).unwrap();
+        let mut render_jobs_list = vec![];
+
+        for node_index in petgraph::algo::toposort(&g, None).unwrap() {
+            if !union_find.equiv(node_index, present_index) {
+                continue;
+            }
+            let node = g.node_weight(node_index).unwrap();
             match node {
-                Node::Pass(_) => {
-                    let mut lifetime_ops = vec![];
-                    let mut next_destroy_resource = vec![];
-                    for (res_id, lifetime) in &usage_resources {
-                        if lifetime.end == index as u32 {
-                            lifetime_ops.push(ResourceLifetimeOperation::Create(*res_id));
-                        }
-                        if lifetime.beg == index as u32 {
-                            next_destroy_resource.push(ResourceLifetimeOperation::Destroy(*res_id));
-                        }
+                Node::Pass(pass) => {
+                    if render_jobs_list.len() == 0 {
+                        render_jobs_list.push(DependencyRenderJobs::default());
                     }
-                    passes_vec.last_mut().unwrap().1 = next_destroy_resource;
-                    passes_vec.push((*node_index, lifetime_ops));
+                    render_jobs_list[0]
+                        .jobs
+                        .push(RenderJob::PassCall((node_index, None)));
                 }
                 _ => (),
             }
         }
 
-        passes_vec.reverse();
+        // lifetime
+        let mut imported = HashSet::new();
+        for jobs in &mut render_jobs_list {
+            let mut resource_lifetime_map = HashMap::new();
+            for (index, job) in jobs.jobs.iter().enumerate() {
+                if let RenderJob::PassCall((node_index, _)) = job {
+                    let resources = g.neighbors(*node_index);
+                    for resource in resources {
+                        if let Node::Resource(resource) = g.node_weight(resource).unwrap() {
+                            match resource.inner {
+                                ResourceType::ImportTexture(_) => {
+                                    imported.insert(resource.id);
+                                    ()
+                                }
+                                ResourceType::ImportBuffer(_) => {
+                                    imported.insert(resource.id);
+                                    ()
+                                }
+                                _ => (),
+                            };
+                            let l = resource_lifetime_map
+                                .entry(resource.id)
+                                .or_insert_with(|| ResourceLifetime::default());
+                            l.add(ResourceLifetime {
+                                beg: index as u32,
+                                end: index as u32,
+                            });
+                        }
+                    }
+                }
+            }
+
+            let mut jobs_with_resource = vec![];
+            let mut clears = vec![];
+
+            for (index, render_job) in jobs.jobs.iter().enumerate() {
+                for (res_id, res_lifetime) in &resource_lifetime_map {
+                    if index as u32 == res_lifetime.beg {
+                        clears.push(*res_id);
+                        if imported.contains(res_id) {
+                            continue;
+                        }
+
+                        jobs_with_resource.push(RenderJob::ResourceOperation(
+                            ResourceLifetimeOperation::Create(*res_id),
+                        ));
+                    }
+                }
+
+                let mut job = *render_job;
+                let job = match render_job {
+                    RenderJob::PassCall((node_index, s)) => {
+                        let node = g.node_weight(*node_index).unwrap();
+                        let state = if let Node::Pass(pass) = &node {
+                            let (_, _, desc) = pass.inputs_outputs();
+                            Some(RenderTargetState::new(desc, &clears))
+                        } else {
+                            None
+                        };
+                        (*node_index, state)
+                    }
+                    _ => panic!("unexpected"),
+                };
+
+                jobs_with_resource.push(RenderJob::PassCall(job));
+
+                for (res_id, res_lifetime) in &resource_lifetime_map {
+                    if index as u32 == res_lifetime.end {
+                        if imported.contains(res_id) {
+                            continue;
+                        }
+                        jobs_with_resource.push(RenderJob::ResourceOperation(
+                            ResourceLifetimeOperation::Destroy(*res_id),
+                        ));
+                    }
+                }
+
+                clears.clear();
+            }
+
+            jobs.jobs = jobs_with_resource;
+        }
 
         let gz = Dot::with_config(&g, &[Config::EdgeNoLabel]);
-        log::info!("graph {:?} \n passes {:?}", gz, passes_vec);
+        log::info!("graph {:?}", gz);
+        log::info!("render jobs {:?}", render_jobs_list);
 
         RenderGraph {
             name: self.name,
             g,
-            passes: passes_vec,
+            render_jobs_list,
+            union_find,
             registry: ResourceRegistry {
                 desc_map: self.resource_map,
                 underlying_map: HashMap::new(),
@@ -488,4 +706,16 @@ impl Debug for Node {
             Self::Resource(arg0) => f.debug_tuple("Resource").field(arg0).finish(),
         }
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum RenderJob {
+    ResourceOperation(ResourceLifetimeOperation),
+    PassCall((NodeIndex, Option<RenderTargetState>)),
+}
+
+#[derive(Debug, Default)]
+struct DependencyRenderJobs {
+    jobs: Vec<RenderJob>,
+    depends_on_jobs: Vec<u32>,
 }

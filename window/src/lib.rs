@@ -88,7 +88,7 @@ impl HardwareRenderPlugin {
 
         let p = RenderParameter {
             gpu: gpu.clone(),
-            scene: &scene,
+            scene: scene.clone(),
             g: self.rdg.as_mut().unwrap(),
         };
 

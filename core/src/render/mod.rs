@@ -1,24 +1,22 @@
-use bevy_ecs::prelude::*;
 use indexmap::IndexMap;
 use std::{
     any::TypeId,
     collections::HashMap,
     fmt::Debug,
-    ops::Range,
     sync::{Arc, Mutex},
 };
 
 use crate::{
     backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
-    material::{basic::BasicMaterialFace, Material, MaterialFace},
-    render::material::SetupResource,
-    scene::{Scene, LAYER_UI},
+    material::{basic::BasicMaterialFace, Material, MaterialFace, MaterialId},
+    render::material::{RenderSourceIndirectObjects, RenderSourceLayer, SetupResource},
+    scene::{LayerId, Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
     util::any_as_u8_slice,
 };
 
-use self::material::{MaterialRenderContext, MaterialRenderer};
+use self::material::{RenderMaterialContext, RenderSource};
 use self::{
     common::BufferAccessor,
     material::{basic::BasicMaterialRendererFactory, MaterialRendererFactory},
@@ -26,7 +24,7 @@ use self::{
 
 pub struct RenderParameter<'a> {
     pub gpu: Arc<WGPUResource>,
-    pub scene: &'a Scene,
+    pub scene: Arc<Scene>,
     pub g: &'a mut RenderGraph,
 }
 
@@ -47,296 +45,14 @@ struct GlobalUniform2d {
     size: Vec2f,
 }
 
-#[derive(Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub struct PassIdent {
-    type_id: TypeId,
-    layer: u64,
-}
-
-impl PassIdent {
-    pub fn new(type_id: TypeId, layer: u64) -> Self {
-        Self { type_id, layer }
-    }
-
-    pub fn new_from<T: MaterialFace>(layer: u64) -> Self {
-        Self {
-            type_id: TypeId::of::<T>(),
-            layer,
-        }
-    }
-}
-
-impl Debug for PassIdent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PassIdent")
-            .field("type_id", &self.type_id)
-            .field("layer", &self.layer)
-            .finish()
-    }
-}
-
-pub struct DrawCommands {
-    commands: Vec<DrawCommand>,
-    push_constant_buffer: Vec<u8>,
-    bind_groups: Vec<Arc<wgpu::BindGroup>>,
-    constant_buffer_size: u16,
-    clips: Vec<Rectu>,
-    bind_group_count: u8,
-    pipelines: Vec<Arc<Pipeline>>,
-    global_bind_group: u32,
-}
-
-pub struct DrawCommandBuilder<'a> {
-    inner: &'a mut DrawCommands,
-    command: DrawCommand,
-}
-
-impl<'a> DrawCommandBuilder<'a> {
-    fn command_mut(&mut self) -> &mut DrawCommand {
-        &mut self.command
-    }
-
-    pub fn with_clip(mut self, clip: Rectu) -> Self {
-        self.set_clip(clip);
-        self
-    }
-
-    pub fn set_clip(&mut self, clip: Rectu) {
-        if let Some(last) = self.inner.clips.last() {
-            if *last == clip {
-                self.command_mut().clip_offset = (self.inner.clips.len() - 1) as u32;
-                return;
-            }
-        }
-        self.command_mut().clip_offset = (self.inner.clips.len()) as u32;
-        self.inner.clips.push(clip);
-    }
-
-    pub fn with_constant(mut self, buffer: &[u8]) -> Self {
-        self.set_constant(buffer);
-        self
-    }
-
-    pub fn set_constant(&mut self, buffer: &[u8]) {
-        assert_eq!(buffer.len(), self.inner.constant_buffer_size as usize);
-        assert_eq!(self.command_mut().push_constant_offset, u32::MAX);
-
-        let offset = self.inner.push_constant_buffer.len() as u32;
-        self.inner.push_constant_buffer.extend_from_slice(buffer);
-        self.command_mut().push_constant_offset = offset;
-    }
-
-    pub fn with_bind_groups(mut self, group: &[Arc<wgpu::BindGroup>]) -> Self {
-        self.set_bind_groups(group);
-        self
-    }
-
-    pub fn set_bind_groups(&mut self, group: &[Arc<wgpu::BindGroup>]) {
-        assert_eq!(group.len() as u8, self.inner.bind_group_count);
-        let offset = self.inner.bind_groups.len() as u32;
-        self.inner.bind_groups.extend_from_slice(group);
-        self.command_mut().bind_groups = offset;
-    }
-
-    pub fn with_pipeline(mut self, pipeline: u32) -> Self {
-        self.set_pipeline(pipeline);
-        self
-    }
-
-    pub fn set_pipeline(&mut self, pipeline: u32) {
-        self.command_mut().pipeline = pipeline;
-    }
-
-    pub fn build(self) {
-        self.inner.commands.push(self.command);
-    }
-}
-
-impl DrawCommands {
-    pub fn new(constant_buffer_size: usize, bind_group_count: usize) -> Self {
-        let constant_buffer_size = constant_buffer_size as u16;
-        let bind_group_count = bind_group_count as u8;
-        Self {
-            commands: Vec::new(),
-            push_constant_buffer: Vec::new(),
-            constant_buffer_size,
-            bind_group_count,
-            clips: Vec::new(),
-            bind_groups: Vec::new(),
-            pipelines: Vec::new(),
-            global_bind_group: u32::MAX,
-        }
-    }
-
-    pub fn new_index_draw_command(
-        &mut self,
-        id: u64,
-        index: Range<u64>,
-        vertex: Range<u64>,
-        vertex_props: Range<u64>,
-        draw_count: u32,
-    ) -> DrawCommandBuilder {
-        let command = DrawCommand {
-            id,
-            vertex,
-            vertex_props,
-            index,
-            draw_count,
-            bind_groups: u32::MAX,
-            pipeline: u32::MAX,
-            push_constant_offset: u32::MAX,
-            clip_offset: u32::MAX,
-        };
-        DrawCommandBuilder {
-            inner: self,
-            command,
-        }
-    }
-
-    fn get_bind_groups(&self, command: &DrawCommand) -> impl Iterator<Item = &wgpu::BindGroup> {
-        if command.bind_groups == u32::MAX {
-            self.bind_groups[0..0].iter()
-        } else {
-            self.bind_groups[(command.bind_groups as usize)
-                ..((command.bind_groups + self.bind_group_count as u32) as usize)]
-                .iter()
-        }
-        .map(|v| v.as_ref())
-    }
-
-    fn get_constant_data(&self, command: &DrawCommand) -> &[u8] {
-        &self.push_constant_buffer[(command.push_constant_offset as usize)
-            ..((command.push_constant_offset + self.constant_buffer_size as u32) as usize)]
-    }
-
-    fn get_clip(&self, command: &DrawCommand) -> Option<Rectu> {
-        if command.clip_offset == u32::MAX {
-            None
-        } else {
-            Some(self.clips[command.clip_offset as usize])
-        }
-    }
-
-    pub fn add_pipeline(&mut self, pipeline: Arc<Pipeline>) -> u32 {
-        let offset = self.pipelines.len() as u32;
-        self.pipelines.push(pipeline);
-        offset
-    }
-
-    pub fn set_global_bind_group(&mut self, bind_group: Arc<wgpu::BindGroup>) {
-        if self.global_bind_group != u32::MAX {
-            return;
-        }
-        self.global_bind_group = self.bind_groups.len() as u32;
-        self.bind_groups.push(bind_group);
-    }
-
-    fn get_global_bind_group(&self) -> Option<&wgpu::BindGroup> {
-        if self.global_bind_group != u32::MAX {
-            Some(&self.bind_groups[self.global_bind_group as usize])
-        } else {
-            None
-        }
-    }
-
-    pub fn draw<'a, B: BufferAccessor<'a>, U: BufferAccessor<'a>, G: BufferAccessor<'a>>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        index_buffer: B,
-        vertex_buffer: U,
-        vertex_props_buffer: G,
-    ) {
-        let bind_group = self.get_global_bind_group().unwrap();
-        pass.set_bind_group(0, bind_group, &[]);
-
-        let mut last_pipeline = u32::MAX;
-        for command in &self.commands {
-            if let Some(clip) = self.get_clip(command) {
-                pass.set_scissor_rect(clip.x, clip.y, clip.z, clip.w);
-            }
-            if last_pipeline != command.pipeline {
-                last_pipeline = command.pipeline;
-                if let Pipeline::Render(pipeline) =
-                    self.pipelines[command.pipeline as usize].as_ref()
-                {
-                    pass.set_pipeline(pipeline);
-                }
-            }
-
-            let mut bind_group_iter = self.get_bind_groups(command);
-            let g = bind_group_iter.next().unwrap();
-
-            pass.set_bind_group(1, g, &[]);
-
-            pass.set_index_buffer(
-                index_buffer
-                    .buffer_slice(command.id, command.index.clone())
-                    .unwrap(),
-                wgpu::IndexFormat::Uint32,
-            );
-            if !command.vertex.is_empty() {
-                pass.set_vertex_buffer(
-                    0,
-                    vertex_buffer
-                        .buffer_slice(command.id, command.vertex.clone())
-                        .unwrap(),
-                );
-                if !command.vertex_props.is_empty() {
-                    pass.set_vertex_buffer(
-                        1,
-                        vertex_props_buffer
-                            .buffer_slice(command.id, command.vertex_props.clone())
-                            .unwrap(),
-                    );
-                }
-            } else {
-                pass.set_vertex_buffer(
-                    0,
-                    vertex_props_buffer
-                        .buffer_slice(command.id, command.vertex_props.clone())
-                        .unwrap(),
-                );
-            }
-            if command.push_constant_offset != u32::MAX {
-                let constant = self.get_constant_data(command);
-                pass.set_push_constants(wgpu::ShaderStages::all(), 0, constant);
-            }
-
-            pass.draw_indexed(0..command.draw_count, 0, 0..1);
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.bind_groups.clear();
-        self.clips.clear();
-        self.pipelines.clear();
-        self.commands.clear();
-        self.push_constant_buffer.clear();
-        self.global_bind_group = u32::MAX;
-    }
-}
-
-struct DrawCommand {
-    id: u64,
-    vertex: Range<u64>,
-    vertex_props: Range<u64>,
-    index: Range<u64>,
-
-    draw_count: u32,
-    bind_groups: u32,
-    pipeline: u32,
-    push_constant_offset: u32,
-    clip_offset: u32,
-}
-
 struct GlobalUniform {
-    buffer: wgpu::Buffer,
+    buffer: Arc<wgpu::Buffer>,
 }
 
 impl GlobalUniform {
     pub fn new(gpu: &WGPUResource, layout: &wgpu::BindGroupLayout, size: u32) -> Self {
         let label = Some("global uniform");
-        let buffer = gpu.new_uniform_buffer(label, size as u64);
+        let buffer = Arc::new(gpu.new_uniform_buffer(label, size as u64));
         Self { buffer }
     }
 }
@@ -348,7 +64,6 @@ struct HardwareRendererInner {
 
 pub struct HardwareRenderer {
     material_renderer_factory: HashMap<TypeId, Box<dyn MaterialRendererFactory>>,
-    material_renderers: HashMap<PassIdent, Arc<Mutex<dyn MaterialRenderer>>>,
     shader_loader: tshader::Loader,
     inner: Option<HardwareRendererInner>,
 }
@@ -358,8 +73,6 @@ impl HardwareRenderer {
         let mut material_renderer_factory =
             HashMap::<TypeId, Box<dyn MaterialRendererFactory>>::new();
 
-        let material_renderers = HashMap::new();
-
         material_renderer_factory.insert(
             TypeId::of::<BasicMaterialFace>(),
             Box::<BasicMaterialRendererFactory>::default(),
@@ -368,7 +81,6 @@ impl HardwareRenderer {
 
         Self {
             material_renderer_factory,
-            material_renderers,
             shader_loader,
             inner: None,
         }
@@ -378,11 +90,8 @@ impl HardwareRenderer {
         log::info!("install factory {:?}", face_id);
         self.material_renderer_factory.insert(face_id, factory);
     }
-}
 
-impl ModuleRenderer for HardwareRenderer {
-    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &Scene) {
-        log::info!("hardware setup");
+    fn setup_global_uniform(&mut self, gpu: &WGPUResource) {
         self.inner.get_or_insert_with(|| {
             let bind_layout =
                 gpu.device()
@@ -400,12 +109,12 @@ impl ModuleRenderer for HardwareRenderer {
                         }],
                     });
             let main = GlobalUniform::new(
-                &gpu,
+                gpu,
                 &bind_layout,
                 std::mem::size_of::<GlobalUniform3d>() as u32,
             );
             let ui = GlobalUniform::new(
-                &gpu,
+                gpu,
                 &bind_layout,
                 std::mem::size_of::<GlobalUniform2d>() as u32,
             );
@@ -414,58 +123,10 @@ impl ModuleRenderer for HardwareRenderer {
                 ui_camera: ui,
             }
         });
-
-        self.material_renderers.clear();
-
-        let inner = self.inner.as_ref().unwrap();
-
-        let setup_resource = SetupResource {
-            ui_camera: &inner.ui_camera.buffer,
-            main_camera: &inner.main_camera.buffer,
-            shader_loader: &self.shader_loader,
-        };
-        let container = scene.get_container();
-
-        for (layer, sorter) in scene.layers() {
-            let mut material_map: IndexMap<TypeId, Vec<Arc<Material>>> = IndexMap::new();
-            let sort_objects = sorter.lock().unwrap().sort_and_cull();
-            log::info!(
-                "setup layer {} total {} object sort {:?}",
-                layer,
-                sort_objects.len(),
-                sort_objects
-            );
-
-            for obj_id in sort_objects {
-                let o = container.get(&obj_id).unwrap();
-                let obj = o.o();
-                let mat_face_id = obj.material().face_id();
-                material_map
-                    .entry(mat_face_id)
-                    .and_modify(|v| v.push(obj.material_arc()))
-                    .or_insert_with(|| vec![obj.material_arc()]);
-            }
-
-            for (mat_face_id, materials) in material_map {
-                let mats: Vec<_> = materials.iter().map(|v| v.as_ref()).collect();
-
-                let ident = PassIdent::new(mat_face_id, layer);
-                let f = match self.material_renderer_factory.get(&mat_face_id) {
-                    Some(v) => v,
-                    None => {
-                        log::error!("material {:?} renderer factory not exist", mat_face_id);
-                        continue;
-                    }
-                };
-                self.material_renderers
-                    .insert(ident, f.setup(ident, &mats, &gpu, g, &setup_resource));
-            }
-        }
     }
-
-    fn render(&mut self, p: RenderParameter) {
+    fn copy_camera_uniform(&mut self, p: &RenderParameter) {
         let gpu = p.gpu.clone();
-        let scene = p.scene;
+        let scene = p.scene.clone();
 
         // prepare camera uniform buffer
         let inner = self.inner.as_ref().unwrap();
@@ -482,23 +143,74 @@ impl ModuleRenderer for HardwareRenderer {
         p.gpu
             .queue()
             .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
+    }
+}
 
-        let g = p.g;
+impl ModuleRenderer for HardwareRenderer {
+    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &Scene) {
+        log::info!("hardware setup");
+        self.setup_global_uniform(&gpu);
 
-        let backend = GraphBackend::new(gpu);
-        let mut encoder = backend.begin_thread();
+        let inner = self.inner.as_ref().unwrap();
 
-        for r in self.material_renderers.values() {
-            let mut r = r.lock().unwrap();
-            r.before_render();
-        }
+        let setup_resource = SetupResource {
+            ui_camera: &inner.ui_camera.buffer,
+            main_camera: &inner.main_camera.buffer,
+            shader_loader: &self.shader_loader,
+        };
         let container = scene.get_container();
 
+        // face map
+        let mut material_map: IndexMap<TypeId, Vec<Arc<Material>>> = IndexMap::new();
+
         for (layer, sorter) in scene.layers() {
-            let camera_uniform = if layer >= LAYER_UI {
-                &inner.ui_camera.buffer
+            let sort_objects = sorter.lock().unwrap().sort_and_cull();
+            log::info!(
+                "setup layer {} total {} object sort {:?}",
+                layer,
+                sort_objects.len(),
+                sort_objects
+            );
+
+            for obj_id in sort_objects {
+                let o = container.get(&obj_id).unwrap();
+                let obj = o.o();
+                let mat_face_id = obj.material().face_id();
+                material_map
+                    .entry(mat_face_id.clone())
+                    .and_modify(|v| v.push(obj.material_arc()))
+                    .or_insert_with(|| vec![obj.material_arc()]);
+            }
+        }
+
+        for (mat_face_id, materials) in material_map {
+            let f = match self.material_renderer_factory.get(&mat_face_id) {
+                Some(v) => v,
+                None => {
+                    log::error!("material {:?} renderer factory not exist", mat_face_id);
+                    continue;
+                }
+            };
+            f.setup(&materials, &gpu, g, &setup_resource);
+        }
+    }
+
+    fn render(&mut self, p: RenderParameter) {
+        self.copy_camera_uniform(&p);
+
+        let gpu = p.gpu.clone();
+        let scene = p.scene;
+        let storage = scene.get_container();
+
+        let mut render_source_map: HashMap<TypeId, RenderSource> = HashMap::new();
+
+        let inner = self.inner.as_ref().unwrap();
+
+        for (layer, sorter) in scene.layers() {
+            let main_camera = if layer >= LAYER_UI {
+                inner.ui_camera.buffer.clone()
             } else {
-                &inner.main_camera.buffer
+                inner.main_camera.buffer.clone()
             };
 
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
@@ -510,39 +222,57 @@ impl ModuleRenderer for HardwareRenderer {
             );
 
             for obj_id in &sort_objects {
-                let o = container.get(&obj_id).unwrap();
+                let o = storage.get(&obj_id).unwrap();
                 let obj = o.o();
-                let mat = obj.material();
-                let mat_face_id = mat.face_id();
+                let mat_id = obj.material().id();
+                let face_id = obj.material().face_id();
 
-                let ident = PassIdent::new(mat_face_id, layer);
-                let r = match self.material_renderers.get(&ident) {
-                    Some(v) => v,
-                    None => {
-                        log::error!("material {:?} not found", ident.type_id);
+                let rs = render_source_map
+                    .entry(face_id)
+                    .or_insert_with(|| RenderSource {
+                        gpu: gpu.clone(),
+                        scene: scene.clone(),
+                        list: vec![],
+                    });
+
+                if let Some(rsl) = rs.list.last_mut() {
+                    if rsl.layer == layer {
+                        // append
+                        let last_mat = rsl.material.last_mut().unwrap();
+                        if last_mat.mat_id != mat_id {
+                            rsl.material.push(RenderSourceIndirectObjects {
+                                material: obj.material_arc(),
+                                mat_id,
+                                offset: 0,
+                                count: 1,
+                            })
+                        } else {
+                            last_mat.count += 1;
+                            rsl.objects.push(*obj_id);
+                        }
                         continue;
                     }
-                };
-
-                let mut r = r.lock().unwrap();
-                let o = [*obj_id];
-
-                let mut ctx = MaterialRenderContext {
-                    gpu: p.gpu.as_ref(),
-                    scene: &scene,
-                    main_camera: camera_uniform,
-                };
-                r.render_material(&mut ctx, &o, mat, encoder.encoder_mut());
+                }
+                // new list
+                rs.list.push(RenderSourceLayer {
+                    objects: vec![*obj_id],
+                    material: vec![RenderSourceIndirectObjects {
+                        material: obj.material_arc(),
+                        mat_id,
+                        offset: 0,
+                        count: 1,
+                    }],
+                    main_camera: main_camera.clone(),
+                    layer,
+                })
             }
         }
-        drop(encoder);
 
-        for (_, r) in &self.material_renderers {
-            let mut r = r.lock().unwrap();
-            r.finish_render();
-        }
-
-        g.execute(|_, _| {}, |_| {}, backend);
+        let rm_context = RenderMaterialContext {
+            map: render_source_map,
+        };
+        let backend = GraphBackend::new(p.gpu.clone());
+        p.g.execute(backend, &rm_context);
     }
 
     fn stop(&mut self) {}

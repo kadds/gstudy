@@ -1,16 +1,30 @@
 use std::{
     any::{Any, Provider, TypeId},
     fmt::Debug,
-    marker::PhantomData,
     sync::{Arc, Mutex},
 };
 
-use super::{
-    backend::{GraphBackend, GraphEncoder},
-    resource::{ClearValue, ResourceOps, RT_COLOR_RESOURCE_ID, RT_DEPTH_RESOURCE_ID},
-    PassParameter, RenderGraph, RenderGraphBuilder, ResourceId, ResourceRegistry, ResourceStateMap,
-    ResourceUsage,
+use crate::{
+    backends::wgpu_backend::{ClearValue, ResourceOps},
+    types::Color,
 };
+
+use super::{
+    backend::{GraphBackend, GraphCopyEngine, GraphRenderEngine},
+    resource::{RT_COLOR_RESOURCE_ID, RT_DEPTH_RESOURCE_ID},
+    PassParameter, RenderGraph, RenderGraphBuilder, ResourceId, ResourceRegistry, ResourceUsage,
+};
+
+#[derive(Debug)]
+pub enum RenderStage {
+    Prepare, // external texture copies... samplers
+
+    Queue, // bind group
+
+    Render, //
+
+    Cleanup,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum PreferAttachment {
@@ -38,24 +52,154 @@ pub struct RenderTargetDescriptor {
     pub depth: Option<DepthRenderTargetDescriptor>,
 }
 
+impl RenderTargetDescriptor {
+    pub fn has_default(&self) -> bool {
+        for c in &self.colors {
+            if PreferAttachment::Default == c.prefer_attachment {
+                return true;
+            }
+        }
+        if let Some(depth) = &self.depth {
+            if PreferAttachment::Default == depth.prefer_attachment {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn new_color(color: ColorRenderTargetDescriptor) -> Self {
+        Self {
+            colors: smallvec::smallvec![color],
+            depth: None,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct RenderTargetState {
+    pub colors: bitmaps::Bitmap<64>,
+    pub depth: Option<bool>,
+}
+
+impl RenderTargetState {
+    pub fn new(desc: &RenderTargetDescriptor, res_id_list: &[ResourceId]) -> Self {
+        let mut t = Self::default();
+
+        for (index, c) in desc.colors.iter().enumerate() {
+            let res_id = match c.prefer_attachment {
+                PreferAttachment::Default => RT_COLOR_RESOURCE_ID,
+                PreferAttachment::Resource(res) => res,
+                _ => continue,
+            };
+            if res_id_list.contains(&res_id) {
+                t.colors.set(index, true);
+            } else {
+                t.colors.set(index, false);
+            }
+        }
+
+        if let Some(depth) = &desc.depth {
+            let res_id = match depth.prefer_attachment {
+                PreferAttachment::Default => RT_DEPTH_RESOURCE_ID,
+                PreferAttachment::Resource(res) => res,
+                _ => return t,
+            };
+            t.depth = Some(res_id_list.contains(&res_id))
+        }
+
+        t
+    }
+
+    pub fn color(
+        &self,
+        index: usize,
+        desc: &RenderTargetDescriptor,
+        texture_clear: &Option<ClearValue>,
+    ) -> Option<ResourceOps> {
+        if let Some(_) = &desc.colors[index].ops.load {
+            return Some(desc.colors[index].ops.clone());
+        } else {
+            if self.colors.get(index) {
+                if let Some(color) = texture_clear {
+                    return Some(ResourceOps {
+                        load: Some(color.clone()),
+                        store: desc.colors[index].ops.store,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    pub fn depth(
+        &self,
+        desc: &RenderTargetDescriptor,
+        texture_clear: &Option<ClearValue>,
+    ) -> (Option<ResourceOps>, Option<ResourceOps>) {
+        if let Some(p) = &desc.depth {
+            let mut depth = None;
+            let mut stencil = None;
+            if self.depth.unwrap_or_default() {
+                depth = texture_clear
+                    .as_ref()
+                    .and_then(|v| v.depth())
+                    .map(|v| ResourceOps {
+                        load: Some(ClearValue::Depth(v)),
+                        store: true,
+                    });
+                stencil = texture_clear
+                    .as_ref()
+                    .and_then(|v| v.stencil())
+                    .map(|v| ResourceOps {
+                        load: Some(ClearValue::Stencil(v)),
+                        store: true,
+                    });
+            }
+            if depth.is_none() {
+                depth = p.depth_ops.clone();
+            }
+            if stencil.is_none() {
+                stencil = p.stencil_ops.clone();
+            }
+
+            if let Some(depth) = &mut depth {
+                if let Some(stencil) = &mut stencil {
+                } else {
+                }
+            } else {
+                if let Some(stencil) = &mut stencil {
+                } else {
+                }
+            }
+            return (depth, stencil);
+        }
+        (None, None)
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct RenderPassContext<'b> {
-    encoder: GraphEncoder,
-    state: &'b mut ResourceStateMap,
-    registry: &'b ResourceRegistry,
-    backend: &'b GraphBackend,
+    // pub state: &'b mut ResourceStateMap,
+    // pub registry: &'b ResourceRegistry,
     name: &'b str,
-    render_targets: &'b RenderTargetDescriptor,
+    parameter: &'b dyn Any,
 }
 
 impl<'b> RenderPassContext<'b> {
-    pub fn new_pass(&mut self) -> wgpu::RenderPass {
-        self.encoder
-            .new_pass(self.name, self.render_targets, self.registry, self.state)
+    pub fn take<T: 'static + Send + Sync>(&self) -> &T {
+        self.parameter.downcast_ref::<T>().unwrap()
     }
 }
 
 pub trait RenderPassExecutor {
-    fn execute<'b>(&'b mut self, context: RenderPassContext<'b>);
+    fn prepare<'b>(
+        &'b mut self,
+        context: RenderPassContext<'b>,
+        engine: &mut GraphCopyEngine,
+    ) -> Option<()>;
+    fn queue<'b>(&'b mut self, context: RenderPassContext<'b>, device: &wgpu::Device);
+    fn render<'b>(&'b mut self, context: RenderPassContext<'b>, engine: &mut GraphRenderEngine);
+    fn cleanup<'b>(&'b mut self, context: RenderPassContext<'b>);
 }
 
 pub trait DynPass: Debug {
@@ -65,11 +209,18 @@ pub trait DynPass: Debug {
         &self,
         registry: &ResourceRegistry,
         backend: &GraphBackend,
-        state: &mut ResourceStateMap,
+        render_target_state: &RenderTargetState,
+        context: &dyn Any,
     );
+
+    fn name(&self) -> &str;
 
     fn is_default_render_target(&self, id: ResourceId) -> bool {
         false
+    }
+
+    fn constraints(&self) -> Option<&PassConstraints> {
+        None
     }
 }
 
@@ -80,6 +231,7 @@ pub struct RenderPass {
     pub inputs: PassParameter,
     pub outputs: PassParameter,
     pub render_targets: RenderTargetDescriptor,
+    pub constraints: PassConstraints,
 }
 
 impl Debug for RenderPass {
@@ -95,23 +247,39 @@ impl DynPass for RenderPass {
         (&self.inputs, &self.outputs, &self.render_targets)
     }
 
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     fn execute(
         &self,
         registry: &ResourceRegistry,
         backend: &GraphBackend,
-        state: &mut ResourceStateMap,
+        render_target_state: &RenderTargetState,
+        parameter: &dyn Any,
     ) {
         let mut c = self.inner.lock().unwrap();
-        let mut encoder = backend.begin_thread();
         let context = RenderPassContext {
-            encoder,
-            state,
-            registry,
-            backend,
             name: &self.name,
-            render_targets: &self.render_targets,
+            parameter,
         };
-        c.execute(context);
+        {
+            let mut copy_engine = backend.dispatch_copy(&self.name);
+            c.prepare(context.clone(), &mut copy_engine);
+        }
+
+        c.queue(context, backend.gpu().device());
+
+        {
+            let mut render_engine = backend.dispatch_render(
+                &self.name,
+                &self.render_targets,
+                render_target_state,
+                registry,
+            );
+            c.render(context, &mut render_engine);
+        }
+        c.cleanup(context);
     }
 
     fn is_default_render_target(&self, id: ResourceId) -> bool {
@@ -120,10 +288,39 @@ impl DynPass for RenderPass {
             .iter()
             .any(|v| v.prefer_attachment == PreferAttachment::Default)
     }
+
+    fn constraints(&self) -> Option<&PassConstraints> {
+        Some(&self.constraints)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum PassConstraint {
+    Before(String),
+    After(String),
+    First,
+    Last,
+}
+
+#[derive(Debug, Default)]
+pub struct PassConstraints {
+    pub constraints: Vec<PassConstraint>,
+}
+
+impl PassConstraints {
+    pub fn add(&mut self, o: &Self) {
+        self.constraints.extend_from_slice(&o.constraints);
+    }
+    pub fn has_last(&self) -> bool {
+        self.constraints.contains(&PassConstraint::Last)
+    }
+    pub fn has_first(&self) -> bool {
+        self.constraints.contains(&PassConstraint::First)
+    }
 }
 
 pub struct RenderPassBuilder {
-    name: String,
+    pub(crate) name: String,
     shader_name: String,
     inputs: PassParameter,
     outputs: PassParameter,
@@ -131,6 +328,7 @@ pub struct RenderPassBuilder {
     inner: Option<Arc<Mutex<dyn RenderPassExecutor>>>,
 
     render_targets: Option<RenderTargetDescriptor>,
+    pub(crate) constraints: PassConstraints,
 }
 
 impl RenderPassBuilder {
@@ -142,7 +340,12 @@ impl RenderPassBuilder {
             outputs: PassParameter::default(),
             inner: None,
             render_targets: None,
+            constraints: PassConstraints::default(),
         }
+    }
+
+    pub fn add_constraint(&mut self, constraint: PassConstraint) {
+        self.constraints.constraints.push(constraint);
     }
 
     pub fn read_texture(&mut self, input: ResourceId) {
@@ -190,79 +393,70 @@ impl RenderPassBuilder {
             inputs: self.inputs,
             outputs: self.outputs,
             render_targets: self.render_targets.unwrap(),
+            constraints: self.constraints,
         }
     }
 }
 
-// pub struct ClearPass {
-//     name: String,
-//     inputs: PassParameter,
-//     outputs: PassParameter,
-//     render_targets: PassRenderTargets,
-// }
+pub struct ClearPass {
+    name: String,
+    inputs: PassParameter,
+    outputs: PassParameter,
+    render_targets: RenderTargetDescriptor,
+}
 
-// impl DynPass for ClearPass {
-//     fn inputs_outputs(&self) -> (&PassParameter, &PassParameter) {
-//         (&self.inputs, &self.outputs)
-//     }
+impl DynPass for ClearPass {
+    fn inputs_outputs(&self) -> (&PassParameter, &PassParameter, &RenderTargetDescriptor) {
+        (&self.inputs, &self.outputs, &self.render_targets)
+    }
 
-//     fn connect_external(
-//         &mut self,
-//         b: &mut RenderGraphBuilder,
-//         present_color: ResourceId,
-//         present_depth: ResourceId,
-//     ) {
-//         let color = b.alias_texture(present_color);
-//         let depth = b.alias_texture(present_depth);
-//         let color_output = b.alias_texture(present_color);
-//         let depth_output = b.alias_texture(present_depth);
+    fn name(&self) -> &str {
+        &self.name
+    }
 
-//         let targets = PassRenderTargets::new(color, depth);
-//         self.inputs
-//             .textures
-//             .push((color, ResourceUsage::RenderTargetTextureRead));
-//         self.inputs
-//             .textures
-//             .push((depth, ResourceUsage::RenderTargetTextureRead));
+    fn execute(
+        &self,
+        registry: &ResourceRegistry,
+        backend: &GraphBackend,
+        render_target_state: &RenderTargetState,
+        context: &dyn Any,
+    ) {
+        let mut r = backend.dispatch_render_with_clear(&self.name, &self.render_targets, registry);
+        r.begin(0);
+    }
+}
 
-//         self.outputs
-//             .textures
-//             .push((color_output, ResourceUsage::RenderTargetTextureWrite));
-//         self.outputs
-//             .textures
-//             .push((depth_output, ResourceUsage::RenderTargetTextureWrite));
-//         self.render_targets = targets;
-//     }
+impl Debug for ClearPass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderPass")
+            .field("name", &self.name)
+            .finish()
+    }
+}
 
-//     fn execute(&self, registry: &ResourceRegistry, backend: &GraphBackend) {
-//         let mut encoder = backend.begin_thread();
-//         let t = encoder.new_pass("clear pass", &self.render_targets, registry);
-//     }
-// }
+#[derive(Debug)]
+pub struct ClearPassBuilder {
+    name: String,
+    render_targets: Option<RenderTargetDescriptor>,
+}
 
-// impl Debug for ClearPass {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("RenderPass")
-//             .field("name", &self.name)
-//             .finish()
-//     }
-// }
-
-// #[derive(Debug)]
-// pub struct ClearPassBuilder {
-//     name: String,
-// }
-
-// impl ClearPassBuilder {
-//     pub fn new<S: Into<String>>(name: S) -> Self {
-//         Self { name: name.into() }
-//     }
-//     pub fn build(mut self) -> ClearPass {
-//         ClearPass {
-//             name: self.name,
-//             inputs: PassParameter::default(),
-//             outputs: PassParameter::default(),
-//             render_targets: PassRenderTargets::default(),
-//         }
-//     }
-// }
+impl ClearPassBuilder {
+    pub fn new<S: Into<String>>(name: S) -> Self {
+        Self {
+            name: name.into(),
+            render_targets: None,
+        }
+    }
+    pub fn render_target(mut self, desc: RenderTargetDescriptor) -> Self {
+        self.render_targets = Some(desc);
+        self
+    }
+    pub fn build(self) -> ClearPass {
+        ClearPass {
+            name: self.name,
+            inputs: PassParameter::default(),
+            outputs: PassParameter::default(),
+            render_targets: self.render_targets.unwrap(),
+        }
+    }
+}

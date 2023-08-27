@@ -18,21 +18,24 @@ use super::{
     Camera,
 };
 
-pub const LAYER_NORMAL: u64 = 4_000;
-pub const LAYER_BACKGROUND: u64 = 10_000;
-pub const LAYER_TRANSPARENT: u64 = 20_000;
-pub const LAYER_ALPHA_TEST: u64 = 30_000;
-pub const LAYER_UI: u64 = 100_000;
-pub const UNKNOWN_OBJECT: u64 = 0;
+pub type LayerId = u32;
+pub type ObjectId = u64;
+
+pub const LAYER_NORMAL: LayerId = 4_000;
+pub const LAYER_BACKGROUND: LayerId = 10_000;
+pub const LAYER_TRANSPARENT: LayerId = 20_000;
+pub const LAYER_ALPHA_TEST: LayerId = 30_000;
+pub const LAYER_UI: LayerId = 100_000;
+pub const UNKNOWN_OBJECT: ObjectId = 0;
 
 #[derive(Debug)]
 pub struct ObjectWrapper {
-    pub layer: u64,
+    pub layer: LayerId,
     pub object: RenderObject,
 }
 
 impl ObjectWrapper {
-    pub fn new(layer: u64, object: RenderObject) -> Self {
+    pub fn new(layer: LayerId, object: RenderObject) -> Self {
         Self { layer, object }
     }
     pub fn o(&self) -> &RenderObject {
@@ -54,7 +57,7 @@ pub struct Scene {
     storage: SceneStorage,
 
     // reader layer -> objects
-    queue: Mutex<BTreeMap<u64, Arc<Mutex<dyn Sorter>>>>,
+    queue: Mutex<BTreeMap<LayerId, Arc<Mutex<dyn Sorter>>>>,
 
     cameras: Mutex<SceneCamera>,
 }
@@ -142,23 +145,23 @@ impl Scene {
         }
     }
 
-    pub fn add_ui(&self, object: RenderObject) -> u64 {
+    pub fn add_ui(&self, object: RenderObject) -> ObjectId {
         self.add_with(object, LAYER_UI)
     }
 
-    pub fn add_with_tag(&self, mut object: RenderObject, layer: u64, tag: TagId) -> u64 {
+    pub fn add_with_tag(&self, mut object: RenderObject, layer: LayerId, tag: TagId) -> u64 {
         object.add_tag(tag);
         self.add_with(object, layer)
     }
 
-    pub fn add_with_tags(&self, mut object: RenderObject, layer: u64, tags: &[TagId]) -> u64 {
+    pub fn add_with_tags(&self, mut object: RenderObject, layer: LayerId, tags: &[TagId]) -> u64 {
         for tag in tags {
             object.add_tag(*tag);
         }
         self.add_with(object, layer)
     }
 
-    pub fn add_with(&self, mut object: RenderObject, layer: u64) -> u64 {
+    pub fn add_with(&self, mut object: RenderObject, layer: LayerId) -> ObjectId {
         let id = self.context.alloc_object_id();
         if !object.has_name() {
             object.set_name(&format!("Object {}", id));
@@ -252,7 +255,7 @@ impl Scene {
         self.storage.clone()
     }
 
-    pub fn layers(&self) -> Vec<(u64, Arc<Mutex<dyn Sorter>>)> {
+    pub fn layers(&self) -> Vec<(LayerId, Arc<Mutex<dyn Sorter>>)> {
         self.queue
             .lock()
             .unwrap()

@@ -5,35 +5,41 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tshader::ShaderTech;
-
 use crate::{
     backends::wgpu_backend::WGPUResource,
-    graph::rdg::{RenderGraph, RenderGraphBuilder},
-    material::Material,
+    graph::rdg::{pass::RenderPassContext, RenderGraphBuilder},
+    material::{Material, MaterialFace, MaterialId},
     scene::{Camera, Scene},
 };
 
-use super::PassIdent;
-
-pub struct MaterialRenderContext<'a> {
-    pub gpu: &'a WGPUResource,
-    pub scene: &'a Scene,
-    pub main_camera: &'a wgpu::Buffer,
+pub struct RenderSourceIndirectObjects {
+    pub material: Arc<Material>,
+    pub mat_id: MaterialId,
+    pub offset: usize,
+    pub count: usize,
 }
 
-pub trait MaterialRenderer {
-    fn before_render(&mut self);
+pub struct RenderSourceLayer {
+    pub objects: Vec<u64>,
+    pub material: Vec<RenderSourceIndirectObjects>,
+    pub main_camera: Arc<wgpu::Buffer>,
+    pub layer: u32,
+}
 
-    fn render_material<'b>(
-        &mut self,
-        ctx: &'b mut MaterialRenderContext<'b>,
-        objects: &'b [u64],
-        material: &'b Material,
-        encoder: &mut wgpu::CommandEncoder,
-    );
+impl RenderSourceLayer {
+    pub fn objects(&self, r: &RenderSourceIndirectObjects) -> &[u64] {
+        &self.objects[r.offset..(r.offset + r.count)]
+    }
+}
 
-    fn finish_render(&mut self);
+pub struct RenderSource {
+    pub gpu: Arc<WGPUResource>,
+    pub scene: Arc<Scene>,
+    pub list: Vec<RenderSourceLayer>,
+}
+
+pub struct RenderMaterialContext {
+    pub map: HashMap<TypeId, RenderSource>,
 }
 
 pub struct SetupResource<'a> {
@@ -45,17 +51,22 @@ pub struct SetupResource<'a> {
 pub trait MaterialRendererFactory {
     fn setup(
         &self,
-        pass_ident: PassIdent,
-        material: &[&Material],
+        materials: &[Arc<Material>],
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
-    ) -> Arc<Mutex<dyn MaterialRenderer>>;
-    fn sort_key(&self, material: &Material, gpu: &WGPUResource) -> u64;
+    );
 }
 
 pub mod basic;
 
 pub struct HardwareMaterialShaderResource {
     pub pass: smallvec::SmallVec<[Arc<wgpu::RenderPipeline>; 1]>,
+}
+
+pub fn take_rs<'a, T: MaterialFace>(
+    context: &'a RenderPassContext<'a>,
+) -> Option<&'a RenderSource> {
+    let rc = context.take::<RenderMaterialContext>();
+    rc.map.get(&std::any::TypeId::of::<T>())
 }

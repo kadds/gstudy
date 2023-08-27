@@ -12,7 +12,6 @@ use std::{
 use instant::Duration;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use winit::{
-    event::StartCause,
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
     window::WindowBuilder,
 };
@@ -34,6 +33,8 @@ pub struct Looper {
     auto_exit: bool,
     has_render_event: bool,
     is_first_update: bool,
+
+    fps: u32,
 }
 
 impl EventSender for LooperEventSource {
@@ -98,6 +99,7 @@ impl Looper {
             auto_exit: true,
             has_render_event: false,
             is_first_update: true,
+            fps: 0,
         }
     }
 
@@ -285,8 +287,12 @@ impl Looper {
             _ => {}
         }
         if self.frame.changed() {
-            let _ =
-                event_proxy.send_event(Box::new(Event::FpsUpdate(crate::FPS(self.frame.fps()))));
+            if self.fps != self.frame.fps() as u32 {
+                self.fps = self.frame.fps() as u32;
+                log::info!("fps {}", self.frame.fps());
+                let _ = event_proxy
+                    .send_event(Box::new(Event::FpsUpdate(crate::FPS(self.frame.fps()))));
+            }
         }
         ret
     }
