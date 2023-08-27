@@ -11,7 +11,7 @@ use crate::{
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
     material::{basic::BasicMaterialFace, Material, MaterialFace, MaterialId},
     render::material::{RenderSourceIndirectObjects, RenderSourceLayer, SetupResource},
-    scene::{LayerId, Scene, LAYER_UI},
+    scene::{layer_str, LayerId, Scene, LAYER_UI},
     types::{Mat4x4f, Rectu, Vec2f},
     util::any_as_u8_slice,
 };
@@ -166,8 +166,9 @@ impl ModuleRenderer for HardwareRenderer {
         for (layer, sorter) in scene.layers() {
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
             log::info!(
-                "setup layer {} total {} object sort {:?}",
+                "setup layer {} {} total {} object sort {:?}",
                 layer,
+                layer_str(layer),
                 sort_objects.len(),
                 sort_objects
             );
@@ -215,8 +216,9 @@ impl ModuleRenderer for HardwareRenderer {
 
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
             log::info!(
-                "layer {} total {} object sort {:?}",
+                "layer {} {} total {} object sort {:?}",
                 layer,
+                layer_str(layer),
                 sort_objects.len(),
                 sort_objects
             );
@@ -243,9 +245,10 @@ impl ModuleRenderer for HardwareRenderer {
                             rsl.material.push(RenderSourceIndirectObjects {
                                 material: obj.material_arc(),
                                 mat_id,
-                                offset: 0,
+                                offset: rsl.objects.len(),
                                 count: 1,
-                            })
+                            });
+                            rsl.objects.push(*obj_id);
                         } else {
                             last_mat.count += 1;
                             rsl.objects.push(*obj_id);
@@ -267,6 +270,7 @@ impl ModuleRenderer for HardwareRenderer {
                 })
             }
         }
+        log::debug!("{:?}", render_source_map);
 
         let rm_context = RenderMaterialContext {
             map: render_source_map,

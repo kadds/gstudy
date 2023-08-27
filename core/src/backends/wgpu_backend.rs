@@ -96,16 +96,16 @@ pub struct WGPUResource {
     queue: Queue,
     instance: Arc<WGPUInstance>,
     context: Arc<RContext>,
-    default_texture: (wgpu::Texture, wgpu::TextureView),
-    default_sampler: wgpu::Sampler,
+    default_texture_id: ResourceRef,
+    default_sampler_id: ResourceRef,
 }
 
 impl WGPUResource {
-    pub fn default_texture(&self) -> &wgpu::TextureView {
-        &self.default_texture.1
+    pub fn default_texture(&self) -> ResourceRef {
+        self.default_texture_id.clone()
     }
-    pub fn default_sampler(&self) -> &wgpu::Sampler {
-        &self.default_sampler
+    pub fn default_sampler(&self) -> ResourceRef {
+        self.default_sampler_id.clone()
     }
 
     fn build_surface_desc(width: u32, height: u32, format: TextureFormat) -> SurfaceConfiguration {
@@ -544,12 +544,11 @@ impl WGPUBackend {
             },
             any_as_u8_slice_array(&texture_data),
         );
-        let view = default_texture.create_view(&wgpu::TextureViewDescriptor {
-            ..Default::default()
-        });
 
-        let default_texture = (default_texture, view);
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        let default_texture_id = context.register_texture(default_texture);
+        let default_sampler_id = context.register_sampler(default_sampler);
 
         // config first time
 
@@ -561,8 +560,8 @@ impl WGPUBackend {
         Ok(WGPUBackend {
             inner: WGPUResource {
                 context,
-                default_texture,
-                default_sampler,
+                default_texture_id,
+                default_sampler_id,
                 instance: Arc::new(WGPUInstance {
                     instance,
                     surface,
@@ -587,11 +586,50 @@ impl WGPUBackend {
     }
 }
 
-#[derive(Debug)]
-struct WGPUFrame {
-    frame: SurfaceTexture,
+#[derive(Debug, Clone)]
+pub enum ClearValue {
+    Color(crate::types::Color),
+    Depth(f32),
+    Stencil(u32),
+    DepthAndStencil((f32, u32)),
+}
 
-    frame_texture_view: TextureView,
+impl ClearValue {
+    pub fn depth(&self) -> Option<f32> {
+        match self {
+            ClearValue::Depth(d) => Some(*d),
+            ClearValue::DepthAndStencil((d, s)) => Some(*d),
+            _ => None,
+        }
+    }
+    pub fn stencil(&self) -> Option<u32> {
+        match self {
+            ClearValue::Stencil(s) => Some(*s),
+            ClearValue::DepthAndStencil((d, s)) => Some(*s),
+            _ => None,
+        }
+    }
+    pub fn color(&self) -> Option<crate::types::Color> {
+        match self {
+            ClearValue::Color(c) => Some(*c),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResourceOps {
+    pub load: Option<ClearValue>,
+    pub store: bool,
+}
+
+impl ResourceOps {
+    pub fn load_store() -> Self {
+        Self {
+            load: None,
+            store: true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -651,43 +689,6 @@ impl std::fmt::Debug for WGPURenderTarget {
 }
 
 unsafe impl std::marker::Send for WGPURenderTarget {}
-
-#[derive(Debug, Clone)]
-pub enum ClearValue {
-    Color(crate::types::Color),
-    Depth(f32),
-    Stencil(u32),
-    DepthAndStencil((f32, u32)),
-}
-
-impl ClearValue {
-    pub fn depth(&self) -> Option<f32> {
-        match self {
-            ClearValue::Depth(d) => Some(*d),
-            ClearValue::DepthAndStencil((d, s)) => Some(*d),
-            _ => None,
-        }
-    }
-    pub fn stencil(&self) -> Option<u32> {
-        match self {
-            ClearValue::Stencil(s) => Some(*s),
-            ClearValue::DepthAndStencil((d, s)) => Some(*s),
-            _ => None,
-        }
-    }
-    pub fn color(&self) -> Option<crate::types::Color> {
-        match self {
-            ClearValue::Color(c) => Some(*c),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ResourceOps {
-    pub load: Option<ClearValue>,
-    pub store: bool,
-}
 
 impl WGPURenderTarget {
     pub fn new(label: &str) -> Self {

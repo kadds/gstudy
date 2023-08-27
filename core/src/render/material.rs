@@ -1,6 +1,7 @@
 use std::{
     any::{Provider, TypeId},
     collections::HashMap,
+    fmt::Debug,
     io::{BufReader, Read},
     sync::{Arc, Mutex},
 };
@@ -19,11 +20,32 @@ pub struct RenderSourceIndirectObjects {
     pub count: usize,
 }
 
+impl Debug for RenderSourceIndirectObjects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderSourceIndirectObjects")
+            .field("material", &self.material.id())
+            .field("mat_id", &self.mat_id)
+            .field("offset", &self.offset)
+            .field("count", &self.count)
+            .finish()
+    }
+}
+
 pub struct RenderSourceLayer {
     pub objects: Vec<u64>,
     pub material: Vec<RenderSourceIndirectObjects>,
     pub main_camera: Arc<wgpu::Buffer>,
     pub layer: u32,
+}
+
+impl Debug for RenderSourceLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderSourceLayer")
+            .field("objects", &self.objects)
+            .field("material", &self.material)
+            .field("layer", &self.layer)
+            .finish()
+    }
 }
 
 impl RenderSourceLayer {
@@ -36,6 +58,14 @@ pub struct RenderSource {
     pub gpu: Arc<WGPUResource>,
     pub scene: Arc<Scene>,
     pub list: Vec<RenderSourceLayer>,
+}
+
+impl Debug for RenderSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderSource")
+            .field("list", &self.list)
+            .finish()
+    }
 }
 
 pub struct RenderMaterialContext {

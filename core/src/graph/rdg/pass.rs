@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    backends::wgpu_backend::{ClearValue, ResourceOps},
+    backends::wgpu_backend::{ClearValue, ResourceOps, WGPUResource},
     types::Color,
 };
 
@@ -183,6 +183,7 @@ pub struct RenderPassContext<'b> {
     // pub registry: &'b ResourceRegistry,
     name: &'b str,
     parameter: &'b dyn Any,
+    gpu: &'b WGPUResource,
 }
 
 impl<'b> RenderPassContext<'b> {
@@ -262,6 +263,7 @@ impl DynPass for RenderPass {
         let context = RenderPassContext {
             name: &self.name,
             parameter,
+            gpu: backend.gpu(),
         };
         {
             let mut copy_engine = backend.dispatch_copy(&self.name);

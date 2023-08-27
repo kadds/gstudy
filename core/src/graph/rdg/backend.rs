@@ -87,6 +87,7 @@ impl GraphBackend {
         registry: &'a ResourceRegistry,
     ) -> GraphRenderEngine {
         let mut render_target = WGPURenderTarget::new(name);
+        let mut render_target2 = WGPURenderTarget::new(name);
         for color in &pass_render_target.colors {
             let res_id = match color.prefer_attachment {
                 super::pass::PreferAttachment::Default => RT_COLOR_RESOURCE_ID,
@@ -95,29 +96,21 @@ impl GraphBackend {
             };
             let (texture, texture_desc) = registry.get_underlying(res_id);
 
-            if let ResourceType::Texture(info) = &texture_desc.inner {
-                render_target.add_render_target(
+            if let Some(c) = match &texture_desc.inner {
+                ResourceType::Texture(info) => Some(&info.clear),
+                ResourceType::ImportTexture(info) => Some(&info.clear),
+                _ => None,
+            } {
+                render_target2.add_render_target(
                     texture.texture_view(),
-                    info.clear
-                        .as_ref()
-                        .and_then(|v| v.color())
-                        .map(|c| ResourceOps {
-                            load: Some(ClearValue::Color(c)),
-                            store: true,
-                        }),
+                    c.as_ref().map(|_| ResourceOps::load_store()),
                 );
-            }
-
-            if let ResourceType::ImportTexture(info) = &texture_desc.inner {
                 render_target.add_render_target(
                     texture.texture_view(),
-                    info.clear
-                        .as_ref()
-                        .and_then(|v| v.color())
-                        .map(|c| ResourceOps {
-                            load: Some(ClearValue::Color(c)),
-                            store: true,
-                        }),
+                    c.as_ref().and_then(|v| v.color()).map(|c| ResourceOps {
+                        load: Some(ClearValue::Color(c)),
+                        store: true,
+                    }),
                 );
             }
         }
@@ -129,44 +122,25 @@ impl GraphBackend {
             };
             if let Some(res_id) = res_id {
                 let (texture, texture_desc) = registry.get_underlying(res_id);
-
-                if let ResourceType::Texture(info) = &texture_desc.inner {
-                    render_target.set_depth_target(
+                if let Some(c) = match &texture_desc.inner {
+                    ResourceType::Texture(info) => Some(&info.clear),
+                    ResourceType::ImportTexture(info) => Some(&info.clear),
+                    _ => None,
+                } {
+                    let depth = c.as_ref().and_then(|v| v.depth()).map(|v| ResourceOps {
+                        load: Some(ClearValue::Depth(v)),
+                        store: true,
+                    });
+                    let stencil = c.as_ref().and_then(|v| v.stencil()).map(|v| ResourceOps {
+                        load: Some(ClearValue::Stencil(v)),
+                        store: true,
+                    });
+                    render_target2.set_depth_target(
                         texture.texture_view(),
-                        info.clear
-                            .as_ref()
-                            .and_then(|v| v.depth())
-                            .map(|v| ResourceOps {
-                                load: Some(ClearValue::Depth(v)),
-                                store: true,
-                            }),
-                        info.clear
-                            .as_ref()
-                            .and_then(|v| v.stencil())
-                            .map(|v| ResourceOps {
-                                load: Some(ClearValue::Stencil(v)),
-                                store: true,
-                            }),
+                        depth.as_ref().map(|_| ResourceOps::load_store()),
+                        stencil.as_ref().map(|_| ResourceOps::load_store()),
                     );
-                }
-                if let ResourceType::ImportTexture(info) = &texture_desc.inner {
-                    render_target.set_depth_target(
-                        texture.texture_view(),
-                        info.clear
-                            .as_ref()
-                            .and_then(|v| v.depth())
-                            .map(|v| ResourceOps {
-                                load: Some(ClearValue::Depth(v)),
-                                store: true,
-                            }),
-                        info.clear
-                            .as_ref()
-                            .and_then(|v| v.stencil())
-                            .map(|v| ResourceOps {
-                                load: Some(ClearValue::Stencil(v)),
-                                store: true,
-                            }),
-                    );
+                    render_target.set_depth_target(texture.texture_view(), depth, stencil);
                 }
             }
         }
@@ -175,6 +149,7 @@ impl GraphBackend {
             gpu: self.gpu.clone(),
             ws: vec![],
             render_target,
+            render_target2,
         }
     }
 
@@ -186,6 +161,7 @@ impl GraphBackend {
         registry: &'a ResourceRegistry,
     ) -> GraphRenderEngine {
         let mut render_target = WGPURenderTarget::new(name);
+        let mut render_target2 = WGPURenderTarget::new(name);
         for (index, color) in pass_render_target.colors.iter().enumerate() {
             let res_id = match color.prefer_attachment {
                 super::pass::PreferAttachment::Default => RT_COLOR_RESOURCE_ID,
@@ -194,13 +170,16 @@ impl GraphBackend {
             };
             let (texture, texture_desc) = registry.get_underlying(res_id);
 
-            if let ResourceType::Texture(info) = &texture_desc.inner {
-                let color = render_target_state.color(index, pass_render_target, &info.clear);
-                render_target.add_render_target(texture.texture_view(), color);
-            }
-
-            if let ResourceType::ImportTexture(info) = &texture_desc.inner {
-                let color = render_target_state.color(index, pass_render_target, &info.clear);
+            if let Some(c) = match &texture_desc.inner {
+                ResourceType::Texture(info) => Some(&info.clear),
+                ResourceType::ImportTexture(info) => Some(&info.clear),
+                _ => None,
+            } {
+                let color = render_target_state.color(index, pass_render_target, c);
+                render_target2.add_render_target(
+                    texture.texture_view(),
+                    color.as_ref().map(|_| ResourceOps::load_store()),
+                );
                 render_target.add_render_target(texture.texture_view(), color);
             }
         }
@@ -212,19 +191,19 @@ impl GraphBackend {
             };
             if let Some(res_id) = res_id {
                 let (texture, texture_desc) = registry.get_underlying(res_id);
+                if let Some(c) = match &texture_desc.inner {
+                    ResourceType::Texture(info) => Some(&info.clear),
+                    ResourceType::ImportTexture(info) => Some(&info.clear),
+                    _ => None,
+                } {
+                    let (clear_depth, clear_stencil) =
+                        render_target_state.depth(&pass_render_target, &c);
 
-                if let ResourceType::Texture(info) = &texture_desc.inner {
-                    let (clear_depth, clear_stencil) =
-                        render_target_state.depth(&pass_render_target, &info.clear);
-                    render_target.set_depth_target(
+                    render_target2.set_depth_target(
                         texture.texture_view(),
-                        clear_depth,
-                        clear_stencil,
+                        clear_depth.as_ref().map(|_| ResourceOps::load_store()),
+                        clear_stencil.as_ref().map(|_| ResourceOps::load_store()),
                     );
-                }
-                if let ResourceType::ImportTexture(info) = &texture_desc.inner {
-                    let (clear_depth, clear_stencil) =
-                        render_target_state.depth(&pass_render_target, &info.clear);
                     render_target.set_depth_target(
                         texture.texture_view(),
                         clear_depth,
@@ -238,6 +217,7 @@ impl GraphBackend {
             gpu: self.gpu.clone(),
             ws: vec![],
             render_target,
+            render_target2,
         }
     }
 
@@ -274,6 +254,7 @@ pub struct GraphRenderEngine {
     gpu: Arc<WGPUResource>,
     pub ws: Vec<Box<RefCell<wgpu::CommandEncoder>>>,
     pub render_target: WGPURenderTarget,
+    pub render_target2: WGPURenderTarget,
 }
 
 impl GraphRenderEngine {
@@ -288,13 +269,23 @@ impl GraphRenderEngine {
 
         self.ws.push(w);
         unsafe {
-            std::mem::transmute(
-                self.ws
-                    .last_mut()
-                    .unwrap()
-                    .borrow_mut()
-                    .begin_render_pass(self.render_target.desc()),
-            )
+            if self.ws.len() == 1 {
+                std::mem::transmute(
+                    self.ws
+                        .last_mut()
+                        .unwrap()
+                        .borrow_mut()
+                        .begin_render_pass(self.render_target.desc()),
+                )
+            } else {
+                std::mem::transmute(
+                    self.ws
+                        .last_mut()
+                        .unwrap()
+                        .borrow_mut()
+                        .begin_render_pass(self.render_target2.desc()),
+                )
+            }
         }
     }
 }

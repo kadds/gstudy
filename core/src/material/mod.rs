@@ -1,11 +1,12 @@
 use std::{
     any::{Any, TypeId},
     fmt::Debug,
-    hash::Hash,
+    hash::{Hash, Hasher},
+    io::Write,
     sync::Arc,
 };
 
-use crate::context::RContext;
+use crate::{context::RContext, util::any_as_u8_slice};
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub struct MaterialId(u64);
@@ -22,6 +23,7 @@ impl MaterialId {
 
 pub trait MaterialFace: Any + Sync + Send + Debug {
     fn sort_key(&self) -> u64;
+    fn hash_key(&self) -> u64;
 }
 
 #[derive(Debug)]
@@ -33,6 +35,7 @@ pub struct Material {
     alpha_test: Option<f32>,
 
     face: Box<dyn MaterialFace>, // material face
+    cached_hash: u64,
 }
 
 impl Material {
@@ -70,6 +73,10 @@ impl Material {
         (self.face.as_ref() as &dyn Any)
             .downcast_ref::<M>()
             .unwrap()
+    }
+
+    pub fn hash_key(&self) -> u64 {
+        self.cached_hash
     }
 }
 
@@ -120,6 +127,16 @@ impl MaterialBuilder {
 
     pub fn build(mut self, context: &RContext) -> Arc<Material> {
         let face = self.face.take().unwrap();
+        let hash = face.hash_key();
+
+        let mut h = fxhash::FxHasher::default();
+        h.write_u64(hash);
+        self.primitive.hash(&mut h);
+        if let Some(blend) = &self.blend {
+            blend.hash(&mut h);
+        }
+        let cached_hash = h.finish();
+
         Arc::new(Material {
             name: self.name,
             id: MaterialId::new(context.alloc_material_id()),
@@ -127,6 +144,7 @@ impl MaterialBuilder {
             alpha_test: self.alpha_test,
             blend: self.blend,
             face,
+            cached_hash,
         })
     }
 }

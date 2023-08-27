@@ -28,6 +28,22 @@ pub const LAYER_ALPHA_TEST: LayerId = 30_000;
 pub const LAYER_UI: LayerId = 100_000;
 pub const UNKNOWN_OBJECT: ObjectId = 0;
 
+pub fn layer_str(id: LayerId) -> &'static str {
+    if id <= LAYER_NORMAL {
+        return "normal";
+    } else if id <= LAYER_BACKGROUND {
+        return "background";
+    } else if id <= LAYER_TRANSPARENT {
+        return "transparent";
+    } else if id <= LAYER_ALPHA_TEST {
+        return "alpha_test";
+    } else if id <= LAYER_UI {
+        return "ui";
+    } else {
+        return "invalid";
+    }
+}
+
 #[derive(Debug)]
 pub struct ObjectWrapper {
     pub layer: LayerId,

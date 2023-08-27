@@ -32,7 +32,6 @@ pub struct MaterialGpuResource {
 
     template: Arc<Vec<tshader::Pass>>,
     pipeline: PipelinePassResource,
-    // sampler: Option<wgpu::Sampler>,
 }
 
 struct MeshMerger {
@@ -47,7 +46,7 @@ struct ObjectBuffer {
 }
 
 struct BasicMaterialHardwareRendererInner {
-    material_pipelines_cache: FramedCache<String, MaterialGpuResource>,
+    material_pipelines_cache: FramedCache<u64, MaterialGpuResource>,
 
     static_object_buffers: FramedCache<u64, ObjectBuffer>,
     dynamic_object_buffers: HashMap<u64, ObjectBuffer>,
@@ -132,6 +131,12 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         for layer in &rs.list {
             for indirect in &layer.material {
                 let material = indirect.material.as_ref();
+                log::info!(
+                    "[{:?}], material {:?} {}",
+                    &layer.objects(&indirect),
+                    material.id(),
+                    material.is_transparent()
+                );
                 let mgr = self.prepare_material_pipeline(&rs.gpu, &layer.main_camera, material);
                 // create uniform buffer
                 mgr.material_bind_buffers.get_or(material.id(), |_| {
@@ -175,20 +180,35 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
             for indirect in &layer.material {
                 let material = indirect.material.as_ref();
                 let mgr = self.prepare_material_pipeline(&rs.gpu, &layer.main_camera, material);
+                let mat = material.face_by::<BasicMaterialFace>();
                 mgr.bind_groups.get_or(material.id(), |_| {
                     let b = mgr.material_bind_buffers.get_mut(&material.id()).unwrap();
+                    let mut entries = vec![];
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &b,
+                            offset: 0,
+                            size: None,
+                        }),
+                    });
+
+                    if let Some(texture) = mat.texture() {
+                        let sampler = mat.sampler().unwrap();
+                        entries.push(wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(sampler.sampler()),
+                        });
+                        entries.push(wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+                        });
+                    }
 
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("basic"),
+                        label: Some("basic material"),
                         layout: &mgr.pipeline.pass[0].get_bind_group_layout(1),
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: &b,
-                                offset: 0,
-                                size: None,
-                            }),
-                        }],
+                        entries: &entries,
                     })
                 });
             }
@@ -206,9 +226,8 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                 let objects = layer.objects(indirect);
                 let material = indirect.material.as_ref();
 
-                let mat = material.face_by::<BasicMaterialFace>();
-                let key = mat.variants_name();
-                let mgr = self.inner.material_pipelines_cache.get(key).unwrap();
+                let key = material.hash_key();
+                let mgr = self.inner.material_pipelines_cache.get(&key).unwrap();
                 let material_bind_group = mgr.bind_groups.get(&material.id()).unwrap();
 
                 pass.set_pipeline(&mgr.pipeline.pass[0].render());
@@ -223,6 +242,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                         None => continue,
                     };
                     let obj = obj.o();
+                    pass.push_debug_group(&format!("object {}", obj.name()));
                     let mesh = obj.geometry().mesh();
                     let object_uniform = obj.geometry().transform();
                     pass.set_push_constants(
@@ -257,6 +277,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     } else {
                         pass.draw(0..mesh.vertex_count() as u32, 0..1);
                     }
+                    pass.pop_debug_group();
                 }
             }
         }
@@ -277,8 +298,7 @@ impl BasicMaterialHardwareRenderer {
         let label = self.label();
         let inner = &mut self.inner;
 
-        let mat = material.face_by::<BasicMaterialFace>();
-        let key = mat.variants_name();
+        let key = material.hash_key();
         inner.material_pipelines_cache.get_mut_or(key, |_| {
             let variants = material.face_by::<BasicMaterialFace>().variants();
             let template = inner.tech.register_variant(gpu.device(), variants).unwrap();
@@ -342,7 +362,6 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
         g: &mut crate::graph::rdg::RenderGraphBuilder,
         setup_resource: &SetupResource,
     ) {
-        let label = Some("basic");
         let tech = setup_resource
             .shader_loader
             .load_tech("basic_forward")
@@ -354,11 +373,6 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
                 material_pipelines_cache: FramedCache::new(),
                 static_object_buffers: FramedCache::new(),
                 dynamic_object_buffers: HashMap::new(),
-                // merger: Arc::new(Mutex::new(MeshMerger {
-                //     static_mesh_merger: StaticMeshMerger::new(label),
-                //     dynamic_mesh_buffer: GpuInputMainBuffersWithProps::new(gpu, label),
-                // })),
-                // render_rank: IndexSet::new(),
             },
         }));
 

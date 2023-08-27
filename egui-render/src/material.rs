@@ -1,5 +1,5 @@
 use core::{context::ResourceRef, material::MaterialFace};
-use std::hash::Hasher;
+use std::{hash::Hasher, io::Write};
 
 #[derive(Debug)]
 pub struct EguiMaterialFace {
@@ -19,6 +19,9 @@ impl MaterialFace for EguiMaterialFace {
             hasher.write_u64(texture.id());
             return hasher.finish();
         }
+        0
+    }
+    fn hash_key(&self) -> u64 {
         0
     }
 }

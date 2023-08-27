@@ -545,6 +545,8 @@ impl<'a> ParseContext<'a> {
                         basic_material_builder.with_sampler(samplers[*index].clone());
                 } else {
                     // use default
+                    basic_material_builder =
+                        basic_material_builder.with_sampler(self.gpu.default_sampler());
                 }
             }
 

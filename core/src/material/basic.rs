@@ -1,4 +1,4 @@
-use std::hash::Hasher;
+use std::{hash::Hasher, io::Write};
 
 use crate::{
     context::ResourceRef,
@@ -62,6 +62,11 @@ impl MaterialFace for BasicMaterialFace {
         let sid = hasher.finish();
 
         (sid & 0xFFFF_FFFF) | (tid >> 32)
+    }
+    fn hash_key(&self) -> u64 {
+        let mut h = fxhash::FxHasher::default();
+        h.write(self.variants_name.as_bytes());
+        h.finish()
     }
 }
 

@@ -21,13 +21,10 @@ use petgraph::stable_graph::NodeIndex;
 use crate::backends::wgpu_backend::ClearValue;
 use crate::backends::wgpu_backend::ResourceOps;
 use crate::context::ResourceRef;
-use crate::graph::rdg::pass::ClearPass;
 use crate::graph::rdg::pass::ClearPassBuilder;
 use crate::graph::rdg::pass::ColorRenderTargetDescriptor;
-use crate::graph::rdg::pass::DepthRenderTargetDescriptor;
 use crate::graph::rdg::pass::PreferAttachment;
 use crate::graph::rdg::pass::RenderTargetDescriptor;
-use crate::render::ColorTargetBuilder;
 use crate::types::{Color, Size, Vec3u};
 
 use self::pass::DynPass;
