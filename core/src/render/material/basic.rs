@@ -237,7 +237,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     let mesh = obj.geometry().mesh();
                     let object_uniform = obj.geometry().transform();
                     pass.set_push_constants(
-                        wgpu::ShaderStages::all(),
+                        wgpu::ShaderStages::VERTEX,
                         0,
                         any_as_u8_slice(object_uniform.mat()),
                     );
@@ -314,7 +314,14 @@ impl BasicMaterialHardwareRenderer {
                 depth.depth_write_enabled = !material.is_transparent();
             });
 
-            let pipeline = resolve_pipeline(gpu, template.clone(), ins, &ResolvePipelineConfig {});
+            let pipeline = resolve_pipeline(
+                gpu,
+                template.clone(),
+                ins,
+                &ResolvePipelineConfig {
+                    constant_stages: vec![wgpu::ShaderStages::VERTEX],
+                },
+            );
 
             let global_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
                 label,

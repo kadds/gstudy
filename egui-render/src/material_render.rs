@@ -206,7 +206,7 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
                         .set_append_blender()
                         .build(),
                 ),
-            &ResolvePipelineConfig {},
+            &ResolvePipelineConfig::default(),
         );
 
         // global bind group

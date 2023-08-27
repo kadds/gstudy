@@ -501,12 +501,19 @@ fn resolve_single_pass(
     for layout in &layouts {
         ref_layouts.push(layout);
     }
+    let mut constants = pass.constants.clone();
+    for (i, c) in config.constant_stages.iter().enumerate() {
+        if i < constants.len() {
+            constants[i].stages = *c;
+        }
+    }
+
     let pipeline_layout = gpu
         .device()
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&pass.name),
             bind_group_layouts: &ref_layouts,
-            push_constant_ranges: &pass.constants,
+            push_constant_ranges: &constants,
         });
 
     if let Some(cs) = &pass.cs {
@@ -580,7 +587,10 @@ fn resolve_single_pass(
     }
 }
 
-pub struct ResolvePipelineConfig {}
+#[derive(Debug, Default)]
+pub struct ResolvePipelineConfig {
+    constant_stages: Vec<wgpu::ShaderStages>,
+}
 
 pub fn resolve_pipeline(
     gpu: &WGPUResource,
