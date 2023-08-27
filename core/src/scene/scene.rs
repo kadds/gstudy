@@ -10,7 +10,7 @@ use crate::{
 use std::{
     collections::{BTreeMap, HashSet},
     fmt::Debug,
-    sync::{Arc, Mutex},
+    sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex},
 };
 
 use super::{
@@ -76,6 +76,8 @@ pub struct Scene {
     queue: Mutex<BTreeMap<LayerId, Arc<Mutex<dyn Sorter>>>>,
 
     cameras: Mutex<SceneCamera>,
+
+    rebuild: AtomicBool,
 }
 
 impl std::fmt::Debug for Scene {
@@ -97,6 +99,8 @@ impl Scene {
             queue: Mutex::new(BTreeMap::new()),
 
             cameras: Mutex::new(SceneCamera::default()),
+
+            rebuild: AtomicBool::new(true),
         };
         s.add_default_ui_camera();
         s
@@ -111,6 +115,18 @@ impl Scene {
             Vec3f::new(0f32, 1f32, 0f32),
         );
         self.cameras.lock().unwrap().ui_camera = Some(ui_camera);
+    }
+
+    pub fn set_rebuild_flag(&self) {
+        self.rebuild.store(true, Ordering::SeqCst);
+    }
+
+    pub fn has_rebuild_flag(&self) -> bool {
+        self.rebuild.load(Ordering::SeqCst)
+    }
+
+    pub fn clear_rebuild_flag(&self) {
+        self.rebuild.store(false, Ordering::SeqCst);
     }
 
     pub fn context(&self) -> RContextRef {

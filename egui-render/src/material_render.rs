@@ -12,9 +12,12 @@ use core::{
         common::FramedCache,
         material::{take_rs, MaterialRendererFactory, SetupResource},
         resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
+        ResolvePipelineConfig,
     },
     types::Rectu,
 };
+
+use tshader::LoadTechConfig;
 
 use crate::material::EguiMaterialFace;
 
@@ -178,7 +181,12 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         setup_resource: &SetupResource,
     ) {
         let label = Some("egui");
-        let tech = setup_resource.shader_loader.load_tech("egui").unwrap();
+        let tech = setup_resource
+            .shader_loader
+            .load_tech(LoadTechConfig {
+                name: "egui".into(),
+            })
+            .unwrap();
         let template = tech.register_variant(gpu.device(), &[]).unwrap();
         let depth_format = wgpu::TextureFormat::Depth32Float;
 
@@ -192,11 +200,13 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
                 .set_primitive(|primitive: &mut _| {
                     primitive.cull_mode = None;
                 })
+                .set_msaa(setup_resource.msaa)
                 .add_target(
                     ColorTargetBuilder::new(gpu.surface_format())
                         .set_append_blender()
                         .build(),
                 ),
+            &ResolvePipelineConfig {},
         );
 
         // global bind group
@@ -229,6 +239,7 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
         pass.render_target(RenderTargetDescriptor {
             colors: smallvec::smallvec![ColorRenderTargetDescriptor {
                 prefer_attachment: PreferAttachment::Default,
+                resolve_attachment: PreferAttachment::Default,
                 ops: ResourceOps {
                     load: None,
                     store: true,

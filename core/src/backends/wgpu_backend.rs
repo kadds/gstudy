@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    collections::VecDeque,
+    collections::{HashMap, HashSet, VecDeque},
     num::NonZeroU64,
     ops::{Not, Range},
     sync::{Arc, Mutex},
@@ -227,28 +227,6 @@ impl WGPUResource {
         self.context().register_texture(texture)
     }
 
-    pub fn new_depth_texture(&self, label: Option<&'static str>, size: Size) -> ResourceRef {
-        let device = self.device();
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label,
-            size: wgpu::Extent3d {
-                width: size.x,
-                height: size.y,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-
-        self.context().register_texture(texture)
-    }
-
     pub fn from_sampler(&self, desc: &wgpu::SamplerDescriptor) -> ResourceRef {
         let sampler = self.device().create_sampler(desc);
 
@@ -408,6 +386,43 @@ impl WGPUResource {
     }
 }
 
+fn request_optional_feature(
+    adapter: &wgpu::Adapter,
+    features: wgpu::Features,
+    limits: Limits,
+    minimal_features: wgpu::Features,
+    minimal_limits: Limits,
+) -> (Device, Queue) {
+    let req_features = adapter.features().intersection(features);
+    if !req_features.contains(minimal_features) {
+        panic!("unsupported features. current {:?}", req_features);
+    }
+
+    if !minimal_limits.check_limits(&adapter.limits()) {
+        panic!("unsupported limits. current {:?}", adapter.limits());
+    }
+
+    if features != req_features {
+        log::warn!("features downgrade {:?}", req_features);
+    }
+
+    let fut = adapter.request_device(
+        &DeviceDescriptor {
+            label: Some("wgpu device"),
+            features: req_features,
+            limits: adapter.limits(),
+        },
+        None,
+    );
+    match pollster::block_on(fut) {
+        Ok(v) => return v,
+        Err(err) => {
+            log::error!("request device {}", err);
+            panic!("request device fail");
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WGPUBackend {
     inner: Arc<WGPUResource>,
@@ -476,47 +491,37 @@ impl WGPUBackend {
             max_push_constant_size: 64,
             ..Default::default()
         };
+        let minimal_limits = wgpu::Limits {
+            max_push_constant_size: 64,
+            ..Default::default()
+        };
+
         let mut features = wgpu::Features::empty();
-        features.toggle(Features::PUSH_CONSTANTS);
-        features.toggle(Features::MULTI_DRAW_INDIRECT);
+        features.insert(Features::PUSH_CONSTANTS);
+        features.insert(Features::MULTI_DRAW_INDIRECT);
+        features.insert(Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
 
-        let device_fut = adapter.request_device(
-            &DeviceDescriptor {
-                features,
-                limits,
-                label: Some("wgpu device"),
-            },
-            None,
-        );
+        let mut minimal_features = wgpu::Features::empty();
+        minimal_features.insert(Features::PUSH_CONSTANTS);
 
-        let mut limits2 = wgpu::Limits::downlevel_webgl2_defaults();
-        limits2.max_push_constant_size = 64;
-        features.remove(Features::MULTI_DRAW_INDIRECT);
+        let (device, queue) =
+            request_optional_feature(&adapter, features, limits, minimal_features, minimal_limits);
 
-        let device_fut2 = adapter.request_device(
-            &DeviceDescriptor {
-                features,
-                limits: limits2,
-                label: Some("wgpu device"),
-            },
-            None,
-        );
-
-        let (device, queue) = match pollster::block_on(device_fut) {
-            Ok(v) => v,
-            Err(_) => pollster::block_on(device_fut2)?,
-        };
         let formats = surface.get_capabilities(&adapter).formats;
-        let has_format = formats.iter().find(|v| **v == TextureFormat::Rgba8Unorm);
-        let has_format_bgr = formats.iter().find(|v| **v == TextureFormat::Bgra8Unorm);
-        let format = if has_format.is_some() {
-            TextureFormat::Rgba8Unorm
-        } else if has_format_bgr.is_some() {
-            TextureFormat::Bgra8Unorm
-        } else {
+
+        let prefer_formats = &[TextureFormat::Bgra8Unorm, TextureFormat::Rgba8Unorm];
+        log::info!("surface formats {:?}", &formats);
+
+        let mut format = TextureFormat::R8Unorm;
+        for f in prefer_formats {
+            if formats.iter().find(|v| **v == *f).is_some() {
+                format = *f;
+                break;
+            }
+        }
+        if format == TextureFormat::R8Unorm {
             anyhow::bail!("no texture format found")
-        };
-        log::info!("use format {:?}", format);
+        }
 
         let mut texture_data = vec![];
         let deep_color = Vec4::<u8>::new(44, 45, 40, 255);
@@ -776,23 +781,23 @@ impl WGPURenderTarget {
         });
     }
 
-    pub fn set_render_target(&mut self, texture_view: &TextureView, color: Option<ResourceOps>) {
-        let inner = self.get();
-        let ops = Self::map_ops(color);
-        if inner.color_attachments.is_empty() {
-            inner.color_attachments.push(RenderPassColorAttachment {
-                view: texture_view,
-                resolve_target: None,
-                ops,
-            })
-        } else {
-            inner.color_attachments[0] = RenderPassColorAttachment {
-                view: texture_view,
-                resolve_target: None,
-                ops,
-            }
-        }
-    }
+    // pub fn set_render_target(&mut self, texture_view: &TextureView, color: Option<ResourceOps>) {
+    //     let inner = self.get();
+    //     let ops = Self::map_ops(color);
+    //     if inner.color_attachments.is_empty() {
+    //         inner.color_attachments.push(RenderPassColorAttachment {
+    //             view: texture_view,
+    //             resolve_target: None,
+    //             ops,
+    //         })
+    //     } else {
+    //         inner.color_attachments[0] = RenderPassColorAttachment {
+    //             view: texture_view,
+    //             resolve_target: None,
+    //             ops,
+    //         }
+    //     }
+    // }
 
     pub fn add_render_target(&mut self, texture_view: &TextureView, color: Option<ResourceOps>) {
         let inner = self.get();
@@ -800,6 +805,21 @@ impl WGPURenderTarget {
         inner.color_attachments.push(RenderPassColorAttachment {
             view: texture_view,
             resolve_target: None,
+            ops,
+        })
+    }
+
+    pub fn add_resolved_render_target(
+        &mut self,
+        texture_view: &TextureView,
+        rtv: Option<&TextureView>,
+        color: Option<ResourceOps>,
+    ) {
+        let inner = self.get();
+        let ops = Self::map_ops(color);
+        inner.color_attachments.push(RenderPassColorAttachment {
+            view: texture_view,
+            resolve_target: rtv,
             ops,
         })
     }

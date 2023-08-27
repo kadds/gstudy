@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use tshader::LoadTechConfig;
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
     mesh::Mesh,
     render::{
         common::FramedCache, resolve_pipeline, ColorTargetBuilder, PipelinePassResource,
-        RenderDescriptorObject,
+        RenderDescriptorObject, ResolvePipelineConfig,
     },
     types::*,
     util::any_as_u8_slice,
@@ -47,6 +48,7 @@ struct BasicMaterialHardwareRendererInner {
     dynamic_object_buffers: HashMap<u64, ObjectBuffer>,
 
     tech: Arc<tshader::ShaderTech>,
+    msaa: u32,
 }
 
 pub struct BasicMaterialHardwareRenderer {
@@ -91,7 +93,7 @@ fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> O
         usage: wgpu::BufferUsages::VERTEX,
     });
 
-    let vertex_properties = if mesh.properties_view().is_empty() {
+    let vertex_properties = if !mesh.properties_view().is_empty() {
         Some(
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{} properties buffer", id)),
@@ -293,6 +295,7 @@ impl BasicMaterialHardwareRenderer {
             let template = inner.tech.register_variant(gpu.device(), variants).unwrap();
 
             let mut ins = RenderDescriptorObject::new();
+            ins = ins.set_msaa(inner.msaa);
 
             if let Some(blend) = material.blend() {
                 ins = ins.add_target(
@@ -311,7 +314,7 @@ impl BasicMaterialHardwareRenderer {
                 depth.depth_write_enabled = !material.is_transparent();
             });
 
-            let pipeline = resolve_pipeline(gpu, template.clone(), ins);
+            let pipeline = resolve_pipeline(gpu, template.clone(), ins, &ResolvePipelineConfig {});
 
             let global_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
                 label,
@@ -353,7 +356,9 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
     ) {
         let tech = setup_resource
             .shader_loader
-            .load_tech("basic_forward")
+            .load_tech(LoadTechConfig {
+                name: "basic_forward".into(),
+            })
             .unwrap();
 
         let r = Arc::new(Mutex::new(BasicMaterialHardwareRenderer {
@@ -362,6 +367,7 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
                 material_pipelines_cache: FramedCache::new(),
                 static_object_buffers: FramedCache::new(),
                 dynamic_object_buffers: HashMap::new(),
+                msaa: setup_resource.msaa,
             },
         }));
 
@@ -369,6 +375,7 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
         pass.render_target(RenderTargetDescriptor {
             colors: smallvec::smallvec![ColorRenderTargetDescriptor {
                 prefer_attachment: PreferAttachment::Default,
+                resolve_attachment: PreferAttachment::Default,
                 ops: ResourceOps {
                     load: None,
                     store: true,

@@ -7,7 +7,8 @@ use crate::{
 
 pub type ResourceId = u32;
 pub const RT_COLOR_RESOURCE_ID: ResourceId = 0;
-pub const RT_DEPTH_RESOURCE_ID: ResourceId = 1;
+pub const RT_RESOLVE_COLOR_RESOURCE_ID: ResourceId = 1;
+pub const RT_DEPTH_RESOURCE_ID: ResourceId = 2;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ResourceUsage {
@@ -26,6 +27,7 @@ pub struct TextureInfo {
     pub format: wgpu::TextureFormat,
     pub clear: Option<ClearValue>,
     pub usage: wgpu::TextureUsages,
+    pub sampler_count: u32,
 }
 
 #[derive(Debug)]

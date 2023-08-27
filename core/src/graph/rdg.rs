@@ -31,6 +31,7 @@ use self::pass::DynPass;
 use self::pass::PassConstraint;
 use self::pass::RenderTargetState;
 use self::resource::ResourceNode;
+use self::resource::RT_RESOLVE_COLOR_RESOURCE_ID;
 use self::{
     backend::GraphBackend,
     present::PresentNode,
@@ -157,6 +158,7 @@ pub struct RenderGraphBuilder {
     pass_name_nodes: HashMap<String, usize>,
     present_node: Option<PresentNode>,
     constraints: HashMap<String, Vec<PassConstraint>>,
+    msaa: u32,
 }
 
 impl RenderGraphBuilder {
@@ -169,7 +171,13 @@ impl RenderGraphBuilder {
             pass_name_nodes: HashMap::new(),
             present_node: None,
             constraints: HashMap::new(),
+            msaa: 1,
         }
+    }
+
+    pub fn set_msaa(&mut self, sampler_count: u32) {
+        assert!(self.present_node.is_none());
+        self.msaa = sampler_count;
     }
 
     pub fn add_constraint<S: Into<String>>(&mut self, pass_node: S, c: PassConstraint) {
@@ -207,6 +215,7 @@ impl RenderGraphBuilder {
                 format: wgpu::TextureFormat::Depth32Float,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 clear: Some(ClearValue::Depth(1f32)),
+                sampler_count: self.msaa,
             }),
         };
 
@@ -223,6 +232,25 @@ impl RenderGraphBuilder {
         self.resource_map.insert(color, color_resource);
 
         self.present_node = Some(PresentNode::new(color));
+        if self.msaa == 1 {
+            return;
+        }
+
+        // enable msaa target
+        let color = RT_RESOLVE_COLOR_RESOURCE_ID;
+        let color_resource = Arc::new(ResourceNode {
+            id: color,
+            name: "resolve back_buffer".to_owned(),
+            inner: ResourceType::Texture(TextureInfo {
+                size: Vec3u::new(size.x, size.y, 1),
+                format: format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                clear: clear.map(|v| ClearValue::Color(v)),
+                sampler_count: self.msaa,
+            }),
+        });
+
+        self.resource_map.insert(color, color_resource);
     }
 
     pub fn allocate_texture(
@@ -232,6 +260,7 @@ impl RenderGraphBuilder {
         format: wgpu::TextureFormat,
         usage: wgpu::TextureUsages,
         clear: Option<ClearValue>,
+        sampler_count: u32,
     ) -> ResourceId {
         let id = self.last_id;
         self.last_id += 1;
@@ -243,6 +272,7 @@ impl RenderGraphBuilder {
                 format,
                 clear,
                 usage,
+                sampler_count,
             }),
         };
         self.resource_map.insert(id, resource.into());
@@ -261,18 +291,6 @@ impl RenderGraphBuilder {
             id,
             name,
             inner: ResourceType::Buffer(BufferInfo { size, usage }),
-        };
-        self.resource_map.insert(id, resource.into());
-        id
-    }
-
-    pub fn alias_resource(&mut self, from: ResourceId) -> ResourceId {
-        let id = self.last_id;
-        self.last_id += 1;
-        let resource = ResourceNode {
-            id,
-            name: "alias".to_owned(),
-            inner: ResourceType::AliasResource(id, from),
         };
         self.resource_map.insert(id, resource.into());
         id
@@ -429,10 +447,12 @@ impl RenderGraphBuilder {
         main_pass_list.push(present_index);
         if main_pass_list.len() == 4 {
             // add clear pass
+            let resolve_attachment = PreferAttachment::None;
             let b = ClearPassBuilder::new("default clear")
                 .render_target(RenderTargetDescriptor {
                     colors: smallvec::smallvec![ColorRenderTargetDescriptor {
                         prefer_attachment: PreferAttachment::Default,
+                        resolve_attachment,
                         ops: ResourceOps {
                             load: None,
                             store: true,
@@ -531,6 +551,16 @@ impl RenderGraphBuilder {
                 resource_depth,
                 ResourceUsage::RenderTargetTextureWrite,
             );
+            if self.msaa > 1 {
+                let resolve_color = g.add_node(Node::Resource(
+                    self.resource_map
+                        .get(&RT_RESOLVE_COLOR_RESOURCE_ID)
+                        .cloned()
+                        .unwrap(),
+                ));
+                g.add_edge(from, resolve_color, ResourceUsage::RenderTargetTextureWrite);
+                g.add_edge(resolve_color, to, ResourceUsage::RenderTargetTextureRead);
+            }
 
             g.add_edge(resource_color, to, ResourceUsage::RenderTargetTextureRead);
             g.add_edge(resource_depth, to, ResourceUsage::RenderTargetTextureRead);
@@ -630,13 +660,12 @@ impl RenderGraphBuilder {
                     }
                 }
 
-                let job = *render_job;
                 let job = match render_job {
                     RenderJob::PassCall((node_index, _s)) => {
                         let node = g.node_weight(*node_index).unwrap();
                         let state = if let Node::Pass(pass) = &node {
                             let (_, _, desc) = pass.inputs_outputs();
-                            Some(RenderTargetState::new(desc, &clears))
+                            Some(RenderTargetState::new(desc, &clears, self.msaa))
                         } else {
                             None
                         };

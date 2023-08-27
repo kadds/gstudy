@@ -55,11 +55,20 @@ impl CameraControllerFactory {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ControllerDriver {
     mouse_enabled: bool,
     keyboard_enabled: bool,
     capture_mouse: bool,
+}
+impl Default for ControllerDriver {
+    fn default() -> Self {
+        Self {
+            mouse_enabled: true,
+            keyboard_enabled: true,
+            capture_mouse: false,
+        }
+    }
 }
 
 impl ControllerDriver {

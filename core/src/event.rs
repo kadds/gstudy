@@ -142,8 +142,6 @@ pub enum Event {
     Resized { logical: Size, physical: Size },
 
     FullScreen(bool),
-
-    RebuildMaterial,
 }
 
 impl Debug for Event {
@@ -164,7 +162,6 @@ impl Debug for Event {
                 .field("physical", physical)
                 .finish(),
             Self::FullScreen(arg0) => f.debug_tuple("FullScreen").field(arg0).finish(),
-            Self::RebuildMaterial => write!(f, "RebuildMaterial"),
         }
     }
 }

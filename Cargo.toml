@@ -2,5 +2,5 @@
 members = ["./core", "./app", "./tshader", "./tshader-builder"
     , "./gltfloader", "./window", "./geometry"
     , "./egui-render", "examples/triangle", "examples/egui", "examples/gltf-viewer"
-    , "examples/empty"]
+    , "examples/empty", "examples/cube"]
 resolver = "2"

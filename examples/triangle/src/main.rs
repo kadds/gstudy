@@ -4,7 +4,6 @@ use core::{
     mesh::{builder::MeshBuilder, StaticGeometry},
     scene::{Camera, RenderObject, Scene},
     types::{Size, Vec3f, Vec4f},
-    util::any_as_u8_slice_array,
 };
 use std::{any::Any, sync::Arc};
 

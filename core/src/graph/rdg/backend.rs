@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    pass::{RenderTargetDescriptor, RenderTargetState},
+    pass::{PreferAttachment, RenderTargetDescriptor, RenderTargetState},
     resource::*,
     ResourceRegistry,
 };
@@ -36,7 +36,7 @@ impl GraphBackend {
                             depth_or_array_layers: 1,
                         },
                         mip_level_count: 1,
-                        sample_count: 1,
+                        sample_count: t.sampler_count,
                         dimension: wgpu::TextureDimension::D2,
                         format: t.format,
                         usage: t.usage,
@@ -52,7 +52,7 @@ impl GraphBackend {
                             depth_or_array_layers: t.size.z,
                         },
                         mip_level_count: 1,
-                        sample_count: 1,
+                        sample_count: t.sampler_count,
                         dimension: wgpu::TextureDimension::D3,
                         format: t.format,
                         usage: t.usage,
@@ -175,12 +175,34 @@ impl GraphBackend {
                 ResourceType::ImportTexture(info) => Some(&info.clear),
                 _ => None,
             } {
-                let color = render_target_state.color(index, pass_render_target, c);
-                render_target2.add_render_target(
-                    texture.texture_view(),
-                    color.as_ref().map(|_| ResourceOps::load_store()),
-                );
-                render_target.add_render_target(texture.texture_view(), color);
+                let color_ops = render_target_state.color(index, pass_render_target, c);
+                if render_target_state.msaa > 1 {
+                    let resolve_res_id = match color.resolve_attachment {
+                        super::pass::PreferAttachment::Default => RT_RESOLVE_COLOR_RESOURCE_ID,
+                        super::pass::PreferAttachment::None => continue,
+                        super::pass::PreferAttachment::Resource(r) => r,
+                    };
+                    let (resolve_texture, _) = registry.get_underlying(resolve_res_id);
+                    let rtv = Some(texture.texture_view());
+                    let rt = resolve_texture.texture_view();
+                    render_target2.add_resolved_render_target(
+                        rt,
+                        rtv,
+                        color_ops.as_ref().map(|_| ResourceOps::load_store()),
+                    );
+                    render_target.add_resolved_render_target(rt, rtv, color_ops);
+                } else {
+                    render_target2.add_resolved_render_target(
+                        texture.texture_view(),
+                        None,
+                        color_ops.as_ref().map(|_| ResourceOps::load_store()),
+                    );
+                    render_target.add_resolved_render_target(
+                        texture.texture_view(),
+                        None,
+                        color_ops,
+                    );
+                }
             }
         }
         if let Some(depth) = &pass_render_target.depth {

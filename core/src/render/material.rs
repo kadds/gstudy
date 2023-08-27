@@ -70,6 +70,7 @@ pub struct SetupResource<'a> {
     pub ui_camera: &'a wgpu::Buffer,
     pub main_camera: &'a wgpu::Buffer,
     pub shader_loader: &'a tshader::Loader,
+    pub msaa: u32,
 }
 
 pub trait MaterialRendererFactory {

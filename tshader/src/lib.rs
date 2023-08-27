@@ -389,12 +389,17 @@ impl ShaderTech {
 pub struct Loader {
     desc_path: PathBuf,
     desc_config: Desc,
-    tech_map: Mutex<HashMap<String, Arc<ShaderTech>>>,
+    tech_map: Mutex<HashMap<LoadTechConfig, Arc<ShaderTech>>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Desc {
     map: HashMap<String, String>,
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub struct LoadTechConfig {
+    pub name: String,
 }
 
 impl Loader {
@@ -408,15 +413,14 @@ impl Loader {
         })
     }
 
-    pub fn load_tech<S: AsRef<str>>(&self, name: S) -> anyhow::Result<Arc<ShaderTech>> {
+    pub fn load_tech(&self, config: LoadTechConfig) -> anyhow::Result<Arc<ShaderTech>> {
         let mut map = self.tech_map.lock().unwrap();
-        let name = name.as_ref();
-        if !map.contains_key(name) {
+        if !map.contains_key(&config) {
             let path_component = self
                 .desc_config
                 .map
-                .get(name)
-                .ok_or_else(|| anyhow::anyhow!("shader tech {} not found", name))?;
+                .get(&config.name)
+                .ok_or_else(|| anyhow::anyhow!("shader tech {} not found", config.name))?;
             let base_path = PathBuf::from(&self.desc_path)
                 .canonicalize()?
                 .parent()
@@ -426,12 +430,12 @@ impl Loader {
             let compiler = ShaderTechCompiler::new(path_component, base_path)?;
             let tech = ShaderTech {
                 compiler,
-                name: name.to_owned(),
+                name: config.name.to_owned(),
                 variants_map: Mutex::new(HashMap::new()),
             };
-            map.insert(name.to_owned(), Arc::new(tech));
+            map.insert(config.clone(), Arc::new(tech));
         }
 
-        Ok(map.get(name).cloned().unwrap())
+        Ok(map.get(&config).cloned().unwrap())
     }
 }

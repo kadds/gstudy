@@ -3,7 +3,7 @@ use core::context::{RContext, ResourceRef};
 use core::event::EventProcessor;
 use core::graph::rdg::resource::RT_COLOR_RESOURCE_ID;
 use core::graph::rdg::{RenderGraph, RenderGraphBuilder};
-use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter};
+use core::render::{HardwareRenderer, ModuleRenderer, RenderParameter, SetupConfig};
 use core::scene::controller::CameraControllerFactory;
 use core::scene::Scene;
 use core::types::{Color, Size, Vec4f};
@@ -59,6 +59,9 @@ impl HardwareRenderPlugin {
         if scene.material_change() {
             self.rdg = None;
         }
+        if scene.has_rebuild_flag() {
+            self.rdg = None;
+        }
 
         scene.ui_camera_ref().make_orthographic(
             Vec4f::new(0f32, 0f32, logic_size.x as f32, logic_size.y as f32),
@@ -67,8 +70,15 @@ impl HardwareRenderPlugin {
         );
 
         if self.rdg.is_none() {
+            let msaa = container.get::<MsaaResource>().unwrap();
             let mut graph_builder = RenderGraphBuilder::new("main graph");
-            self.renderer.setup(&mut graph_builder, gpu.clone(), &scene);
+            let aa = msaa.get().0;
+            graph_builder.set_msaa(aa);
+
+            let config = SetupConfig { msaa: aa };
+
+            self.renderer
+                .setup(&mut graph_builder, gpu.clone(), &scene, &config);
             log::info!("rebuild render graph with view size {:?}", view_size);
             // container.get::<RContext>().unwrap();
             let real_size = Size::new(
@@ -78,6 +88,7 @@ impl HardwareRenderPlugin {
 
             graph_builder.set_present_target(real_size, gpu.surface_format(), Some(clear_color));
             self.rdg = Some(graph_builder.compile());
+            scene.clear_rebuild_flag();
         }
 
         self.rdg
@@ -137,9 +148,6 @@ impl AppEventProcessor for HardwareRenderPlugin {
                         Size::new(physical.x, physical.y),
                         Size::new(logical.x, logical.y),
                     ));
-                }
-                core::event::Event::RebuildMaterial => {
-                    self.rdg = None;
                 }
                 _ => (),
             }
@@ -252,6 +260,11 @@ pub struct FPS(pub f32);
 
 pub type FPSResource = LockResource<FPS>;
 
+#[derive(Default, Clone, Debug, Copy)]
+pub struct Msaa(pub u32);
+
+pub type MsaaResource = LockResource<Msaa>;
+
 pub struct WindowPlugin;
 
 impl Plugin for WindowPlugin {}
@@ -289,6 +302,7 @@ impl LooperPlugin for WindowLooperPlugin {
         });
         container.register_arc(gpu);
         container.register(FPSResource::new(FPS(0f32)));
+        container.register(MsaaResource::new(Msaa(1)));
 
         struct Process(Rc<RefCell<dyn app::plugin::Runner>>);
 

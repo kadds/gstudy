@@ -20,8 +20,18 @@ pub struct RenderParameter<'a> {
     pub g: &'a mut RenderGraph,
 }
 
+pub struct SetupConfig {
+    pub msaa: u32,
+}
+
 pub trait ModuleRenderer {
-    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &Scene);
+    fn setup(
+        &mut self,
+        g: &mut RenderGraphBuilder,
+        gpu: Arc<WGPUResource>,
+        scene: &Scene,
+        config: &SetupConfig,
+    );
     fn render(&mut self, parameter: RenderParameter);
     fn stop(&mut self);
 }
@@ -141,7 +151,13 @@ impl HardwareRenderer {
 }
 
 impl ModuleRenderer for HardwareRenderer {
-    fn setup(&mut self, g: &mut RenderGraphBuilder, gpu: Arc<WGPUResource>, scene: &Scene) {
+    fn setup(
+        &mut self,
+        g: &mut RenderGraphBuilder,
+        gpu: Arc<WGPUResource>,
+        scene: &Scene,
+        config: &SetupConfig,
+    ) {
         log::info!("hardware setup");
         self.setup_global_uniform(&gpu);
 
@@ -151,6 +167,7 @@ impl ModuleRenderer for HardwareRenderer {
             ui_camera: &inner.ui_camera.buffer,
             main_camera: &inner.main_camera.buffer,
             shader_loader: &self.shader_loader,
+            msaa: config.msaa,
         };
         let container = scene.get_container();
 
@@ -399,6 +416,11 @@ impl RenderDescriptorObject {
         }
     }
 
+    pub fn set_msaa(mut self, c: u32) -> Self {
+        self.multi_sample.count = c;
+        self
+    }
+
     pub fn add_target(mut self, target: wgpu::ColorTargetState) -> Self {
         self.color_targets.push(Some(target));
         self
@@ -441,6 +463,7 @@ fn resolve_single_pass(
     gpu: &WGPUResource,
     pass: &tshader::Pass,
     ins: &RenderDescriptorObject,
+    config: &ResolvePipelineConfig,
 ) -> Pipeline {
     let mut layouts = Vec::new();
 
@@ -557,10 +580,13 @@ fn resolve_single_pass(
     }
 }
 
+pub struct ResolvePipelineConfig {}
+
 pub fn resolve_pipeline(
     gpu: &WGPUResource,
     template: Arc<Vec<tshader::Pass>>,
     ins: RenderDescriptorObject,
+    config: &ResolvePipelineConfig,
 ) -> PipelinePassResource {
     let mut desc = PipelinePassResource {
         inner: template.clone(),
@@ -568,7 +594,7 @@ pub fn resolve_pipeline(
     };
 
     for pass in template.iter() {
-        let pipeline = resolve_single_pass(gpu, pass, &ins);
+        let pipeline = resolve_single_pass(gpu, pass, &ins, config);
         desc.pass.push(Arc::new(pipeline));
     }
 

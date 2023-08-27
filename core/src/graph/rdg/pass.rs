@@ -33,6 +33,7 @@ pub enum PreferAttachment {
 #[derive(Debug)]
 pub struct ColorRenderTargetDescriptor {
     pub prefer_attachment: PreferAttachment,
+    pub resolve_attachment: PreferAttachment,
     pub ops: ResourceOps,
 }
 
@@ -76,11 +77,13 @@ impl RenderTargetDescriptor {
 pub struct RenderTargetState {
     pub colors: bitmaps::Bitmap<64>,
     pub depth: Option<bool>,
+    pub msaa: u32,
 }
 
 impl RenderTargetState {
-    pub fn new(desc: &RenderTargetDescriptor, res_id_list: &[ResourceId]) -> Self {
+    pub fn new(desc: &RenderTargetDescriptor, res_id_list: &[ResourceId], msaa: u32) -> Self {
         let mut t = Self::default();
+        t.msaa = msaa;
 
         for (index, c) in desc.colors.iter().enumerate() {
             let res_id = match c.prefer_attachment {
