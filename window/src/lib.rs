@@ -43,7 +43,7 @@ impl HardwareRenderPlugin {
             cc_factory: None,
         }
     }
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, _delta: f32) {
         if self.first_update {
             self.first_update = false;
             log::info!("App startup");
@@ -151,7 +151,7 @@ impl AppEventProcessor for HardwareRenderPlugin {
 pub struct HardwareRenderPluginFactory;
 
 impl PluginFactory for HardwareRenderPluginFactory {
-    fn create(&self, container: &Container) -> Box<dyn Plugin> {
+    fn create(&self, _container: &Container) -> Box<dyn Plugin> {
         Box::new(HardwareRenderPlugin::new())
     }
 
@@ -211,7 +211,7 @@ impl WindowPluginFactory {
 }
 
 impl PluginFactory for WindowPluginFactory {
-    fn create(&self, container: &Container) -> Box<dyn app::plugin::Plugin> {
+    fn create(&self, _container: &Container) -> Box<dyn app::plugin::Plugin> {
         Box::new(WindowPlugin)
     }
 
@@ -223,10 +223,10 @@ impl PluginFactory for WindowPluginFactory {
         }
     }
 
-    fn create_looper(&self, container: &Container) -> Option<Box<dyn app::plugin::LooperPlugin>> {
+    fn create_looper(&self, _container: &Container) -> Option<Box<dyn app::plugin::LooperPlugin>> {
         Some(Box::new(WindowLooperPlugin {
             title: self.title.clone(),
-            size: self.size.clone(),
+            size: self.size,
         }))
     }
 }
@@ -237,7 +237,7 @@ pub struct RawWindow {
 
 unsafe impl HasRawWindowHandle for RawWindow {
     fn raw_window_handle(&self) -> RawWindowHandle {
-        self.handle.clone()
+        self.handle
     }
 }
 

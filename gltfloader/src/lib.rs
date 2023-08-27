@@ -16,7 +16,7 @@ use core::mesh::{Geometry, MeshPropertyType};
 use core::render::default_blender;
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
 use core::types::{BoundBox, Color, Size, Vec2f, Vec3f, Vec4f};
-use core::util::{any_as_u8_slice_array, any_as_x_slice_array};
+use core::util::any_as_x_slice_array;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::{
@@ -164,7 +164,7 @@ fn parse_texture(
 
     let data = r.read_bytes();
 
-    let image = image::load_from_memory(&data)?;
+    let image = image::load_from_memory(data)?;
     let width = image.width();
     let height = image.height();
 
@@ -267,7 +267,7 @@ fn parse_primitive_indices(
             }
         }
 
-        let mut kind = MaterialInputKind::None;
+        let _kind = MaterialInputKind::None;
 
         for (semantic, _) in p.attributes() {
             match semantic {
@@ -285,7 +285,7 @@ fn parse_primitive_indices(
             gltf::accessor::DataType::U8 => {
                 let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
                 let mut input = Vec::new();
-                for d in any_as_x_slice_array::<u8, _>(&buf) {
+                for d in any_as_x_slice_array::<u8, _>(buf) {
                     input.push(*d as u32);
                 }
                 res.total_indices += (buf.len() / std::mem::size_of::<u8>()) as u64;
@@ -295,7 +295,7 @@ fn parse_primitive_indices(
                 let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
 
                 let mut input = Vec::new();
-                for d in any_as_x_slice_array::<u16, _>(&buf) {
+                for d in any_as_x_slice_array::<u16, _>(buf) {
                     input.push(*d as u32);
                 }
                 res.total_indices += (buf.len() / std::mem::size_of::<u16>()) as u64;
@@ -303,7 +303,7 @@ fn parse_primitive_indices(
             }
             gltf::accessor::DataType::U32 => {
                 let buf = buf_view.buffer[0].read_bytes_from_accessor(&indices);
-                mesh_builder.add_indices32(any_as_x_slice_array(&buf));
+                mesh_builder.add_indices32(any_as_x_slice_array(buf));
                 res.total_indices += (buf.len() / std::mem::size_of::<u32>()) as u64;
             }
             t => {
@@ -397,7 +397,7 @@ fn parse_primitive_vertices(
                     }
                 };
 
-                let f = any_as_x_slice_array(&buf);
+                let f = any_as_x_slice_array(buf);
                 let mut data = Vec::new();
                 for block in f.chunks(2) {
                     data.push(Vec2f::new(block[0], block[1]));
@@ -615,7 +615,7 @@ impl<'a> ParseContext<'a> {
                     match buf.source() {
                         gltf::buffer::Source::Bin => {
                             let blob = gltf.blob.as_ref().ok_or(anyhow::anyhow!("no blob"))?;
-                            GltfDataViewSource::new_cursor(SourcePosition { size, offset }, &blob)
+                            GltfDataViewSource::new_cursor(SourcePosition { size, offset }, blob)
                         }
                         gltf::buffer::Source::Uri(uri) => {
                             let uri = urlencoding::decode(uri)?;
@@ -774,7 +774,7 @@ impl<'a> ParseContext<'a> {
         ctx: RContextRef,
         gpu: Arc<WGPUResource>,
     ) -> anyhow::Result<(Scene, LoadResult)> {
-        let gltf = gltf::Gltf::open(&path)?;
+        let gltf = gltf::Gltf::open(path)?;
         let mut this = Self {
             scene: Scene::new(ctx.clone()),
             res: LoadResult::default(),
@@ -875,7 +875,7 @@ impl Loader {
         let mut tmp = VecDeque::new();
         std::mem::swap(&mut tmp, &mut *result);
 
-        return tmp.into_iter().collect();
+        tmp.into_iter().collect()
     }
 }
 

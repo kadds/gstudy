@@ -779,7 +779,7 @@ impl WGPURenderTarget {
     pub fn set_render_target(&mut self, texture_view: &TextureView, color: Option<ResourceOps>) {
         let inner = self.get();
         let ops = Self::map_ops(color);
-        if inner.color_attachments.len() == 0 {
+        if inner.color_attachments.is_empty() {
             inner.color_attachments.push(RenderPassColorAttachment {
                 view: texture_view,
                 resolve_target: None,
@@ -854,7 +854,7 @@ impl Drop for WGPURenderer {
 
         std::mem::swap(&mut tmp, &mut self.command_buffers);
 
-        self.inner.queue.submit(tmp.into_iter());
+        self.inner.queue.submit(tmp);
     }
 }
 
@@ -881,7 +881,10 @@ impl EventProcessor for WGPUEventProcessor {
     fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult {
         if let Some(event) = event.downcast_ref::<Event>() {
             match event {
-                Event::Resized { physical, logical } => {
+                Event::Resized {
+                    physical,
+                    logical: _,
+                } => {
                     let width = u32::max(physical.x, 16);
                     let height = u32::max(physical.y, 16);
                     let format = self.format;
@@ -958,8 +961,8 @@ impl GpuMainBuffer {
         let size = 1024 * 1024 * 2; // 2mb
 
         let buffer = gpu.device().create_buffer(&wgpu::BufferDescriptor {
-            label: label,
-            size: size,
+            label,
+            size,
             usage: wgpu::BufferUsages::COPY_DST | usage,
             mapped_at_creation: false,
         });
@@ -1040,7 +1043,7 @@ pub struct GpuInputMainBuffer {
 }
 
 impl<'a> BufferAccessor<'a> for &'a GpuInputMainBuffer {
-    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+    fn buffer_slice(&self, _id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
         Some(self.buffer.buffer().slice(range))
     }
 }

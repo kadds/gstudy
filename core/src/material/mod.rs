@@ -2,11 +2,10 @@ use std::{
     any::{Any, TypeId},
     fmt::Debug,
     hash::{Hash, Hasher},
-    io::Write,
     sync::Arc,
 };
 
-use crate::{context::RContext, util::any_as_u8_slice};
+use crate::context::RContext;
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub struct MaterialId(u64);

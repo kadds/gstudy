@@ -110,7 +110,7 @@ impl RenderGraph {
                 match job {
                     RenderJob::ResourceOperation(op) => match op {
                         ResourceLifetimeOperation::Create(id) => {
-                            let res_desc = self.registry.desc_map.get(&id).unwrap();
+                            let res_desc = self.registry.desc_map.get(id).unwrap();
                             let underlying = backend.create_resource(&res_desc.inner);
                             self.registry.underlying_map.insert(*id, underlying);
                         }
@@ -571,8 +571,8 @@ impl RenderGraphBuilder {
             }
             let node = g.node_weight(node_index).unwrap();
             match node {
-                Node::Pass(pass) => {
-                    if render_jobs_list.len() == 0 {
+                Node::Pass(_) => {
+                    if render_jobs_list.is_empty() {
                         render_jobs_list.push(DependencyRenderJobs::default());
                     }
                     render_jobs_list[0]
@@ -595,17 +595,15 @@ impl RenderGraphBuilder {
                             match resource.inner {
                                 ResourceType::ImportTexture(_) => {
                                     imported.insert(resource.id);
-                                    ()
                                 }
                                 ResourceType::ImportBuffer(_) => {
                                     imported.insert(resource.id);
-                                    ()
                                 }
                                 _ => (),
                             };
                             let l = resource_lifetime_map
                                 .entry(resource.id)
-                                .or_insert_with(|| ResourceLifetime::default());
+                                .or_insert(ResourceLifetime::default());
                             l.add(ResourceLifetime {
                                 beg: index as u32,
                                 end: index as u32,
@@ -632,9 +630,9 @@ impl RenderGraphBuilder {
                     }
                 }
 
-                let mut job = *render_job;
+                let job = *render_job;
                 let job = match render_job {
-                    RenderJob::PassCall((node_index, s)) => {
+                    RenderJob::PassCall((node_index, _s)) => {
                         let node = g.node_weight(*node_index).unwrap();
                         let state = if let Node::Pass(pass) = &node {
                             let (_, _, desc) = pass.inputs_outputs();

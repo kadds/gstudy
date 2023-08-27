@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::fmt::Debug;
 
-use crate::backends::WGPUBackend;
 use crate::context::ResourceRef;
 use crate::types::*;
 
@@ -392,5 +391,3 @@ pub enum VirtualKeyCode {
 
     Unknown,
 }
-
-type WK = VirtualKeyCode;

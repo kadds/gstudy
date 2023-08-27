@@ -23,7 +23,7 @@ impl MeshBuilder {
     }
 
     pub fn add_property(&mut self, property: MeshPropertyType) {
-        if !self.mesh.is_none() {
+        if self.mesh.is_some() {
             panic!("please modify property before add vertex data")
         }
 
@@ -43,7 +43,7 @@ impl MeshBuilder {
         let mesh = self.finish_property();
         match &mut mesh.indices {
             Indices::Unknown => {
-                mesh.indices = Indices::U32(indices.into_iter().cloned().collect());
+                mesh.indices = Indices::U32(indices.iter().cloned().collect());
             }
             Indices::U32(d) => d.extend_from_slice(indices),
             _ => panic!("different index type"),
@@ -65,8 +65,7 @@ impl MeshBuilder {
         let mesh = self.finish_property();
         match &mut mesh.position_vertices {
             PositionVertices::Unknown => {
-                mesh.position_vertices =
-                    PositionVertices::F3(position.into_iter().cloned().collect());
+                mesh.position_vertices = PositionVertices::F3(position.to_vec());
                 mesh.vertex_count += position.len();
             }
             PositionVertices::F3(d) => {
@@ -104,7 +103,7 @@ impl MeshBuilder {
             panic!("invalid data size");
         }
 
-        for (_, value) in &mut self.properties_written {
+        for value in self.properties_written.values_mut() {
             *value += count;
         }
     }
@@ -132,7 +131,7 @@ impl MeshBuilder {
             unsafe {
                 let src_slice = any_as_u8_slice(vertex);
                 let src = src_slice.as_ptr();
-                let dst = mesh.properties.as_mut_ptr().add(cur_offset as usize);
+                let dst = mesh.properties.as_mut_ptr().add(cur_offset);
                 std::ptr::copy_nonoverlapping(src, dst, o.len as usize);
             }
             cur_offset += row_strip;
@@ -194,8 +193,6 @@ impl MeshBuilder {
             _ => (),
         }
 
-        drop(mesh);
-
         Ok(self.mesh.take().unwrap())
     }
 }
@@ -245,7 +242,7 @@ impl<'a> PropertiesRowBuilder<'a> {
             std::ptr::copy_nonoverlapping(src, dst, o.len as usize);
         }
     }
-    pub fn finish(mut self) {
+    pub fn finish(self) {
         self.result.push(self.vertex)
     }
 }

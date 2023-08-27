@@ -4,5 +4,5 @@ struct CameraUniform {
 };
 
 struct D2SizeCameraUniform {
-    view_size: vec2<f32>,
+    view_size: vec4<f32>,
 }

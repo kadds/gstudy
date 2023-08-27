@@ -6,23 +6,23 @@ use std::{
 use wgpu::util::DeviceExt;
 
 use crate::{
-    backends::wgpu_backend::{GpuInputMainBuffersWithProps, ResourceOps, WGPUResource},
+    backends::wgpu_backend::{ResourceOps, WGPUResource},
     graph::rdg::{
         backend::{GraphCopyEngine, GraphRenderEngine},
         pass::*,
         RenderPassBuilder,
     },
-    material::{basic::*, Material, MaterialFace, MaterialId},
+    material::{basic::*, Material, MaterialId},
     mesh::Mesh,
     render::{
-        common::{FramedCache, StaticMeshMerger},
-        resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
+        common::FramedCache, resolve_pipeline, ColorTargetBuilder, PipelinePassResource,
+        RenderDescriptorObject,
     },
     types::*,
     util::any_as_u8_slice,
 };
 
-use super::{take_rs, MaterialRendererFactory, RenderMaterialContext, RenderSource, SetupResource};
+use super::{take_rs, MaterialRendererFactory, SetupResource};
 
 pub struct MaterialGpuResource {
     global_bind_group: wgpu::BindGroup,
@@ -32,11 +32,6 @@ pub struct MaterialGpuResource {
 
     template: Arc<Vec<tshader::Pass>>,
     pipeline: PipelinePassResource,
-}
-
-struct MeshMerger {
-    static_mesh_merger: StaticMeshMerger,
-    dynamic_mesh_buffer: GpuInputMainBuffersWithProps,
 }
 
 struct ObjectBuffer {
@@ -96,7 +91,7 @@ fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> O
         usage: wgpu::BufferUsages::VERTEX,
     });
 
-    let vertex_properties = if mesh.properties_view().len() > 0 {
+    let vertex_properties = if mesh.properties_view().is_empty() {
         Some(
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{} properties buffer", id)),
@@ -181,7 +176,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     entries.push(wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &b,
+                            buffer: b,
                             offset: 0,
                             size: None,
                         }),
@@ -224,10 +219,10 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                 let mgr = self.inner.material_pipelines_cache.get(&key).unwrap();
                 let material_bind_group = mgr.bind_groups.get(&material.id()).unwrap();
 
-                pass.set_pipeline(&mgr.pipeline.pass[0].render());
+                pass.set_pipeline(mgr.pipeline.pass[0].render());
 
                 pass.set_bind_group(0, &mgr.global_bind_group, &[]); // camera bind group
-                pass.set_bind_group(1, &material_bind_group, &[]); // material bind group
+                pass.set_bind_group(1, material_bind_group, &[]); // material bind group
 
                 // object bind_group
                 for id in objects {
@@ -266,7 +261,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     }
 
                     // index
-                    if let Some(_) = &b.index {
+                    if b.index.is_some() {
                         pass.draw_indexed(0..mesh.index_count().unwrap(), 0, 0..1);
                     } else {
                         pass.draw(0..mesh.vertex_count() as u32, 0..1);

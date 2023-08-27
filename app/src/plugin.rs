@@ -1,14 +1,9 @@
 use core::{
-    event::{EventProcessor, EventSender, EventSource},
+    event::{EventProcessor, EventSender},
     render::material::MaterialRendererFactory,
     scene::controller::ControllerFactory,
 };
-use std::{
-    any::{Any, TypeId},
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
-};
+use std::{any::TypeId, cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{AppEventProcessor, Container};
 
@@ -20,7 +15,7 @@ pub struct PluginInfo {
 
 pub trait PluginFactory {
     fn create(&self, container: &Container) -> Box<dyn Plugin>;
-    fn create_looper(&self, container: &Container) -> Option<Box<dyn LooperPlugin>> {
+    fn create_looper(&self, _container: &Container) -> Option<Box<dyn LooperPlugin>> {
         None
     }
     fn info(&self) -> PluginInfo;
@@ -40,9 +35,9 @@ pub trait Plugin: AppEventProcessor {
     fn load_factory(&self) -> CoreFactoryList {
         CoreFactoryList::default()
     }
-    fn install_factory(&mut self, container: &Container, factory_list: &mut CoreFactoryList) {}
+    fn install_factory(&mut self, _container: &Container, _factory_list: &mut CoreFactoryList) {}
 }
 
 pub trait LooperPlugin {
-    fn run(&self, container: &Container, runner: Rc<RefCell<dyn Runner>>) {}
+    fn run(&self, _container: &Container, _runner: Rc<RefCell<dyn Runner>>) {}
 }

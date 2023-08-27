@@ -1,11 +1,8 @@
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
-use crate::event::{InputEvent, KeyboardInput};
+use crate::event::InputEvent;
 
-use self::{
-    orbit::{OrbitCameraController, OrbitControllerFactory},
-    trackball::TrackballControllerFactory,
-};
+use self::{orbit::OrbitControllerFactory, trackball::TrackballControllerFactory};
 
 use super::Camera;
 
@@ -70,7 +67,7 @@ impl ControllerDriver {
         match event {
             crate::event::InputEvent::CursorMoved {
                 logical: _,
-                physical,
+                physical: _,
             } => {
                 if !self.capture_mouse {
                     if !self.mouse_enabled {
@@ -85,12 +82,12 @@ impl ControllerDriver {
                     }
                 }
             }
-            crate::event::InputEvent::MouseWheel { delta } => {
+            crate::event::InputEvent::MouseWheel { delta: _ } => {
                 if !self.mouse_enabled {
                     return None;
                 }
             }
-            crate::event::InputEvent::MouseInput { state, button } => {
+            crate::event::InputEvent::MouseInput { state, button: _ } => {
                 if state.is_pressed() {
                     if !self.mouse_enabled {
                         return None;

@@ -103,7 +103,10 @@ impl Window {
                     log::debug!("post render");
                     self.before_update(proxy);
                 }
-                core::event::Event::Resized { logical, physical } => {
+                core::event::Event::Resized {
+                    logical: _,
+                    physical: _,
+                } => {
                     self.frame = None;
                 }
                 _ => (),
@@ -128,7 +131,7 @@ impl Window {
     pub fn on_translate_event(
         &mut self,
         original_event: WEvent,
-        proxy: &EventLoopProxy<DEvent>,
+        _proxy: &EventLoopProxy<DEvent>,
     ) -> Option<DEvent> {
         match original_event {
             WEvent::WindowEvent {

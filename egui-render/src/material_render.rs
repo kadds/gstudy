@@ -1,14 +1,11 @@
 use std::{
-    mem::{size_of, size_of_val},
+    mem::size_of,
     ops::Range,
     sync::{Arc, Mutex},
 };
 
 use core::{
-    backends::wgpu_backend::{
-        ClearValue, GpuInputMainBuffer, GpuInputMainBuffers, NullBufferAccessor, ResourceOps,
-        WGPUResource,
-    },
+    backends::wgpu_backend::{ClearValue, GpuInputMainBuffers, ResourceOps, WGPUResource},
     graph::rdg::{backend::GraphCopyEngine, pass::*, RenderGraphBuilder, RenderPassBuilder},
     material::{Material, MaterialId},
     render::{
@@ -17,7 +14,6 @@ use core::{
         resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
     },
     types::Rectu,
-    util::any_as_u8_slice,
 };
 
 use crate::material::EguiMaterialFace;
@@ -140,7 +136,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         for layer in &rs.list {
             let mut pass = engine.begin(layer.layer);
 
-            pass.set_pipeline(&inner.pipeline.pass[0].render());
+            pass.set_pipeline(inner.pipeline.pass[0].render());
             pass.set_bind_group(0, &inner.global_bind_group, &[]);
             pass.set_index_buffer(
                 inner.main_buffers.index().buffer().slice(..),
@@ -153,7 +149,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
                 let material_bind_group =
                     inner.material_bind_group_cache.get(&material.id()).unwrap();
 
-                pass.set_bind_group(1, &material_bind_group, &[]);
+                pass.set_bind_group(1, material_bind_group, &[]);
 
                 for (indices, vertices, rect) in &inner.draw_index_buffer {
                     if let Some(r) = rect {
@@ -165,7 +161,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         }
     }
 
-    fn cleanup<'b>(&'b mut self, context: RenderPassContext<'b>) {
+    fn cleanup<'b>(&'b mut self, _context: RenderPassContext<'b>) {
         self.inner.draw_index_buffer.clear();
     }
 }
@@ -176,7 +172,7 @@ pub struct EguiMaterialRendererFactory {}
 impl MaterialRendererFactory for EguiMaterialRendererFactory {
     fn setup(
         &self,
-        materials: &[Arc<Material>],
+        _materials: &[Arc<Material>],
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
@@ -223,7 +219,7 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
                 sampler: gpu.new_sampler(label),
                 tech,
                 pipeline,
-                global_bind_group: global_bind_group,
+                global_bind_group,
                 material_bind_group_cache: FramedCache::new(),
                 draw_index_buffer: vec![],
             },

@@ -184,7 +184,7 @@ where
 {
     fn set_camera(&mut self, camera: Arc<Camera>) {
         self.camera = Some(camera.clone());
-        for (_, t) in &mut self.map {
+        for t in &mut self.map.values_mut() {
             t.0.set_camera(camera.clone());
         }
     }
@@ -229,7 +229,7 @@ where
         for (_, material_id) in material_list {
             let t = self.map.get_mut(&material_id).unwrap();
             let res2 = t.0.sort_and_cull();
-            res.extend(res2.into_iter());
+            res.extend(res2);
         }
 
         res

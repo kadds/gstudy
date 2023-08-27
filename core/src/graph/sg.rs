@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use crate::scene::Transform;
 
-mod sg;
-
 pub type NodeId = u64;
 type Graph<P> = petgraph::graph::DiGraph<Node<P>, (), u32>;
 

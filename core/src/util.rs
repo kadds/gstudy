@@ -1,16 +1,4 @@
-use std::{
-    collections::{vec_deque, HashMap, VecDeque},
-    hash::Hash,
-    marker::PhantomData,
-    sync::{
-        atomic::AtomicU32,
-        mpsc::{channel, Receiver, Sender},
-        Arc, Condvar, Mutex,
-    },
-    thread::ScopedJoinHandle,
-    time::Instant,
-    vec,
-};
+use std::{collections::HashMap, hash::Hash};
 
 #[allow(unused)]
 pub fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
@@ -40,6 +28,8 @@ pub fn any_as_x_slice_array<X: Sized, T: Sized>(p: &[T]) -> &[X] {
 }
 
 type SString = smartstring::alias::String;
+
+#[derive(Default, Debug)]
 pub struct StringIdMap<T> {
     str2id: HashMap<SString, T>,
     id2str: HashMap<T, SString>,
@@ -67,7 +57,7 @@ where
     }
 
     pub fn id_by_name(&self, name: &str) -> Option<T> {
-        self.str2id.get(name).map(|v| *v)
+        self.str2id.get(name).copied()
     }
 
     pub fn remove(&mut self, id: T) {
@@ -77,6 +67,7 @@ where
     }
 }
 
+#[derive(Default, Debug)]
 pub struct StringIdAllocMap<T>
 where
     T: num_traits::PrimInt,

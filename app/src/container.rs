@@ -17,7 +17,7 @@ impl Container {
 
     pub fn register_arc<T: 'static + Send + Sync>(&self, t: Arc<T>) {
         let mut m = self.m.lock().unwrap();
-        m.insert((&*t).type_id(), t);
+        m.insert((*t).type_id(), t);
     }
 
     pub fn get<T: 'static + Send + Sync>(&self) -> Option<Arc<T>> {

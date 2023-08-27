@@ -108,7 +108,7 @@ impl EguiRenderer {
     }
 
     pub fn pre_update(&mut self, dt: f32, size: Size) {
-        self.input.predicted_dt += dt as f32;
+        self.input.predicted_dt += dt;
         self.input.pixels_per_point = Some(self.ppi);
         self.input.screen_rect = Some(egui::Rect::from_min_max(
             egui::pos2(0f32, 0f32),
@@ -170,13 +170,11 @@ impl EguiRenderer {
                 )));
                 self.mouse_in_ui = true;
             }
-        } else {
-            if self.mouse_in_ui {
-                proxy.send_event(Box::new(core::event::Event::Input(
-                    core::event::InputEvent::CaptureMouseInputOut,
-                )));
-                self.mouse_in_ui = false;
-            }
+        } else if self.mouse_in_ui {
+            proxy.send_event(Box::new(core::event::Event::Input(
+                core::event::InputEvent::CaptureMouseInputOut,
+            )));
+            self.mouse_in_ui = false;
         }
 
         if self.ctx.wants_keyboard_input() {
@@ -186,13 +184,11 @@ impl EguiRenderer {
                 )));
                 self.keyboard_in_ui = true;
             }
-        } else {
-            if self.keyboard_in_ui {
-                proxy.send_event(Box::new(core::event::Event::Input(
-                    core::event::InputEvent::CaptureKeyboardInputOut,
-                )));
-                self.keyboard_in_ui = false;
-            }
+        } else if self.keyboard_in_ui {
+            proxy.send_event(Box::new(core::event::Event::Input(
+                core::event::InputEvent::CaptureKeyboardInputOut,
+            )));
+            self.keyboard_in_ui = false;
         }
     }
 
@@ -240,7 +236,7 @@ impl EguiRenderer {
         self.ui_materials = Some(ui_materials);
     }
 
-    fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult {
+    fn on_event(&mut self, _source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult {
         if let Some(cevent) = event.downcast_ref::<CEvent>() {
             match &cevent {
                 CEvent::Input(ev) => match ev {
@@ -285,7 +281,10 @@ impl EguiRenderer {
                             dst.command = modifiers.ctrl;
                         }
                     }
-                    InputEvent::CursorMoved { logical, physical } => {
+                    InputEvent::CursorMoved {
+                        logical,
+                        physical: _,
+                    } => {
                         let replace = if let Some(v) = self.input.events.last() {
                             match v {
                                 egui::Event::PointerMoved(_) => true,
@@ -397,14 +396,13 @@ impl EguiPlugin {
 
 impl Plugin for EguiPlugin {
     fn load_factory(&self) -> CoreFactoryList {
-        let list = CoreFactoryList {
+        CoreFactoryList {
             materials: vec![(
                 TypeId::of::<EguiMaterialFace>(),
                 Box::new(EguiMaterialRendererFactory {}),
             )],
             ..Default::default()
-        };
-        list
+        }
     }
 }
 

@@ -136,12 +136,12 @@ impl ShaderTechCompiler {
         let preprocessor = Preprocessor::new(cfg);
         let real_path = self.base_path.join(&self.config.pass[pass_index].source);
 
-        let res = preprocessor.process(&real_path.as_os_str().to_str().unwrap())?;
+        let res = preprocessor.process(real_path.as_os_str().to_str().unwrap())?;
 
         let shaders = self.config.pass[pass_index]
             .shaders
             .iter()
-            .map(|v| Shader::from_str(&v))
+            .map(|v| Shader::from_str(v))
             .collect::<Result<Vec<_>, strum::ParseError>>()?;
 
         Ok(PassShaderSourceDescriptor {

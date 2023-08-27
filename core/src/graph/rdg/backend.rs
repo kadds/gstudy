@@ -197,7 +197,7 @@ impl GraphBackend {
                     _ => None,
                 } {
                     let (clear_depth, clear_stencil) =
-                        render_target_state.depth(&pass_render_target, &c);
+                        render_target_state.depth(pass_render_target, c);
 
                     render_target2.set_depth_target(
                         texture.texture_view(),

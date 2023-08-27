@@ -3,11 +3,7 @@ use core::{
     context::RContextRef,
     event::{EventProcessor, EventRegistry, EventSender, EventSource, ProcessEventResult},
 };
-use std::{
-    any::{Any, TypeId},
-    cell::RefCell,
-    sync::Arc,
-};
+use std::{any::Any, cell::RefCell, sync::Arc};
 
 use instant::Duration;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
@@ -122,7 +118,7 @@ impl Looper {
     pub fn create_window(&mut self, b: WindowBuilder, context: RContextRef) -> Arc<WGPUResource> {
         let ev = self.event_loop.borrow();
         let ev = ev.as_ref().unwrap();
-        let w = b.build(&ev).unwrap();
+        let w = b.build(ev).unwrap();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -223,7 +219,7 @@ impl Looper {
     fn on_event(
         &mut self,
         original_event: WEvent,
-        target: &EventLoopWindowTarget<DEvent>,
+        _target: &EventLoopWindowTarget<DEvent>,
         event_proxy: &EventLoopProxy<DEvent>,
     ) -> ControlFlow {
         let mut ret = ControlFlow::Wait;
@@ -248,24 +244,22 @@ impl Looper {
             }
             WEvent::RedrawEventsCleared => {
                 let (_, d, ok) = self.frame.next_frame();
-                if ok {
-                    if !self.has_render_event {
-                        if self.is_first_update {
-                            self.is_first_update = false;
-                            let _ = event_proxy.send_event(Box::new(CEvent::FirstSync));
-                        } else {
-                            let to_event: Box<dyn Any + Send> =
-                                Box::new(CEvent::PreUpdate(d.as_secs_f64()));
-                            let _ = event_proxy.send_event(to_event);
-                            ret = ControlFlow::Poll;
-                        }
+                if ok && !self.has_render_event {
+                    if self.is_first_update {
+                        self.is_first_update = false;
+                        let _ = event_proxy.send_event(Box::new(CEvent::FirstSync));
+                    } else {
+                        let to_event: Box<dyn Any + Send> =
+                            Box::new(CEvent::PreUpdate(d.as_secs_f64()));
+                        let _ = event_proxy.send_event(to_event);
+                        ret = ControlFlow::Poll;
                     }
                 }
             }
             WEvent::UserEvent(event) => {
                 ret = self.process(event.as_ref());
             }
-            WEvent::NewEvents(c) => {
+            WEvent::NewEvents(_c) => {
                 let mut w = self.main_window.as_mut().unwrap().borrow_mut();
                 let ev = w.on_translate_event(original_event, event_proxy);
                 if let Some(ev) = ev {
@@ -286,13 +280,11 @@ impl Looper {
             }
             _ => {}
         }
-        if self.frame.changed() {
-            if self.fps != self.frame.fps() as u32 {
-                self.fps = self.frame.fps() as u32;
-                log::info!("fps {}", self.frame.fps());
-                let _ = event_proxy
-                    .send_event(Box::new(Event::FpsUpdate(crate::FPS(self.frame.fps()))));
-            }
+        if self.frame.changed() && self.fps != self.frame.fps() as u32 {
+            self.fps = self.frame.fps() as u32;
+            log::info!("fps {}", self.frame.fps());
+            let _ =
+                event_proxy.send_event(Box::new(Event::FpsUpdate(crate::FPS(self.frame.fps()))));
         }
         ret
     }

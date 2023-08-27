@@ -104,7 +104,7 @@ impl SingleMeshMergerData {
         usage: wgpu::BufferUsages,
     ) -> SharedBufferRef {
         let buf = gpu.device().create_buffer(&wgpu::BufferDescriptor {
-            label: label,
+            label,
             size,
             usage: wgpu::BufferUsages::COPY_DST | usage,
             mapped_at_creation: false,
@@ -311,6 +311,7 @@ impl StaticMeshMerger {
     }
 }
 
+#[derive(Default)]
 pub struct FramedCache<K: Hash + Eq + PartialEq + Clone, V> {
     map: HashMap<K, V>,
     used: HashSet<K>,

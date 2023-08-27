@@ -342,14 +342,12 @@ impl ShaderTech {
                     count: None,
                 };
                 pass.bind_layout.insert(pos, layout);
-            } else {
-                if let naga::AddressSpace::PushConstant = global_value.space {
-                    let size = h.inner.size(module.to_ctx());
-                    pass.constants.push(wgpu::PushConstantRange {
-                        stages: wgpu::ShaderStages::all(),
-                        range: 0..size,
-                    });
-                }
+            } else if let naga::AddressSpace::PushConstant = global_value.space {
+                let size = h.inner.size(module.to_ctx());
+                pass.constants.push(wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::all(),
+                    range: 0..size,
+                });
             }
         }
 

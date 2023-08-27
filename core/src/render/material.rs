@@ -1,16 +1,10 @@
-use std::{
-    any::{Provider, TypeId},
-    collections::HashMap,
-    fmt::Debug,
-    io::{BufReader, Read},
-    sync::{Arc, Mutex},
-};
+use std::{any::TypeId, collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
     graph::rdg::{pass::RenderPassContext, RenderGraphBuilder},
     material::{Material, MaterialFace, MaterialId},
-    scene::{Camera, Scene},
+    scene::Scene,
 };
 
 pub struct RenderSourceIndirectObjects {

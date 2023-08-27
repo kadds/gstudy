@@ -30,17 +30,17 @@ pub const UNKNOWN_OBJECT: ObjectId = 0;
 
 pub fn layer_str(id: LayerId) -> &'static str {
     if id <= LAYER_NORMAL {
-        return "normal";
+        "normal"
     } else if id <= LAYER_BACKGROUND {
-        return "background";
+        "background"
     } else if id <= LAYER_TRANSPARENT {
-        return "transparent";
+        "transparent"
     } else if id <= LAYER_ALPHA_TEST {
-        return "alpha_test";
+        "alpha_test"
     } else if id <= LAYER_UI {
-        return "ui";
+        "ui"
     } else {
-        return "invalid";
+        "invalid"
     }
 }
 
@@ -242,7 +242,7 @@ impl Scene {
     }
 
     pub fn remove_all(&self) {
-        self.remove_if(|v| true);
+        self.remove_if(|_| true);
     }
 
     pub fn remove_if<F: Fn(&ObjectWrapper) -> bool>(&self, f: F) {
@@ -293,33 +293,6 @@ impl Scene {
     pub fn clear_objects(&mut self) {
         self.queue.lock().unwrap().clear();
         self.storage.clear();
-    }
-
-    pub fn calculate_bytes<'a, I: Iterator<Item = &'a u64>, F: Fn(&RenderObject) -> bool>(
-        &self,
-        objects: I,
-        filter: F,
-    ) -> (u64, u64, u64) {
-        let mut total_bytes = (0, 0, 0);
-
-        for id in objects {
-            let object = self.storage.get(id).unwrap();
-            let object = object.o();
-            let mesh = object.geometry().mesh();
-            let indices = mesh.indices_view();
-            if filter(&object) {
-                total_bytes = (
-                    total_bytes.0 + indices.map(|v| v.len() as u64).unwrap_or_default(),
-                    total_bytes.1
-                        + mesh
-                            .vertices_view()
-                            .map(|v| v.len() as u64)
-                            .unwrap_or_default(),
-                    total_bytes.2 + mesh.properties_view().len() as u64,
-                );
-            }
-        }
-        total_bytes
     }
 
     pub fn resize(&self, logical: &Size, view_size: &Size) {

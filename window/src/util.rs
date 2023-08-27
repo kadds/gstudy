@@ -31,19 +31,14 @@ pub fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
 
 #[allow(unused)]
 pub fn any_as_u8_slice_array<T: Sized>(p: &[T]) -> &[u8] {
-    unsafe {
-        ::std::slice::from_raw_parts(
-            (p.as_ptr() as *const T) as *const u8,
-            std::mem::size_of_val(p),
-        )
-    }
+    unsafe { ::std::slice::from_raw_parts(p.as_ptr() as *const u8, std::mem::size_of_val(p)) }
 }
 
 #[allow(unused)]
 pub fn any_as_x_slice_array<X: Sized, T: Sized>(p: &[T]) -> &[X] {
     unsafe {
         ::std::slice::from_raw_parts(
-            (p.as_ptr() as *const T) as *const X,
+            p.as_ptr() as *const X,
             std::mem::size_of_val(p) / ::std::mem::size_of::<X>(),
         )
     }

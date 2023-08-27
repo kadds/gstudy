@@ -26,7 +26,7 @@ impl Default for PerspectiveProject {
 
 impl PerspectiveProject {
     pub fn gen(&self) -> Mat4x4f {
-        Mat4x4f::new_perspective(self.aspect, self.fovy, self.near, self.far).into()
+        Mat4x4f::new_perspective(self.aspect, self.fovy, self.near, self.far)
     }
 }
 
@@ -57,7 +57,6 @@ impl OrthographicProject {
             self.near,
             self.far,
         )
-        .into()
     }
 }
 
@@ -191,8 +190,8 @@ impl Camera {
         if inner.dirty_view {
             let from = inner.from.into();
             let to = inner.to.into();
-            let up = inner.up.into();
-            inner.view = Mat4x4f::look_at_rh(&from, &to, &up);
+            let up = &inner.up;
+            inner.view = Mat4x4f::look_at_rh(&from, &to, up);
             inner.dirty_view = false;
         }
         inner.projection * inner.view
@@ -296,48 +295,32 @@ impl Camera {
     pub fn far(&self) -> f32 {
         let mut inner = self.inner.lock().unwrap();
         match &mut inner.project_var {
-            Project::Perspective(p) => {
-                return p.far;
-            }
-            Project::Orthographic(o) => {
-                return o.far;
-            }
+            Project::Perspective(p) => p.far,
+            Project::Orthographic(o) => o.far,
         }
     }
 
     pub fn near(&self) -> f32 {
         let mut inner = self.inner.lock().unwrap();
         match &mut inner.project_var {
-            Project::Perspective(p) => {
-                return p.near;
-            }
-            Project::Orthographic(o) => {
-                return o.near;
-            }
+            Project::Perspective(p) => p.near,
+            Project::Orthographic(o) => o.near,
         }
     }
 
     pub fn fovy(&self) -> f32 {
         let mut inner = self.inner.lock().unwrap();
         match &mut inner.project_var {
-            Project::Perspective(p) => {
-                return p.fovy;
-            }
-            Project::Orthographic(o) => {
-                return 0f32;
-            }
+            Project::Perspective(p) => p.fovy,
+            Project::Orthographic(o) => 0f32,
         }
     }
 
     pub fn aspect(&self) -> f32 {
         let mut inner = self.inner.lock().unwrap();
         match &mut inner.project_var {
-            Project::Perspective(p) => {
-                return p.aspect;
-            }
-            Project::Orthographic(o) => {
-                return 0f32;
-            }
+            Project::Perspective(p) => p.aspect,
+            Project::Orthographic(o) => 0f32,
         }
     }
 

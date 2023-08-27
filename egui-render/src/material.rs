@@ -1,5 +1,5 @@
 use core::{context::ResourceRef, material::MaterialFace};
-use std::{hash::Hasher, io::Write};
+use std::hash::Hasher;
 
 #[derive(Debug)]
 pub struct EguiMaterialFace {

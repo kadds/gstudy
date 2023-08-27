@@ -69,7 +69,7 @@ impl Transform {
         &self,
         vertices: impl Iterator<Item = Vec3f>,
     ) -> impl Iterator<Item = Vec3f> {
-        let mat = self.mat.clone();
+        let mat = self.mat;
         vertices.map(move |vertex| {
             let v = Vec4f::new(vertex.x, vertex.y, vertex.z, 0f32);
             let v4 = mat * v;

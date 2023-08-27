@@ -53,7 +53,7 @@ impl Resource {
     }
     pub fn sampler(&self) -> &wgpu::Sampler {
         match &self.ty {
-            ResourceTy::Sampler(s) => &s,
+            ResourceTy::Sampler(s) => s,
             _ => panic!("resource type invalid"),
         }
     }
@@ -107,8 +107,7 @@ impl RContext {
 
     pub fn new_tag(&self, name: &str) -> TagId {
         let mut tags = self.tags.lock().unwrap();
-        let id = tags.alloc_or_get(name);
-        id
+        tags.alloc_or_get(name)
     }
 
     pub fn delete_tag(&self, id: TagId) {

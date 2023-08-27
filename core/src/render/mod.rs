@@ -1,26 +1,18 @@
 use indexmap::IndexMap;
-use std::{
-    any::TypeId,
-    collections::HashMap,
-    fmt::Debug,
-    sync::{Arc, Mutex},
-};
+use std::{any::TypeId, collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
-    backends::wgpu_backend::{GpuInputMainBuffers, WGPUResource},
+    backends::wgpu_backend::WGPUResource,
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
-    material::{basic::BasicMaterialFace, Material, MaterialFace, MaterialId},
+    material::{basic::BasicMaterialFace, Material},
     render::material::{RenderSourceIndirectObjects, RenderSourceLayer, SetupResource},
-    scene::{layer_str, LayerId, Scene, LAYER_UI},
-    types::{Mat4x4f, Rectu, Vec2f},
+    scene::{layer_str, Scene, LAYER_UI},
+    types::{Mat4x4f, Vec4f},
     util::any_as_u8_slice,
 };
 
+use self::material::{basic::BasicMaterialRendererFactory, MaterialRendererFactory};
 use self::material::{RenderMaterialContext, RenderSource};
-use self::{
-    common::BufferAccessor,
-    material::{basic::BasicMaterialRendererFactory, MaterialRendererFactory},
-};
 
 pub struct RenderParameter<'a> {
     pub gpu: Arc<WGPUResource>,
@@ -42,7 +34,7 @@ struct GlobalUniform3d {
 }
 
 struct GlobalUniform2d {
-    size: Vec2f,
+    size: Vec4f,
 }
 
 struct GlobalUniform {
@@ -139,7 +131,9 @@ impl HardwareRenderer {
         }
         let size = scene.ui_camera_ref().width_height();
 
-        let data = GlobalUniform2d { size };
+        let data = GlobalUniform2d {
+            size: Vec4f::new(size.x, size.y, 0f32, 0f32),
+        };
         p.gpu
             .queue()
             .write_buffer(&inner.ui_camera.buffer, 0, any_as_u8_slice(&data));
@@ -178,7 +172,7 @@ impl ModuleRenderer for HardwareRenderer {
                 let obj = o.o();
                 let mat_face_id = obj.material().face_id();
                 material_map
-                    .entry(mat_face_id.clone())
+                    .entry(mat_face_id)
                     .and_modify(|v| v.push(obj.material_arc()))
                     .or_insert_with(|| vec![obj.material_arc()]);
             }
@@ -224,7 +218,7 @@ impl ModuleRenderer for HardwareRenderer {
             );
 
             for obj_id in &sort_objects {
-                let o = storage.get(&obj_id).unwrap();
+                let o = storage.get(obj_id).unwrap();
                 let obj = o.o();
                 let mat_id = obj.material().id();
                 let face_id = obj.material().face_id();
@@ -467,7 +461,7 @@ fn resolve_single_pass(
                 }
             }
             current = (pos.group, pos.binding);
-            layout_entries.push(entry.clone());
+            layout_entries.push(*entry);
         }
         if !layout_entries.is_empty() {
             let layout = gpu

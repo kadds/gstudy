@@ -1,14 +1,13 @@
 use std::{
-    any::Any,
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use core::{
     backends::wgpu_backend::WGPUResource,
     context::ResourceRef,
     mesh::{builder::MeshBuilder, Mesh},
-    types::{Rectu, Size, Vec2},
+    types::{Rectu, Size},
     util::any_as_u8_slice_array,
 };
 
@@ -45,11 +44,11 @@ impl UITextures {
         }
 
         let texture = {
-            if !self.textures.contains_key(&id) {
+            self.textures.entry(id).or_insert_with(|| {
                 let texture = gpu.new_srgba_2d_texture(Some("ui texture"), vsize);
                 let res = gpu.context().register_texture(texture);
-                self.textures.insert(id, (res, vsize));
-            }
+                (res, vsize)
+            });
             self.textures.get(&id).unwrap()
         };
 
@@ -141,7 +140,7 @@ impl UIMesh {
             mesh_builder.set_clip(clip);
             let texture_id = match mesh.primitive {
                 egui::epaint::Primitive::Mesh(m) => {
-                    if m.vertices.len() == 0 {
+                    if m.vertices.is_empty() {
                         continue;
                     }
                     unsafe {

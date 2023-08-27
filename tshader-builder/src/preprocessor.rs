@@ -121,7 +121,7 @@ fn atomic_counter(
 ) -> anyhow::Result<EvalVal> {
     let mut beg = 0;
     let mut step = 1;
-    if inputs.len() >= 1 {
+    if !inputs.is_empty() {
         if let EvalVal::Number(i) = inputs[0] {
             beg = i;
         } else {
@@ -146,7 +146,7 @@ fn atomic_counter(
             .collect::<String>()
     );
     ctx.insert(hidden_name.clone(), EvalVal::Number(beg));
-    return Ok(EvalVal::ContextFn(Rc::new(move |_, ctx| {
+    Ok(EvalVal::ContextFn(Rc::new(move |_, ctx| {
         let val = ctx.get_mut(&hidden_name).unwrap();
         if let EvalVal::Number(n) = val {
             let val = *n;
@@ -154,7 +154,7 @@ fn atomic_counter(
             return Ok(EvalVal::Number(val));
         }
         anyhow::bail!("atomic_counter invalid type");
-    })));
+    })))
 }
 
 #[derive(Default)]
@@ -183,7 +183,7 @@ impl<'a> PreprocessorContext<'a> {
             if var_map.contains_key(value) {
                 var_map.insert(key.to_owned(), var_map.get(value).unwrap().clone());
             } else {
-                if value == "" {
+                if value.is_empty() {
                     var_map.insert(key.to_owned(), ().into());
                     continue;
                 }
@@ -242,14 +242,14 @@ impl<'a> PreprocessorContext<'a> {
                 .collect()
         };
         for include in includes {
-            let path_str = self.detect_include_file_path(&include.source)?;
+            let path_str = self.detect_include_file_path(include.source)?;
             if !self.map.contains_key(&path_str) {
                 let idx = self.parse_file(path_str.clone())?;
                 ret.push(idx);
             }
             let idx = self.map.get(&path_str).unwrap();
-            self.graph.add_edge(node, idx.clone(), ());
-            include_nodes.push(idx.clone());
+            self.graph.add_edge(node, *idx, ());
+            include_nodes.push(*idx);
         }
         self.graph.node_weight_mut(node).unwrap().includes = include_nodes;
 
@@ -297,7 +297,7 @@ impl<'a> PreprocessorContext<'a> {
 
                 let mut vals = Vec::new();
                 for expr in &c.exprs {
-                    vals.push(self.eval(&expr)?);
+                    vals.push(self.eval(expr)?);
                 }
                 match self.built_in_func.get(ident_name) {
                     Some(func) => func(&vals, &mut self.var_map),
@@ -321,9 +321,9 @@ impl<'a> PreprocessorContext<'a> {
                     let include_node = self.graph.node_weight(node).unwrap().includes[index];
                     index += 1;
                     if !self.distinct_nodes.contains(&include_node) {
-                        self.distinct_nodes.insert(include_node.clone());
+                        self.distinct_nodes.insert(include_node);
 
-                        self.build_commands(include_node.clone())?;
+                        self.build_commands(include_node)?;
                         self.buf.write_str("\n")?;
                     }
                 }
@@ -878,7 +878,7 @@ impl<'a> PartialEq for Literal {
     }
 }
 
-impl<'a> Eq for Literal {}
+impl Eq for Literal {}
 
 #[derive(Debug, Eq, PartialEq)]
 enum IdentOrOper<'a> {
@@ -896,7 +896,7 @@ fn function_call(i: &str) -> IResult<&str, Vec<Box<Expr>>> {
             separated_list0(tuple((space0, tag(","))), expr),
             tuple((space0, tag(")"))),
         ),
-        |v| Some(v),
+        Some,
     )(i)
 }
 
@@ -998,7 +998,7 @@ fn expr_pratt_parser(mut i: &str, precedence: i32) -> IResult<&str, Box<Expr>> {
                     // eof
                     break;
                 } else {
-                    let infix_val = INFIX_MAP.get(&oper).unwrap().clone();
+                    let infix_val = *INFIX_MAP.get(&oper).unwrap();
                     if infix_val.left_precedence < precedence {
                         break;
                     }
@@ -1079,7 +1079,7 @@ fn literal(i: &str) -> IResult<&str, Literal> {
                     if let Some((_, s)) = k {
                         let s_int = u64::from_str(s).ok()?;
                         let mut f = z_int as f64;
-                        f = f + (s_int as f64 / s_int.ilog10() as f64);
+                        f += s_int as f64 / s_int.ilog10() as f64;
 
                         Some(Literal::Float(f))
                     } else {

@@ -113,13 +113,7 @@ impl Mesh {
                 }
             }
             max_alignment = max_alignment.max(alignment);
-            properties_offset.insert(
-                *prop,
-                FieldOffset {
-                    offset: offset as u32,
-                    len: size as u32,
-                },
-            );
+            properties_offset.insert(*prop, FieldOffset { offset, len: size });
             offset += size;
         }
         if max_alignment == 0 {
@@ -130,13 +124,13 @@ impl Mesh {
                 ..Default::default()
             }
         } else {
-            let row_data_size = offset as u32;
+            let row_data_size = offset;
 
             let rest = offset % max_alignment;
             if rest != 0 {
                 // offset += max_alignment - rest;
             }
-            let row_strip_size = offset as u32;
+            let row_strip_size = offset;
 
             Self {
                 row_size: row_data_size,
@@ -168,25 +162,25 @@ impl Mesh {
 
     pub fn indices_view(&self) -> Option<&[u8]> {
         match &self.indices {
-            Indices::U32(d) => Some(any_as_u8_slice_array(&d)),
-            Indices::U16(d) => Some(any_as_u8_slice_array(&d)),
+            Indices::U32(d) => Some(any_as_u8_slice_array(d)),
+            Indices::U16(d) => Some(any_as_u8_slice_array(d)),
             _ => None,
         }
     }
 
     pub fn indices_is_u32(&self) -> Option<bool> {
         match &self.indices {
-            Indices::U32(d) => Some(true),
-            Indices::U16(d) => Some(false),
+            Indices::U32(_) => Some(true),
+            Indices::U16(_) => Some(false),
             _ => None,
         }
     }
 
     pub fn vertices_view(&self) -> Option<&[u8]> {
         match &self.position_vertices {
-            PositionVertices::F2(d) => Some(any_as_u8_slice_array(&d)),
-            PositionVertices::F3(d) => Some(any_as_u8_slice_array(&d)),
-            PositionVertices::F4(d) => Some(any_as_u8_slice_array(&d)),
+            PositionVertices::F2(d) => Some(any_as_u8_slice_array(d)),
+            PositionVertices::F3(d) => Some(any_as_u8_slice_array(d)),
+            PositionVertices::F4(d) => Some(any_as_u8_slice_array(d)),
             _ => None,
         }
     }

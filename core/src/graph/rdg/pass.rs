@@ -1,18 +1,15 @@
 use std::{
-    any::{Any, Provider, TypeId},
+    any::Any,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
 
-use crate::{
-    backends::wgpu_backend::{ClearValue, ResourceOps, WGPUResource},
-    types::Color,
-};
+use crate::backends::wgpu_backend::{ClearValue, ResourceOps, WGPUResource};
 
 use super::{
     backend::{GraphBackend, GraphCopyEngine, GraphRenderEngine},
     resource::{RT_COLOR_RESOURCE_ID, RT_DEPTH_RESOURCE_ID},
-    PassParameter, RenderGraph, RenderGraphBuilder, ResourceId, ResourceRegistry, ResourceUsage,
+    PassParameter, ResourceId, ResourceRegistry, ResourceUsage,
 };
 
 #[derive(Debug)]
@@ -116,7 +113,7 @@ impl RenderTargetState {
         desc: &RenderTargetDescriptor,
         texture_clear: &Option<ClearValue>,
     ) -> Option<ResourceOps> {
-        if let Some(_) = &desc.colors[index].ops.load {
+        if desc.colors[index].ops.load.is_some() {
             return Some(desc.colors[index].ops.clone());
         } else {
             if self.colors.get(index) {
@@ -162,15 +159,15 @@ impl RenderTargetState {
                 stencil = p.stencil_ops.clone();
             }
 
-            if let Some(depth) = &mut depth {
-                if let Some(stencil) = &mut stencil {
-                } else {
-                }
-            } else {
-                if let Some(stencil) = &mut stencil {
-                } else {
-                }
-            }
+            // if let Some(depth) = &mut depth {
+            //     if let Some(stencil) = &mut stencil {
+            //     } else {
+            //     }
+            // } else {
+            //     if let Some(stencil) = &mut stencil {
+            //     } else {
+            //     }
+            // }
             return (depth, stencil);
         }
         (None, None)
@@ -179,8 +176,6 @@ impl RenderTargetState {
 
 #[derive(Clone, Copy)]
 pub struct RenderPassContext<'b> {
-    // pub state: &'b mut ResourceStateMap,
-    // pub registry: &'b ResourceRegistry,
     name: &'b str,
     parameter: &'b dyn Any,
     gpu: &'b WGPUResource,
@@ -267,7 +262,15 @@ impl DynPass for RenderPass {
         };
         {
             let mut copy_engine = backend.dispatch_copy(&self.name);
-            if c.prepare(context.clone(), &mut copy_engine).is_none() {
+            if c.prepare(context, &mut copy_engine).is_none() {
+                // clear target
+                let mut render_engine = backend.dispatch_render(
+                    &self.name,
+                    &self.render_targets,
+                    render_target_state,
+                    registry,
+                );
+                render_engine.begin(0);
                 return;
             }
         }
@@ -422,8 +425,8 @@ impl DynPass for ClearPass {
         &self,
         registry: &ResourceRegistry,
         backend: &GraphBackend,
-        render_target_state: &RenderTargetState,
-        context: &dyn Any,
+        _render_target_state: &RenderTargetState,
+        _context: &dyn Any,
     ) {
         let mut r = backend.dispatch_render_with_clear(&self.name, &self.render_targets, registry);
         r.begin(0);
