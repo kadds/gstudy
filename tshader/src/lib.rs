@@ -9,7 +9,6 @@ use serde_derive::Deserialize;
 use tshader_builder::compiler::ShaderTechCompiler;
 
 pub use tshader_builder::compiler::variants_name;
-pub use tshader_builder::compiler::Variant;
 
 #[derive(Debug)]
 pub struct Shader {
@@ -354,7 +353,7 @@ impl ShaderTech {
     pub fn register_variant(
         &self,
         device: &wgpu::Device,
-        variants: &[Variant],
+        variants: &[&'static str],
     ) -> anyhow::Result<Arc<Vec<Pass>>> {
         let key = variants_name(variants);
         let mut l = self.variants_map.lock().unwrap();

@@ -41,7 +41,7 @@ enum BasicMaterialParameter {
 }
 
 pub struct BasicMaterialFace {
-    pub(crate) variants: Vec<tshader::Variant>,
+    pub(crate) variants: Vec<&'static str>,
     pub(crate) variants_name: String,
     pub(crate) texture: MaterialMap<Color>,
     pub(crate) sampler: Option<ResourceRef>,
@@ -131,7 +131,7 @@ impl BasicMaterialFaceBuilder {
                 }
             }
             MaterialMap::Constant(c) => {
-                variants.push(tshader::Variant::ConstColor);
+                variants.push("CONST_COLOR");
                 if let Some(a) = self.alpha_test {
                     BasicMaterialParameter::ConstParameterWithAlpha(ConstParameterWithAlpha {
                         alpha: a,
@@ -143,7 +143,7 @@ impl BasicMaterialFaceBuilder {
                 }
             }
             MaterialMap::PreVertex => {
-                variants.push(tshader::Variant::VertexColor);
+                variants.push("VERTEX_COLOR");
 
                 if let Some(a) = self.alpha_test {
                     BasicMaterialParameter::Alpha(ParameterWithAlpha {
@@ -155,7 +155,7 @@ impl BasicMaterialFaceBuilder {
                 }
             }
             MaterialMap::Texture(_) => {
-                variants.push(tshader::Variant::TextureColor);
+                variants.push("TEXTURE");
 
                 if let Some(a) = self.alpha_test {
                     BasicMaterialParameter::Alpha(ParameterWithAlpha {
@@ -169,7 +169,7 @@ impl BasicMaterialFaceBuilder {
         };
 
         if self.alpha_test.is_some() {
-            variants.push(tshader::Variant::AlphaTest);
+            variants.push("ALPHA_TEST");
         }
 
         BasicMaterialFace {

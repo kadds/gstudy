@@ -395,6 +395,28 @@ impl RenderPassBuilder {
         self.render_targets = Some(desc);
     }
 
+    pub fn default_color_depth_render_target(&mut self) {
+        let desc = RenderTargetDescriptor {
+            colors: smallvec::smallvec![ColorRenderTargetDescriptor {
+                prefer_attachment: PreferAttachment::Default,
+                resolve_attachment: PreferAttachment::Default,
+                ops: ResourceOps {
+                    load: None,
+                    store: true,
+                },
+            }],
+            depth: Some(DepthRenderTargetDescriptor {
+                prefer_attachment: PreferAttachment::Default,
+                depth_ops: Some(ResourceOps {
+                    load: None,
+                    store: true,
+                }),
+                stencil_ops: None,
+            }),
+        };
+        self.render_target(desc);
+    }
+
     pub fn build(self) -> RenderPass {
         RenderPass {
             inner: self.inner.unwrap(),

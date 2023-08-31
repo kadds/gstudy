@@ -8,15 +8,11 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct MaterialUniform {
-}
-
 struct Object {
     model: mat4x4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> camera_uniform: CameraUniform;
-@group(1) @binding(0) var<uniform> material_uniform: MaterialUniform;
 
 var<push_constant> object: Object;
 

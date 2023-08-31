@@ -8,7 +8,8 @@ use crate::{
     types::{Size, Vec3f, Vec4f},
 };
 use std::{
-    collections::{BTreeMap, HashSet},
+    any::{Any, TypeId},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex},
 };
@@ -78,6 +79,8 @@ pub struct Scene {
     cameras: Mutex<SceneCamera>,
 
     rebuild: AtomicBool,
+
+    attach_resources: Mutex<HashMap<TypeId, Arc<dyn Any + 'static + Send + Sync>>>,
 }
 
 impl std::fmt::Debug for Scene {
@@ -101,6 +104,8 @@ impl Scene {
             cameras: Mutex::new(SceneCamera::default()),
 
             rebuild: AtomicBool::new(true),
+
+            attach_resources: Mutex::new(HashMap::new()),
         };
         s.add_default_ui_camera();
         s
@@ -318,6 +323,18 @@ impl Scene {
         for camera in c.cameras.iter() {
             camera.set_aspect(aspect);
         }
+    }
+
+    pub fn attach(&self, resource: Arc<dyn Any + 'static + Send + Sync>) {
+        let mut s = self.attach_resources.lock().unwrap();
+        let id = (&*resource).type_id();
+        s.insert(id, resource);
+    }
+
+    pub fn get_resource<T: 'static + Send + Sync>(&self) -> Option<Arc<T>> {
+        let mut s = self.attach_resources.lock().unwrap();
+        let id = std::any::TypeId::of::<T>();
+        s.get(&id).and_then(|v| v.clone().downcast::<T>().ok())
     }
 }
 

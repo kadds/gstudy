@@ -255,6 +255,8 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
             }),
         });
 
+        pass.add_constraint(PassConstraint::Last);
+
         pass.async_execute(r.clone());
 
         g.add_render_pass(pass);

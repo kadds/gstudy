@@ -1,3 +1,4 @@
+use core::scene::Scene;
 use std::any::TypeId;
 
 use app::{
@@ -5,6 +6,7 @@ use app::{
     plugin::{CoreFactoryList, Plugin, PluginFactory},
     AppEventProcessor,
 };
+use light::SceneLights;
 use material::PhongMaterialFace;
 use material_render::PhongMaterialRendererFactory;
 
@@ -33,6 +35,7 @@ pub struct PhongPlugin {}
 
 impl PhongPlugin {
     pub fn new(container: &Container) -> Self {
+        container.register(SceneLights::default());
         Self {}
     }
 }
@@ -50,5 +53,16 @@ impl Plugin for PhongPlugin {
 }
 
 impl AppEventProcessor for PhongPlugin {
-    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn std::any::Any) {}
+    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn std::any::Any) {
+        if let Some(ev) = event.downcast_ref::<core::event::Event>() {
+            match ev {
+                core::event::Event::FirstSync => {
+                    let scene = context.container.get::<Scene>().unwrap();
+                    let lights = context.container.get::<SceneLights>().unwrap();
+                    scene.attach(lights);
+                }
+                _ => (),
+            }
+        }
+    }
 }

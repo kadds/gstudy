@@ -167,6 +167,7 @@ impl ModuleRenderer for HardwareRenderer {
             ui_camera: &inner.ui_camera.buffer,
             main_camera: &inner.main_camera.buffer,
             shader_loader: &self.shader_loader,
+            scene: scene,
             msaa: config.msaa,
         };
         let container = scene.get_container();

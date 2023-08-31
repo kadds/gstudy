@@ -1,7 +1,21 @@
 [[pass]]
 index = 0
 name = "phong-forward"
-source = "forward.wgsl"
+source = "forward_base.wgsl"
+binding = ["pre_camera"]
+camera = "D3"
+shaders = ["vs", "fs"]
+
+[pass.variants]
+excludes = []
+exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"]
+unit = ["DIFFUSE_CONSTANT", "DIFFUSE_VERTEX", "DIFFUSE_TEXTURE", "DIRECT_LIGHT", 
+"ALPHA_TEST"]
+
+[[pass]]
+index = 0
+name = "phong-forward-add"
+source = "forward_add.wgsl"
 binding = ["pre_camera"]
 camera = "D3"
 shaders = ["vs", "fs"]

@@ -379,24 +379,7 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
         }));
 
         let mut pass = RenderPassBuilder::new("basic render pass");
-        pass.render_target(RenderTargetDescriptor {
-            colors: smallvec::smallvec![ColorRenderTargetDescriptor {
-                prefer_attachment: PreferAttachment::Default,
-                resolve_attachment: PreferAttachment::Default,
-                ops: ResourceOps {
-                    load: None,
-                    store: true,
-                },
-            }],
-            depth: Some(DepthRenderTargetDescriptor {
-                prefer_attachment: PreferAttachment::Default,
-                depth_ops: Some(ResourceOps {
-                    load: None,
-                    store: true,
-                }),
-                stencil_ops: None,
-            }),
-        });
+        pass.default_color_depth_render_target();
         pass.async_execute(r.clone());
         pass.add_constraint(PassConstraint::Last);
 

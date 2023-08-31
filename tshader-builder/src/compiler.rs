@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use std::{path::PathBuf, str::FromStr};
+use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
 use serde_derive::Deserialize;
 use strum::{Display, EnumIter, EnumString};
@@ -41,47 +41,10 @@ pub struct Config {
     pub pass: Vec<Pass>,
 }
 
-#[derive(Debug, Clone, Copy, Display, EnumIter, EnumString, PartialEq, Eq, Hash)]
-#[repr(u8)]
-#[strum(serialize_all = "snake_case", use_phf)]
-pub enum Variant {
-    #[strum(serialize = "TEXTURE_COLOR")]
-    TextureColor,
-    #[strum(serialize = "NORMAL_TEX")]
-    NormalTex,
-    #[strum(serialize = "VERTEX_NORMAL")]
-    VertexNormal,
-    #[strum(serialize = "HEIGHT_TEX")]
-    HeightTex,
-    #[strum(serialize = "EMISSION_TEX")]
-    EmissionTex,
-    #[strum(serialize = "VERTEX_COLOR")]
-    VertexColor,
-    #[strum(serialize = "ALPHA_TEST")]
-    AlphaTest,
-    #[strum(serialize = "CONST_COLOR")]
-    ConstColor,
-}
-
-impl Variant {
-    pub fn need_sampler(&self) -> bool {
-        match self {
-            Variant::TextureColor => true,
-            Variant::NormalTex => true,
-            Variant::VertexNormal => false,
-            Variant::VertexColor => false,
-            Variant::HeightTex => true,
-            Variant::EmissionTex => true,
-            Variant::AlphaTest => false,
-            Variant::ConstColor => false,
-        }
-    }
-}
-
-pub fn variants_name<S: Into<Vec<Variant>>>(variants: S) -> String {
-    let mut variants: Vec<Variant> = variants.into();
-    variants.sort_by_key(|v| *v as u8);
-    variants.iter().map(|v| v.to_string()).join(",")
+pub fn variants_name<S: Into<Vec<V>>, V: Into<String>>(variants: S) -> String {
+    let variants: Vec<_> = variants.into();
+    // variants.sort_by_key(|v| *v as u8);
+    variants.into_iter().map(|v| v.into()).join("+")
 }
 
 #[derive(Debug, Clone, Copy, Display, EnumIter, EnumString, PartialEq, Eq, Hash)]
@@ -129,11 +92,26 @@ impl ShaderTechCompiler {
     pub fn compile_pass(
         &self,
         pass_index: usize,
-        variants: &[Variant],
+        variants: &[&'static str],
     ) -> anyhow::Result<PassShaderSourceDescriptor> {
         let mut cfg = PreprocessorConfig::default();
 
+        let mut set = HashSet::new();
+
+        if let Some(variants) = &self.config.pass[pass_index].variants {
+            for unit in &variants.unit {
+                set.insert(unit.to_owned());
+            }
+        }
+
         for variant in variants {
+            if !set.contains(*variant) {
+                return Err(anyhow::anyhow!(
+                    "variant {} not exists in pass {}",
+                    *variant,
+                    pass_index
+                ));
+            }
             cfg = cfg.with_define(variant.to_string(), "True");
         }
         cfg = cfg.with_include(self.base_path.to_str().unwrap());

@@ -13,4 +13,5 @@ anyhow = "1.0.57"
 app = {path = "../app"}
 tshader = {path="../tshader"}
 fxhash = "0.2.1"
+smallvec = "1.10"
 
