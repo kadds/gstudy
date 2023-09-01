@@ -1,7 +1,9 @@
+use indexmap::IndexMap;
+
 use crate::{scene::Transform, types::*, util::any_as_u8_slice_array};
 use std::{
     any::Any,
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
@@ -11,42 +13,31 @@ use self::intersect::{IntersectResult, Ray};
 pub mod builder;
 pub mod intersect;
 
-#[repr(u8)]
-#[derive(Debug, Hash, Eq, Ord, PartialEq, PartialOrd, Clone, Copy)]
-pub enum MeshPropertyType {
-    Color,
-    Pos2,
-    TexCoord,
-    TexNormal,
-    TexBump,
-    TexCube,
-    ColorUint,
-    Custom(&'static str, u32, u32),
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub struct MeshPropertyType {
+    pub name: &'static str,
+    pub size: u32,
+    pub alignment: u32,
 }
 
 impl MeshPropertyType {
-    pub fn size_alignment(&self) -> (u32, u32) {
-        match self {
-            MeshPropertyType::Color => (16, 16),
-            MeshPropertyType::Pos2 => (8, 8),
-            MeshPropertyType::TexCoord => (8, 8),
-            MeshPropertyType::TexNormal => (8, 8),
-            MeshPropertyType::TexBump => (8, 8),
-            MeshPropertyType::TexCube => (8, 8),
-            MeshPropertyType::ColorUint => (4, 4),
-            MeshPropertyType::Custom(_, a, b) => (*a, *b),
+    pub fn new<T>(name: &'static str) -> Self {
+        let size = std::mem::size_of::<T>();
+        let alignment = if size <= 4 {
+            4
+        } else if size <= 8 {
+            8
+        } else if size <= 16 {
+            16
+        } else {
+            panic!()
+        };
+        Self {
+            name,
+            size: size as u32,
+            alignment,
         }
     }
-}
-
-pub type MeshTransformer = Box<dyn FnMut(Vec<u8>, &Transform) -> Vec<u8> + Send + Sync>;
-
-fn default_transformer(data: Vec<u8>, t: &Transform) -> Vec<u8> {
-    data
-}
-
-pub fn load_default_transformer() -> MeshTransformer {
-    Box::new(default_transformer)
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -80,7 +71,7 @@ pub struct Mesh {
     pub(crate) indices: Indices,
     pub(crate) clip: Option<Rectu>,
 
-    pub(crate) properties_offset: BTreeMap<MeshPropertyType, FieldOffset>,
+    pub(crate) properties_offset: IndexMap<MeshPropertyType, FieldOffset>,
 
     pub(crate) row_strip_size: u32,
     pub(crate) row_size: u32,
@@ -102,21 +93,26 @@ impl std::fmt::Debug for Mesh {
 
 impl Mesh {
     pub fn new<'a, I: Iterator<Item = &'a MeshPropertyType>>(properties: I) -> Self {
-        let mut properties_offset = BTreeMap::new();
+        let mut properties_offset = IndexMap::new();
         let mut offset = 0;
         let mut max_alignment = 0;
 
         for prop in properties {
-            let (size, alignment) = prop.size_alignment();
-            let rest = offset % alignment;
-            if rest < size {
+            let rest = offset % prop.alignment;
+            if rest < prop.size {
                 if rest != 0 {
-                    offset += alignment - rest;
+                    // offset += prop.alignment - rest;
                 }
             }
-            max_alignment = max_alignment.max(alignment);
-            properties_offset.insert(*prop, FieldOffset { offset, len: size });
-            offset += size;
+            max_alignment = max_alignment.max(prop.alignment);
+            properties_offset.insert(
+                *prop,
+                FieldOffset {
+                    offset,
+                    len: prop.size,
+                },
+            );
+            offset += prop.size;
         }
         if max_alignment == 0 {
             Self {

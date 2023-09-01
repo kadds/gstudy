@@ -348,6 +348,8 @@ pub struct RenderObject {
     material: Arc<Material>,
     z_order: i8,
     visiable: bool,
+    case_shadow: bool,
+    recv_shadow: bool,
     name: String,
     tag: HashSet<TagId>,
 }
@@ -358,10 +360,20 @@ impl RenderObject {
             geometry,
             material,
             z_order: 0,
+            case_shadow: false,
+            recv_shadow: false,
             name: String::default(),
             visiable: true,
             tag: HashSet::default(),
         }
+    }
+
+    pub fn set_cast_shadow(&mut self) {
+        self.case_shadow = true;
+    }
+
+    pub fn set_recv_shadow(&mut self) {
+        self.recv_shadow = true;
     }
 
     pub fn set_name(&mut self, name: &str) {

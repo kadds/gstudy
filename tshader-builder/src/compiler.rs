@@ -69,6 +69,7 @@ pub struct ShaderTechCompiler {
     config: Config,
     base_path: PathBuf,
     include_base_path: PathBuf,
+    source: String,
 }
 
 impl ShaderTechCompiler {
@@ -84,6 +85,7 @@ impl ShaderTechCompiler {
 
         Ok(Self {
             config,
+            source: source_path.to_str().unwrap().to_owned(),
             include_base_path: p,
             base_path: source_path.canonicalize()?.parent().unwrap().to_path_buf(),
         })
@@ -122,6 +124,7 @@ impl ShaderTechCompiler {
 
         let res = preprocessor.process(real_path.as_os_str().to_str().unwrap())?;
 
+        log::debug!("compile {} pass {} success \n{}", self.source, pass_index, res);
         let shaders = self.config.pass[pass_index]
             .shaders
             .iter()

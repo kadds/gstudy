@@ -7,7 +7,7 @@ use core::{
     backends::wgpu_backend::WGPUResource,
     context::ResourceRef,
     mesh::{builder::MeshBuilder, Mesh},
-    types::{Rectu, Size},
+    types::{Rectu, Size, Vec2f},
     util::any_as_u8_slice_array,
 };
 
@@ -133,9 +133,13 @@ impl UIMesh {
             clip.w = clip.w.min(view_size.y - clip.y);
 
             let mut mesh_builder = MeshBuilder::new();
-            mesh_builder.add_property(core::mesh::MeshPropertyType::Pos2);
-            mesh_builder.add_property(core::mesh::MeshPropertyType::TexCoord);
-            mesh_builder.add_property(core::mesh::MeshPropertyType::ColorUint);
+            let pos2 = core::mesh::MeshPropertyType::new::<Vec2f>("pos");
+            let tex_coord = core::mesh::MeshPropertyType::new::<Vec2f>("texture_coord");
+            let color_uint = core::mesh::MeshPropertyType::new::<u32>("color_uint");
+
+            mesh_builder.add_property(pos2);
+            mesh_builder.add_property(tex_coord);
+            mesh_builder.add_property(color_uint);
 
             mesh_builder.set_clip(clip);
             let texture_id = match mesh.primitive {

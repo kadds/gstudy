@@ -10,4 +10,5 @@ core = {path = "../../core"}
 window = {path = "../../window"}
 app = {path = "../../app"}
 phong-render = {path="../../phong-render"}
+geometry = {path="../../geometry"}
 env_logger = "0.10"

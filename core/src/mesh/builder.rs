@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use indexmap::{IndexSet, IndexMap};
+
 use crate::{
     types::{Rectu, Vec3f},
     util::{any_as_u8_slice, any_as_u8_slice_array},
@@ -9,7 +11,7 @@ use super::{FieldOffset, Indices, Mesh, MeshPropertyType, PositionVertices};
 
 #[derive(Default)]
 pub struct MeshBuilder {
-    properties: BTreeSet<MeshPropertyType>,
+    properties: IndexSet<MeshPropertyType>,
     mesh: Option<Mesh>,
     properties_written: HashMap<MeshPropertyType, usize>,
 }
@@ -206,7 +208,7 @@ pub struct PropertiesRow {
 }
 
 pub struct PropertiesVerticesBuilder {
-    properties_offset: BTreeMap<MeshPropertyType, FieldOffset>,
+    properties_offset: IndexMap<MeshPropertyType, FieldOffset>,
     row_strip: u32,
     result: Vec<PropertiesRow>,
 }
@@ -228,7 +230,7 @@ impl PropertiesVerticesBuilder {
 }
 
 pub struct PropertiesRowBuilder<'a> {
-    properties_offset: &'a BTreeMap<MeshPropertyType, FieldOffset>,
+    properties_offset: &'a IndexMap<MeshPropertyType, FieldOffset>,
     vertex: PropertiesRow,
     result: &'a mut Vec<PropertiesRow>,
 }

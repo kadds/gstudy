@@ -3,7 +3,7 @@ use core::{
     material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
     mesh::{builder::MeshBuilder, StaticGeometry},
     scene::{Camera, RenderObject, Scene},
-    types::{Size, Vec3f, Vec4f},
+    types::{Size, Vec3f, Vec4f, Color},
 };
 use std::{any::Any, sync::Arc};
 
@@ -15,7 +15,8 @@ pub struct MainLogic {}
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
         let mut builder = MeshBuilder::new();
-        builder.add_property(core::mesh::MeshPropertyType::Color);
+        let property = core::mesh::MeshPropertyType::new::<Color>("color");
+        builder.add_property(property);
         builder.add_position_vertices3(&[
             Vec3f::new(0f32, -0.5f32, 0f32),
             Vec3f::new(-0.7f32, 0.7f32, 0f32),
@@ -23,7 +24,7 @@ impl MainLogic {
         ]);
         builder.add_indices32(&[0, 1, 2]);
         builder.add_property_vertices(
-            core::mesh::MeshPropertyType::Color,
+            property,
             &[
                 Vec4f::new(1f32, 0f32, 0f32, 1f32),
                 Vec4f::new(0f32, 1f32, 0f32, 1f32),
