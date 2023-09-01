@@ -63,9 +63,6 @@ struct LightUniform {
     direct: DirectLight
 }
 
-struct ObjectMaterial {
-}
-
 struct Object {
     model: mat4x4<f32>,
 }
@@ -99,7 +96,7 @@ var<push_constant> object: Object;
 fn vs_main(input: VertexInput) -> VertexOutput{
     var output: VertexOutput;
     output.position = camera_uniform.vp * object.model * vec4<f32>(input.position, 1.0);
-    output.color = material_uniform.color;
+    output.color = vec4<f32>(1.0,1.0,1.0,1.0);
 ///#if VERTEX_COLOR
     output.color *= input.color;
 ///#endif

@@ -21,6 +21,7 @@ pub enum MeshPropertyType {
     TexBump,
     TexCube,
     ColorUint,
+    Custom(&'static str, u32, u32),
 }
 
 impl MeshPropertyType {
@@ -33,6 +34,7 @@ impl MeshPropertyType {
             MeshPropertyType::TexBump => (8, 8),
             MeshPropertyType::TexCube => (8, 8),
             MeshPropertyType::ColorUint => (4, 4),
+            MeshPropertyType::Custom(_, a, b) => (*a, *b),
         }
     }
 }

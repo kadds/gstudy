@@ -10,10 +10,11 @@ shaders = ["vs", "fs"]
 excludes = []
 exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"]
 unit = ["DIFFUSE_CONSTANT", "DIFFUSE_VERTEX", "DIFFUSE_TEXTURE", "DIRECT_LIGHT", 
-"ALPHA_TEST"]
+"ALPHA_TEST", "NORMAL_VERTEX", "NORMAL_TEXTURE", "SPECULAR_CONSTANT", "SPECULAR_VERTEX", 
+"SPECULAR_TEXTURE"]
 
 [[pass]]
-index = 0
+index = 1
 name = "phong-forward-add"
 source = "forward_add.wgsl"
 binding = ["pre_camera"]

@@ -7,6 +7,8 @@ use crate::{
     scene::Scene,
 };
 
+use super::GlobalUniform;
+
 pub struct RenderSourceIndirectObjects {
     pub material: Arc<Material>,
     pub mat_id: MaterialId,
@@ -28,7 +30,7 @@ impl Debug for RenderSourceIndirectObjects {
 pub struct RenderSourceLayer {
     pub objects: Vec<u64>,
     pub material: Vec<RenderSourceIndirectObjects>,
-    pub main_camera: Arc<wgpu::Buffer>,
+    pub main_camera: Arc<GlobalUniform>,
     pub layer: u32,
 }
 
@@ -67,8 +69,8 @@ pub struct RenderMaterialContext {
 }
 
 pub struct SetupResource<'a> {
-    pub ui_camera: &'a wgpu::Buffer,
-    pub main_camera: &'a wgpu::Buffer,
+    pub ui_camera: Arc<GlobalUniform>,
+    pub main_camera: Arc<GlobalUniform>,
     pub shader_loader: &'a tshader::Loader,
     pub scene: &'a Scene,
     pub msaa: u32,

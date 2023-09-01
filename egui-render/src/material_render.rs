@@ -26,7 +26,6 @@ struct EguiMaterialHardwareRendererInner {
 
     sampler: wgpu::Sampler,
     pipeline: PipelinePassResource,
-    global_bind_group: wgpu::BindGroup,
     tech: Arc<tshader::ShaderTech>,
     material_bind_group_cache: FramedCache<MaterialId, wgpu::BindGroup>,
 
@@ -140,7 +139,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
             let mut pass = engine.begin(layer.layer);
 
             pass.set_pipeline(inner.pipeline.pass[0].render());
-            pass.set_bind_group(0, &inner.global_bind_group, &[]);
+            pass.set_bind_group(0, &layer.main_camera.bind_group, &[]);
             pass.set_index_buffer(
                 inner.main_buffers.index().buffer().slice(..),
                 wgpu::IndexFormat::Uint32,
@@ -187,12 +186,12 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
                 name: "egui".into(),
             })
             .unwrap();
-        let template = tech.register_variant(gpu.device(), &[]).unwrap();
+        let template = tech.register_variant(gpu.device(), &[&[]]).unwrap();
         let depth_format = wgpu::TextureFormat::Depth32Float;
 
         let pipeline = resolve_pipeline(
             gpu,
-            template,
+            &template,
             RenderDescriptorObject::new()
                 .set_depth(depth_format, |depth: &mut _| {
                     depth.depth_compare = wgpu::CompareFunction::LessEqual;
@@ -206,22 +205,11 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
                         .set_append_blender()
                         .build(),
                 ),
-            &ResolvePipelineConfig::default(),
+            &ResolvePipelineConfig {
+                global_bind_group_layout: Some(&setup_resource.ui_camera.bind_group_layout),
+                ..Default::default()
+            },
         );
-
-        // global bind group
-        let global_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("egui"),
-            layout: &pipeline.pass[0].get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: setup_resource.ui_camera,
-                    offset: 0,
-                    size: None,
-                }),
-            }],
-        });
 
         let r = Arc::new(Mutex::new(EguiMaterialHardwareRenderer {
             inner: EguiMaterialHardwareRendererInner {
@@ -229,7 +217,6 @@ impl MaterialRendererFactory for EguiMaterialRendererFactory {
                 sampler: gpu.new_sampler(label),
                 tech,
                 pipeline,
-                global_bind_group,
                 material_bind_group_cache: FramedCache::new(),
                 draw_index_buffer: vec![],
             },

@@ -1,102 +1,34 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
-use tshader::LoadTechConfig;
-use wgpu::util::DeviceExt;
+use tshader::{LoadTechConfig, ShaderTech};
 
 use crate::{
-    backends::wgpu_backend::{ResourceOps, WGPUResource},
+    backends::wgpu_backend::WGPUResource,
     graph::rdg::{
         backend::{GraphCopyEngine, GraphRenderEngine},
         pass::*,
         RenderPassBuilder,
     },
-    material::{basic::*, Material, MaterialFace, MaterialId},
-    mesh::Mesh,
+    material::{basic::*, Material},
     render::{
-        common::FramedCache, resolve_pipeline, ColorTargetBuilder, PipelinePassResource,
-        RenderDescriptorObject, ResolvePipelineConfig,
+        collector::{
+            MaterialBufferInstantCollector, MaterialBufferInstantiation, MeshBufferCollector,
+        },
+        resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
+        ResolvePipelineConfig,
     },
-    types::*,
     util::any_as_u8_slice,
 };
 
 use super::{take_rs, MaterialRendererFactory, SetupResource};
 
-pub struct MaterialGpuResource {
-    global_bind_group: wgpu::BindGroup,
-
-    material_bind_buffers: FramedCache<MaterialId, wgpu::Buffer>,
-    bind_groups: FramedCache<MaterialId, Option<wgpu::BindGroup>>,
-
-    template: Arc<Vec<tshader::Pass>>,
-    pipeline: PipelinePassResource,
-}
-
-struct ObjectBuffer {
-    index: Option<wgpu::Buffer>,
-    vertex: wgpu::Buffer,
-    vertex_properties: Option<wgpu::Buffer>,
-}
-
 struct BasicMaterialHardwareRendererInner {
-    material_pipelines_cache: FramedCache<u64, MaterialGpuResource>,
-
-    static_object_buffers: FramedCache<u64, ObjectBuffer>,
-    dynamic_object_buffers: HashMap<u64, ObjectBuffer>,
-
-    tech: Arc<tshader::ShaderTech>,
-    msaa: u32,
+    material_buffer_collector: MaterialBufferInstantCollector,
+    mesh_buffer_collector: MeshBufferCollector,
 }
 
 pub struct BasicMaterialHardwareRenderer {
     inner: BasicMaterialHardwareRendererInner,
-}
-
-fn create_materia_buffer(material: &Material, gpu: &WGPUResource) -> wgpu::Buffer {
-    let mat = material.face_by::<BasicMaterialFace>();
-    let data = mat.material_data();
-    gpu.new_wvp_buffer_from(Some("basic material buffer"), data)
-}
-
-fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> ObjectBuffer {
-    let index = if let Some(index) = mesh.indices_view() {
-        Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{} index buffer", id)),
-                contents: index,
-                usage: wgpu::BufferUsages::INDEX,
-            }),
-        )
-    } else {
-        None
-    };
-
-    let vertex = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(&format!("{} vertex buffer", id)),
-        contents: mesh.vertices_view().unwrap_or_default(),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-
-    let vertex_properties = if !mesh.properties_view().is_empty() {
-        Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{} properties buffer", id)),
-                contents: mesh.properties_view(),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-        )
-    } else {
-        None
-    };
-
-    ObjectBuffer {
-        index,
-        vertex,
-        vertex_properties,
-    }
 }
 
 impl RenderPassExecutor for BasicMaterialHardwareRenderer {
@@ -105,45 +37,30 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         context: RenderPassContext<'a>,
         engine: &mut GraphCopyEngine,
     ) -> Option<()> {
-        self.inner.dynamic_object_buffers.clear();
+        self.inner.mesh_buffer_collector.recall();
+        self.inner.material_buffer_collector.recall();
 
         let rs = take_rs::<BasicMaterialFace>(&context)?;
         let c = rs.scene.get_container();
 
-        self.inner.material_pipelines_cache.recall();
-
         for layer in &rs.list {
             for indirect in &layer.material {
                 let material = indirect.material.as_ref();
-                let mgr = self.prepare_material_pipeline(&rs.gpu, &layer.main_camera, material);
-                // create uniform buffer
-                mgr.material_bind_buffers.get_or(material.id(), |_| {
-                    create_materia_buffer(material, engine.gpu())
-                });
+                self.inner
+                    .material_buffer_collector
+                    .add_pipeline_and_copy_buffer(
+                        material,
+                        &layer.main_camera.bind_group_layout,
+                        &rs.gpu,
+                    );
 
                 // create index/vertex buffer
                 let objects = layer.objects(indirect);
 
                 for id in objects {
-                    let obj = match c.get(id) {
-                        Some(v) => v,
-                        None => continue,
-                    };
-                    let obj = obj.o();
-                    let mesh = obj.geometry().mesh();
-
-                    if obj.geometry().is_static() {
-                        self.inner.static_object_buffers.get_or(*id, |_| {
-                            create_static_object_buffer(*id, &mesh, engine.device())
-                        });
-                    } else {
-                        self.inner
-                            .dynamic_object_buffers
-                            .entry(*id)
-                            .or_insert_with(|| {
-                                create_static_object_buffer(*id, &mesh, engine.device())
-                            });
-                    }
+                    self.inner
+                        .mesh_buffer_collector
+                        .add(&c, *id, engine.device());
                 }
             }
         }
@@ -157,49 +74,9 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         for layer in &rs.list {
             for indirect in &layer.material {
                 let material = indirect.material.as_ref();
-                let mgr = self.prepare_material_pipeline(&rs.gpu, &layer.main_camera, material);
-                let mat = material.face_by::<BasicMaterialFace>();
-                mgr.bind_groups.get_or(material.id(), |_| {
-                    let b = mgr.material_bind_buffers.get_mut(&material.id()).unwrap();
-                    let mut entries = vec![];
-                    if b.size() != 0 {
-                        entries.push(wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: b,
-                                offset: 0,
-                                size: None,
-                            }),
-                        });
-                    }
-
-                    match &mat.texture {
-                        crate::material::MaterialMap::Texture(texture) => {
-                            let sampler = mat.sampler.as_ref().unwrap();
-                            entries.push(wgpu::BindGroupEntry {
-                                binding: entries.len() as u32,
-                                resource: wgpu::BindingResource::Sampler(sampler.sampler()),
-                            });
-                            entries.push(wgpu::BindGroupEntry {
-                                binding: entries.len() as u32,
-                                resource: wgpu::BindingResource::TextureView(
-                                    texture.texture_view(),
-                                ),
-                            });
-                        }
-                        _ => (),
-                    }
-
-                    if entries.len() == 0 {
-                        return None;
-                    }
-
-                    Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("basic material"),
-                        layout: &mgr.pipeline.pass[0].get_bind_group_layout(1),
-                        entries: &entries,
-                    }))
-                });
+                self.inner
+                    .material_buffer_collector
+                    .add_bind_group(material, device);
             }
         }
     }
@@ -215,14 +92,13 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                 let objects = layer.objects(indirect);
                 let material = indirect.material.as_ref();
 
-                let key = material.hash_key();
-                let mgr = self.inner.material_pipelines_cache.get(&key).unwrap();
-                let material_bind_group = mgr.bind_groups.get(&material.id()).unwrap();
+                let (pipeline, material_bind_groups) =
+                    self.inner.material_buffer_collector.get(material);
 
-                pass.set_pipeline(mgr.pipeline.pass[0].render());
+                pass.set_pipeline(pipeline.render());
 
-                pass.set_bind_group(0, &mgr.global_bind_group, &[]); // camera bind group
-                if let Some(b) = material_bind_group {
+                pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
+                if let Some(b) = &material_bind_groups[0] {
                     pass.set_bind_group(1, b, &[]); // material bind group
                 }
 
@@ -242,11 +118,8 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                         any_as_u8_slice(object_uniform.mat()),
                     );
 
-                    let b = if obj.geometry().is_static() {
-                        self.inner.static_object_buffers.get(id).unwrap()
-                    } else {
-                        self.inner.dynamic_object_buffers.get(id).unwrap()
-                    };
+                    let b = self.inner.mesh_buffer_collector.get(&c, *id).unwrap();
+
                     let index_type_u32 = mesh.indices_is_u32().unwrap_or_default();
 
                     if let Some(index) = &b.index {
@@ -276,77 +149,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
 
     fn cleanup<'b>(&'b mut self, context: RenderPassContext<'b>) {
         let rs = take_rs::<BasicMaterialFace>(&context).unwrap();
-    }
-}
-
-impl BasicMaterialHardwareRenderer {
-    pub fn prepare_material_pipeline(
-        &mut self,
-        gpu: &WGPUResource,
-        camera: &wgpu::Buffer,
-        material: &Material,
-    ) -> &mut MaterialGpuResource {
-        let label = self.label();
-        let inner = &mut self.inner;
-
-        let key = material.hash_key();
-        inner.material_pipelines_cache.get_mut_or(key, |_| {
-            let variants = &material.face_by::<BasicMaterialFace>().variants;
-            let template = inner.tech.register_variant(gpu.device(), variants).unwrap();
-
-            let mut ins = RenderDescriptorObject::new();
-            ins = ins.set_msaa(inner.msaa);
-
-            if let Some(blend) = material.blend() {
-                ins = ins.add_target(
-                    ColorTargetBuilder::new(gpu.surface_format())
-                        .set_blender(*blend)
-                        .build(),
-                );
-            } else {
-                ins = ins.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
-            }
-            let depth_format = wgpu::TextureFormat::Depth32Float;
-
-            ins = ins.set_primitive(|p: &mut _| *p = *material.primitive());
-            ins = ins.set_depth(depth_format, |depth: &mut _| {
-                depth.depth_compare = wgpu::CompareFunction::Less;
-                depth.depth_write_enabled = !material.is_transparent();
-            });
-
-            let pipeline = resolve_pipeline(
-                gpu,
-                template.clone(),
-                ins,
-                &ResolvePipelineConfig {
-                    constant_stages: vec![wgpu::ShaderStages::VERTEX],
-                },
-            );
-
-            let global_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-                label,
-                layout: &pipeline.pass[0].get_bind_group_layout(0),
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: camera,
-                        offset: 0,
-                        size: None,
-                    }),
-                }],
-            });
-
-            MaterialGpuResource {
-                template,
-                pipeline,
-                bind_groups: FramedCache::new(),
-                material_bind_buffers: FramedCache::new(),
-                global_bind_group,
-            }
-        })
-    }
-    pub fn label(&self) -> Option<&'static str> {
-        Some("basic material")
+        self.inner.mesh_buffer_collector.finish();
     }
 }
 
@@ -370,11 +173,13 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
 
         let r = Arc::new(Mutex::new(BasicMaterialHardwareRenderer {
             inner: BasicMaterialHardwareRendererInner {
-                tech,
-                material_pipelines_cache: FramedCache::new(),
-                static_object_buffers: FramedCache::new(),
-                dynamic_object_buffers: HashMap::new(),
-                msaa: setup_resource.msaa,
+                material_buffer_collector: MaterialBufferInstantCollector::new(
+                    BasicMaterialBufferInstantiation {
+                        tech: tech.clone(),
+                        msaa: setup_resource.msaa,
+                    },
+                ),
+                mesh_buffer_collector: MeshBufferCollector::new(),
             },
         }));
 
@@ -384,5 +189,105 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
         pass.add_constraint(PassConstraint::Last);
 
         g.add_render_pass(pass);
+    }
+}
+
+struct BasicMaterialBufferInstantiation {
+    tech: Arc<ShaderTech>,
+    msaa: u32,
+}
+
+impl MaterialBufferInstantiation for BasicMaterialBufferInstantiation {
+    fn create_pipeline(
+        &self,
+        material: &Material,
+        global_layout: &wgpu::BindGroupLayout,
+        gpu: &WGPUResource,
+    ) -> PipelinePassResource {
+        let variants = &material.face_by::<BasicMaterialFace>().variants;
+        let template = self
+            .tech
+            .register_variant(&gpu.device(), &[variants])
+            .unwrap();
+
+        let mut ins = RenderDescriptorObject::new();
+        ins = ins.set_msaa(self.msaa);
+
+        if let Some(blend) = material.blend() {
+            ins = ins.add_target(
+                ColorTargetBuilder::new(gpu.surface_format())
+                    .set_blender(*blend)
+                    .build(),
+            );
+        } else {
+            ins = ins.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
+        }
+        let depth_format = wgpu::TextureFormat::Depth32Float;
+
+        ins = ins.set_primitive(|p: &mut _| *p = *material.primitive());
+        ins = ins.set_depth(depth_format, |depth: &mut _| {
+            depth.depth_compare = wgpu::CompareFunction::Less;
+            depth.depth_write_enabled = !material.is_transparent();
+        });
+
+        resolve_pipeline(
+            &gpu,
+            &template,
+            ins,
+            &ResolvePipelineConfig {
+                constant_stages: vec![wgpu::ShaderStages::VERTEX],
+                global_bind_group_layout: Some(global_layout),
+            },
+        )
+    }
+
+    fn create_bind_group(
+        &self,
+        material: &Material,
+        buffers: &[wgpu::Buffer],
+        pipeline: &PipelinePassResource,
+        device: &wgpu::Device,
+    ) -> Vec<Option<wgpu::BindGroup>> {
+        let buffer = &buffers[0];
+
+        let mat = material.face_by::<BasicMaterialFace>();
+        let mut entries = vec![];
+        if buffer.size() != 0 {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            });
+        }
+
+        match &mat.texture {
+            crate::material::MaterialMap::Texture(texture) => {
+                let sampler = mat.sampler.as_ref().unwrap();
+                entries.push(wgpu::BindGroupEntry {
+                    binding: entries.len() as u32,
+                    resource: wgpu::BindingResource::Sampler(sampler.sampler()),
+                });
+                entries.push(wgpu::BindGroupEntry {
+                    binding: entries.len() as u32,
+                    resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+                });
+            }
+            _ => (),
+        }
+
+        if entries.len() == 0 {
+            return vec![None];
+        }
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("basic material"),
+            layout: &pipeline.pass[0].get_bind_group_layout(1),
+            entries: &entries,
+        });
+
+        vec![Some(bind_group)]
     }
 }

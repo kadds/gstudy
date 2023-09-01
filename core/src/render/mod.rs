@@ -36,32 +36,54 @@ pub trait ModuleRenderer {
     fn stop(&mut self);
 }
 
+pub mod collector;
 pub mod common;
 pub mod material;
 
+#[repr(C)]
 struct GlobalUniform3d {
     mat: Mat4x4f,
+    direction: Vec4f,
 }
 
+#[repr(C)]
 struct GlobalUniform2d {
     size: Vec4f,
 }
 
-struct GlobalUniform {
-    buffer: Arc<wgpu::Buffer>,
+pub struct GlobalUniform {
+    pub buffer: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+    pub bind_group_layout: Arc<wgpu::BindGroupLayout>,
 }
 
 impl GlobalUniform {
-    pub fn new(gpu: &WGPUResource, layout: &wgpu::BindGroupLayout, size: u32) -> Self {
+    pub fn new(gpu: &WGPUResource, layout: Arc<wgpu::BindGroupLayout>, size: u32) -> Self {
         let label = Some("global uniform");
-        let buffer = Arc::new(gpu.new_uniform_buffer(label, size as u64));
-        Self { buffer }
+        let buffer = gpu.new_uniform_buffer(label, size as u64);
+        let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label,
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+        });
+        Self {
+            buffer,
+            bind_group,
+            bind_group_layout: layout,
+        }
     }
 }
 
 struct HardwareRendererInner {
-    main_camera: GlobalUniform,
-    ui_camera: GlobalUniform,
+    main_camera: Arc<GlobalUniform>,
+    ui_camera: Arc<GlobalUniform>,
 }
 
 pub struct HardwareRenderer {
@@ -95,46 +117,49 @@ impl HardwareRenderer {
 
     fn setup_global_uniform(&mut self, gpu: &WGPUResource) {
         self.inner.get_or_insert_with(|| {
-            let bind_layout =
-                gpu.device()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("global layout"),
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::VERTEX,
-                            count: None,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                        }],
-                    });
+            let bind_layout = Arc::new(gpu.device().create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("global layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        count: None,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                    }],
+                },
+            ));
             let main = GlobalUniform::new(
                 gpu,
-                &bind_layout,
+                bind_layout.clone(),
                 std::mem::size_of::<GlobalUniform3d>() as u32,
             );
             let ui = GlobalUniform::new(
                 gpu,
-                &bind_layout,
+                bind_layout.clone(),
                 std::mem::size_of::<GlobalUniform2d>() as u32,
             );
             HardwareRendererInner {
-                main_camera: main,
-                ui_camera: ui,
+                main_camera: Arc::new(main),
+                ui_camera: Arc::new(ui),
             }
         });
     }
     fn copy_camera_uniform(&mut self, p: &RenderParameter) {
-        let gpu = p.gpu.clone();
         let scene = p.scene.clone();
 
         // prepare camera uniform buffer
         let inner = self.inner.as_ref().unwrap();
         if let Some(camera) = scene.main_camera_ref() {
             let vp = camera.vp();
-            let data = GlobalUniform3d { mat: vp };
+            let direction = camera.to() - camera.from();
+            let data = GlobalUniform3d {
+                mat: vp,
+                direction: Vec4f::new(direction.x, direction.y, direction.z, 1.0f32).normalize(),
+            };
             p.gpu
                 .queue()
                 .write_buffer(&inner.main_camera.buffer, 0, any_as_u8_slice(&data));
@@ -164,8 +189,8 @@ impl ModuleRenderer for HardwareRenderer {
         let inner = self.inner.as_ref().unwrap();
 
         let setup_resource = SetupResource {
-            ui_camera: &inner.ui_camera.buffer,
-            main_camera: &inner.main_camera.buffer,
+            ui_camera: inner.ui_camera.clone(),
+            main_camera: inner.main_camera.clone(),
             shader_loader: &self.shader_loader,
             scene: scene,
             msaa: config.msaa,
@@ -221,9 +246,9 @@ impl ModuleRenderer for HardwareRenderer {
 
         for (layer, sorter) in scene.layers() {
             let main_camera = if layer >= LAYER_UI {
-                inner.ui_camera.buffer.clone()
+                inner.ui_camera.clone()
             } else {
-                inner.main_camera.buffer.clone()
+                inner.main_camera.clone()
             };
 
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
@@ -317,8 +342,6 @@ impl Pipeline {
 
 #[derive(Debug)]
 pub struct PipelinePassResource {
-    #[allow(unused)]
-    pub inner: Arc<Vec<tshader::Pass>>,
     pub pass: Vec<Arc<Pipeline>>,
 }
 
@@ -460,11 +483,11 @@ impl RenderDescriptorObject {
     }
 }
 
-fn resolve_single_pass(
+fn resolve_single_pass<'a>(
     gpu: &WGPUResource,
     pass: &tshader::Pass,
     ins: &RenderDescriptorObject,
-    config: &ResolvePipelineConfig,
+    config: &ResolvePipelineConfig<'a>,
 ) -> Pipeline {
     let mut layouts = Vec::new();
 
@@ -502,6 +525,13 @@ fn resolve_single_pass(
     for layout in &layouts {
         ref_layouts.push(layout);
     }
+
+    if let Some(g) = config.global_bind_group_layout {
+        if !ref_layouts.is_empty() {
+            ref_layouts[0] = g;
+        }
+    }
+
     let mut constants = pass.constants.clone();
     for (i, c) in config.constant_stages.iter().enumerate() {
         if i < constants.len() {
@@ -589,20 +619,18 @@ fn resolve_single_pass(
 }
 
 #[derive(Debug, Default)]
-pub struct ResolvePipelineConfig {
-    constant_stages: Vec<wgpu::ShaderStages>,
+pub struct ResolvePipelineConfig<'a> {
+    pub constant_stages: Vec<wgpu::ShaderStages>,
+    pub global_bind_group_layout: Option<&'a wgpu::BindGroupLayout>,
 }
 
-pub fn resolve_pipeline(
+pub fn resolve_pipeline<'a>(
     gpu: &WGPUResource,
-    template: Arc<Vec<tshader::Pass>>,
+    template: &[Arc<tshader::Pass>],
     ins: RenderDescriptorObject,
     config: &ResolvePipelineConfig,
 ) -> PipelinePassResource {
-    let mut desc = PipelinePassResource {
-        inner: template.clone(),
-        pass: vec![],
-    };
+    let mut desc = PipelinePassResource { pass: vec![] };
 
     for pass in template.iter() {
         let pipeline = resolve_single_pass(gpu, pass, &ins, config);

@@ -1,5 +1,6 @@
 // includes
-///#include "./camera.wgsl"
+///#include "camera.wgsl"
+///#include "object.wgsl"
 ///#if TEXTURE
 ///#decl VERTEX_TEX
 ///#endif
@@ -39,10 +40,6 @@ struct MaterialUniform {
 ///#endif
 }
 ///#endif
-
-struct Object {
-    model: mat4x4<f32>,
-}
 
 @group(0) @binding(0) var<uniform> camera_uniform: CameraUniform;
 ///#if MATERIAL

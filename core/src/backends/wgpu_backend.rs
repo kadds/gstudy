@@ -376,7 +376,7 @@ impl WGPUResource {
         })
     }
 
-    pub(crate) fn new_wvp_buffer_from(&self, label: Option<&str>, data: &[u8]) -> wgpu::Buffer {
+    pub fn new_wvp_buffer_from(&self, label: Option<&str>, data: &[u8]) -> wgpu::Buffer {
         self.device.create_buffer_init(&BufferInitDescriptor {
             label,
             usage: BufferUsages::UNIFORM,
@@ -496,11 +496,11 @@ impl WGPUBackend {
             }
         };
         let limits = wgpu::Limits {
-            max_push_constant_size: 64,
+            max_push_constant_size: 128,
             ..Default::default()
         };
         let minimal_limits = wgpu::Limits {
-            max_push_constant_size: 64,
+            max_push_constant_size: 128,
             ..Default::default()
         };
 

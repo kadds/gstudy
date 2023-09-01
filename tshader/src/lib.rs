@@ -41,15 +41,16 @@ pub struct Pass {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq)]
-pub struct ShaderTechIdentity {
-    pub name: String,
+struct VariantKey {
+    name: String,
+    index: u32,
 }
 
 #[derive(Debug)]
 pub struct ShaderTech {
     compiler: ShaderTechCompiler,
     pub name: String,
-    pub variants_map: Mutex<HashMap<String, Arc<Vec<Pass>>>>,
+    variants_map: Mutex<HashMap<VariantKey, Arc<Pass>>>,
 }
 
 impl ShaderTech {
@@ -353,32 +354,49 @@ impl ShaderTech {
     pub fn register_variant(
         &self,
         device: &wgpu::Device,
-        variants: &[&'static str],
-    ) -> anyhow::Result<Arc<Vec<Pass>>> {
-        let key = variants_name(variants);
-        let mut l = self.variants_map.lock().unwrap();
+        variants_list: &[&[&'static str]],
+    ) -> anyhow::Result<Vec<Arc<Pass>>> {
         let mut pass_list = vec![];
+        let mut l = self.variants_map.lock().unwrap();
 
-        if !l.contains_key(&key) {
-            for pass_index in 0..self.compiler.npass() {
-                let shader_descriptor = self.compiler.compile_pass(pass_index, variants)?;
-                // create vs, fs, cs
-                let label = format!("{}-{}", self.name, pass_index);
-
-                let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some(&label),
-                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_descriptor.source)),
-                });
-                let module = naga::front::wgsl::parse_str(&shader_descriptor.source)?;
-                let mut pass =
-                    Self::parse_pass(&shader_descriptor.include_shaders, module, shader_module)?;
-                pass.name = label;
-                pass_list.push(pass);
+        for pass_index in 0..self.compiler.npass() {
+            let key = VariantKey {
+                name: variants_name(variants_list[pass_index]),
+                index: pass_index as u32,
+            };
+            if let Some(v) = l.get(&key) {
+                pass_list.push(v.clone());
+                continue;
             }
-            l.insert(key.clone(), Arc::new(pass_list));
+
+            let shader_descriptor = self
+                .compiler
+                .compile_pass(pass_index, variants_list[pass_index])?;
+            // create vs, fs, cs
+            let label = format!("{}-{}", self.name, pass_index);
+
+            let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&label),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_descriptor.source)),
+            });
+            let module = naga::front::wgsl::parse_str(&shader_descriptor.source)?;
+            let mut pass =
+                Self::parse_pass(&shader_descriptor.include_shaders, module, shader_module)?;
+            pass.name = label;
+            log::info!(
+                "load variant {:?} for tech '{}', pass: {:?}",
+                key,
+                self.name,
+                pass
+            );
+
+            let pass = Arc::new(pass);
+            l.insert(key, pass.clone());
+
+            pass_list.push(pass);
         }
 
-        Ok(l.get(&key).cloned().unwrap())
+        Ok(pass_list)
     }
 }
 

@@ -20,7 +20,7 @@ pub struct DirectLight {
 
 impl DirectLight {
     fn uniform(&self) -> DirectLightUniform {
-        let dir = self.camera.from() - self.camera.to();
+        let dir = (self.camera.to() - self.camera.from()).normalize();
         DirectLightUniform {
             color: Vec3f::new(self.color.x, self.color.y, self.color.z),
             _a: 0f32,
@@ -92,8 +92,6 @@ pub struct SpotLight {
     color: Color,
     camera: Camera,
 }
-
-#[derive(Default)]
 struct SceneLightsInner {
     direct_light: Option<DirectLight>,
     point_light: Vec<PointLight>,
@@ -102,6 +100,20 @@ struct SceneLightsInner {
     ambient: Color,
     base_uniform: Vec<u8>,
     add_uniform: Vec<Vec<u8>>,
+}
+
+impl Default for SceneLightsInner {
+    fn default() -> Self {
+        Self {
+            dirty: true,
+            ambient: Vec4f::new(0.2f32, 0.2f32, 0.2f32, 1.0f32),
+            direct_light: None,
+            point_light: vec![],
+            spot_light: vec![],
+            base_uniform: vec![],
+            add_uniform: vec![],
+        }
+    }
 }
 
 pub struct SceneLights {

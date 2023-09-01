@@ -13,17 +13,18 @@ use std::{hash::Hasher, io::Write};
 
 #[derive(Debug)]
 pub struct PhongMaterialFace {
-    diffuse: MaterialMap<Color>,
-    specular: MaterialMap<Color>,
-    normal: MaterialMap<Vec3f>,
-    emissive: MaterialMap<Color>,
-    sampler: Option<ResourceRef>,
+    pub diffuse: MaterialMap<Color>,
+    pub specular: MaterialMap<Color>,
+    pub normal: MaterialMap<Vec3f>,
+    pub emissive: MaterialMap<Color>,
+    pub sampler: Option<ResourceRef>,
 
-    shininess: f32,
+    pub shininess: f32,
 
-    variants: Vec<&'static str>,
-    variants_name: String,
-    uniform: Vec<u8>,
+    pub variants: Vec<&'static str>,
+    pub variants_add: Vec<&'static str>,
+    pub variants_name: String,
+    pub uniform: Vec<u8>,
 }
 
 impl MaterialFace for PhongMaterialFace {
@@ -112,6 +113,7 @@ impl PhongMaterialFaceBuilder {
 
     pub fn build(self) -> PhongMaterialFace {
         let mut variants = vec![];
+        let mut variants_add = vec![];
         let mut uniform = vec![];
 
         match self.diffuse {
@@ -128,7 +130,33 @@ impl PhongMaterialFaceBuilder {
             }
         }
 
+        match self.specular {
+            MaterialMap::None => {}
+            MaterialMap::Constant(c) => {
+                variants.push("SPECULAR_CONSTANT");
+                uniform.write_all(any_as_u8_slice(&Vec4f::new(c.x, c.y, c.z, 0f32)));
+            }
+            MaterialMap::PreVertex => {
+                variants.push("SPECULAR_VERTEX");
+            }
+            MaterialMap::Texture(_) => {
+                variants.push("SPECULAR_TEXTURE");
+            }
+        }
+
+        match self.normal {
+            MaterialMap::None => todo!(),
+            MaterialMap::Constant(_) => todo!(),
+            MaterialMap::PreVertex => {
+                variants.push("NORMAL_VERTEX");
+            }
+            MaterialMap::Texture(_) => {
+                variants.push("NORMAL_TEXTURE");
+            }
+        }
+
         uniform.write_all(any_as_u8_slice(&self.shininess));
+        uniform.write_all(any_as_u8_slice(&Vec3f::zeros()));
 
         PhongMaterialFace {
             diffuse: self.diffuse,
@@ -140,6 +168,7 @@ impl PhongMaterialFaceBuilder {
 
             variants_name: tshader::variants_name(&variants[..]),
             variants,
+            variants_add,
             sampler: self.sampler,
         }
     }

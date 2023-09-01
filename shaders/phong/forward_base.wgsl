@@ -1,85 +1,76 @@
 // includes
-///#include "./camera.wgsl"
-///#if TEXTURE_COLOR || NORMAL_TEX || HEIGHT_TEX || EMISSION_TEX
-///#decl VERTEX_TEX
+///#include "camera.wgsl"
+///#include "./light.wgsl"
+///#include "./material.wgsl"
+///#if DIFFUSE_TEXTURE || NORMAL_TEXTURE || SPECULAR_TEXTURE || EMISSIVE_TEXTURE
+///#decl UV
 ///#endif
 
 ///#decl POSITION_VERTEX_INPUT = _atomic_counter(0, 1)
 ///#decl POSITION_VERTEX_OUTPUT = _atomic_counter(0, 1)
 ///#decl BINDING_GLOBAL_GROUP1 = _atomic_counter(1, 1)
 
+struct Object {
+    model: mat4x4<f32>,
+    inverse_model: mat4x4<f32>,
+}
+
+
 struct VertexInput {
     @location(#{POSITION_VERTEX_INPUT}) position: vec3<f32>,
-///#if VERTEX_COLOR
-    @location(#{POSITION_VERTEX_INPUT}) color: vec4<f32>,
+///#if NORMAL_VERTEX
+    @location(#{POSITION_VERTEX_INPUT}) normal: vec3<f32>,
 ///#endif
-///#if VERTEX_TEX
+///#if DIFFUSE_VERTEX
+    @location(#{POSITION_VERTEX_INPUT}) diffuse: vec4<f32>,
+///#endif
+///#if SPECULAR_VERTEX
+    @location(#{POSITION_VERTEX_INPUT}) specular: vec4<f32>,
+///#endif
+///#if EMISSIVE_VERTEX
+    @location(#{POSITION_VERTEX_INPUT}) emissive: vec4<f32>,
+///#endif
+///#if UV
     @location(#{POSITION_VERTEX_INPUT}) uv: vec2<f32>,
 ///#endif
 }
 
 struct VertexOutput {
-    @location(#{POSITION_VERTEX_OUTPUT}) color: vec4<f32>,
-///#if VERTEX_TEX
+///#if NORMAL_VERTEX
+    @location(#{POSITION_VERTEX_OUTPUT}) normal: vec3<f32>,
+///#endif
+///#if DIFFUSE_VERTEX
+    @location(#{POSITION_VERTEX_OUTPUT}) diffuse: vec3<f32>,
+///#endif
+///#if EMISSIVE_VERTEX
+    @location(#{POSITION_VERTEX_INPUT}) emissive: vec3<f32>,
+///#endif
+///#if UV
     @location(#{POSITION_VERTEX_OUTPUT}) uv: vec2<f32>,
 ///#endif
     @builtin(position) position: vec4<f32>,
 };
 
-struct MaterialUniform {
-///#if DIFFUSE_CONSTANT
-    diffuse: vec3<f32>,
-    placement1: f32,
-///#endif
-///#if SPECULAR_CONSTANT
-    specular: vec3<f32>,
-    placement2: f32,
-///#endif
-///#if EMISSIVE_CONSATNT
-    emissive: vec3<f32>,
-    placement3: f32,
-///#endif
-
-    shininess: f32,
-///#if ALPHA_TEST
-    alpha_test: f32,
-///#endif
-}
-
-struct DirectLight {
-    color: vec3<f32>,
-    placement: f32,
-    direction: vec3<f32>,
-    placement2: f32,
-}
-
-
 struct BaseLightUniform {
-    ambient: vec4<f32>,
+    ambient: vec3<f32>,
+    placement: f32,
 ///#if DIRECT_LIGHT
     direct: DirectLight
 ///#endif
 }
 
-struct ObjectMaterial {
-}
-
-struct Object {
-    model: mat4x4<f32>,
-}
-
 @group(0) @binding(0) var<uniform> camera_uniform: CameraUniform;
 @group(1) @binding(0) var<uniform> material_uniform: MaterialUniform;
 
-///#if VERTEX_TEX
+///#if UV
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler_tex: sampler;
 ///#endif
 
-///#if TEXTURE_COLOR
+///#if DIFFUSE_TEXTURE
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_color: texture_2d<f32>;
 ///#endif
 
-///#if NORMAL_TEX
+///#if NORMAL_TEXTURE
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_normal: texture_2d<f32>;
 ///#endif
 
@@ -91,17 +82,24 @@ struct Object {
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_emission: texture_2d<f32>;
 ///#endif
 
+@group(2) @binding(0) var<uniform> light_uniform: BaseLightUniform;
+
 var<push_constant> object: Object;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput{
     var output: VertexOutput;
-    output.position = camera_uniform.vp * object.model * vec4<f32>(input.position, 1.0);
-    output.color = material_uniform.color;
-///#if VERTEX_COLOR
-    output.color *= input.color;
+    output.position = camera_uniform.vp * (object.model * vec4<f32>(input.position, 1.0));
+///#if NORMAL_VERTEX
+    output.normal = input.normal;
 ///#endif
-///#if VERTEX_TEX
+///#if DIFFUSE_VERTEX
+    output.diffuse = input.diffuse.xyz;
+///#endif
+///#if EMISSIVE_VERTEX
+    output.emissive = input.emissive.xyz;
+///#endif
+///#if UV
     output.uv = input.uv;
 ///#endif
 
@@ -110,18 +108,41 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
-    var color = input.color;
-///#if TEXTURE_COLOR
-    color *= textureSample(texture_color, sampler_tex, input.uv);
-///#endif
-///#if EMISSION_TEX
-    color *= textureSample(texture_emission, sampler_tex, input.uv);
+    var obj: ObjectInfo;
+///#if DIFFUSE_VERTEX
+    obj.color = input.diffuse;
+///#elseif DIFFUSE_CONSTANT
+    obj.color = material_uniform.diffuse;
+///#else
+    obj.color = vec3<f32>(0.0, 0.0, 0.0);
 ///#endif
 
-///#if ALPHA_TEST
-    if (color.a < material_uniform.alpha_test) {
-        discard;
-    }
+///#if NORMAL_VERTEX
+    obj.normal = transform_normal_worldspace(input.normal, object.inverse_model);
 ///#endif
-    return color;
+
+    var color = ambient(obj, light_uniform.ambient);
+
+///#if DIRECT_LIGHT
+    var light: LightInfo;
+    light.dir = light_uniform.direct.direction;
+    light.color = light_uniform.direct.color;
+    color += diffuse(obj, light);
+///#if SPECULAR_VERTEX
+    obj.color = input.specular;
+///#elseif SPECULAR_CONSTANT
+    obj.color = material_uniform.specular;
+///#else
+    obj.color = vec3<f32>(0.0, 0.0, 0.0);
+///#endif
+    color += specular(obj, light, camera_uniform.dir, material_uniform.shininess);
+///#endif
+
+///#if EMISSIVE_VERTEX
+    color += input.emissive;
+///#elseif EMISSIVE_CONSTANT
+    color += material_uniform.emissive;
+///#endif
+
+    return vec4<f32>(color.xyz, 1.0);
 }
