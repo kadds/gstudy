@@ -52,8 +52,8 @@ impl OrthographicProject {
         Mat4x4f::new_orthographic(
             self.rect.x,
             self.rect.z,
-            self.rect.w,
             self.rect.y,
+            self.rect.w,
             self.near,
             self.far,
         )

@@ -8,10 +8,10 @@ shaders = ["vs", "fs"]
 
 [pass.variants]
 excludes = []
-exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"]
+exclusives = []
 unit = ["DIFFUSE_CONSTANT", "DIFFUSE_VERTEX", "DIFFUSE_TEXTURE", "DIRECT_LIGHT", 
 "ALPHA_TEST", "NORMAL_VERTEX", "NORMAL_TEXTURE", "SPECULAR_CONSTANT", "SPECULAR_VERTEX", 
-"SPECULAR_TEXTURE", "SHADOW_MAP"]
+"SPECULAR_TEXTURE"]
 
 [[pass]]
 index = 1
@@ -20,8 +20,12 @@ source = "forward_add.wgsl"
 binding = ["pre_camera"]
 camera = "D3"
 shaders = ["vs", "fs"]
-variants = { excludes = [], exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"], unit = ["TEXTURE_COLOR", "NORMAL_TEX", "HEIGHT_TEX", "EMISSION_TEX", "VERTEX_COLOR", "ALPHA_TEST"]}
-
+[pass.variants]
+excludes = []
+exclusives = []
+unit = ["DIFFUSE_CONSTANT", "DIFFUSE_VERTEX", "DIFFUSE_TEXTURE", "POINT_LIGHT",  "SPOT_LIGHT",
+"ALPHA_TEST", "NORMAL_VERTEX", "NORMAL_TEXTURE", "SPECULAR_CONSTANT", "SPECULAR_VERTEX", 
+"SPECULAR_TEXTURE"]
 
 [tech]
 author="kadds"

@@ -15,7 +15,6 @@ struct Object {
     inverse_model: mat4x4<f32>,
 }
 
-
 struct VertexInput {
     @location(#{POSITION_VERTEX_INPUT}) position: vec3<f32>,
 ///#if NORMAL_VERTEX
@@ -60,33 +59,34 @@ struct BaseLightUniform {
 }
 
 @group(0) @binding(0) var<uniform> camera_uniform: CameraUniform;
-@group(1) @binding(0) var<uniform> material_uniform: MaterialUniform;
+@group(1) @binding(0) var<uniform> light_uniform: BaseLightUniform;
 
-///#if UV || SHADOW_MAP
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler_tex: sampler;
+@group(2) @binding(0) var<uniform> material_uniform: MaterialUniform;
+
+///#if UV
+@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler_tex: sampler;
 ///#endif
 
 ///#if DIFFUSE_TEXTURE
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_color: texture_2d<f32>;
+@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_color: texture_2d<f32>;
 ///#endif
 
 ///#if NORMAL_TEXTURE
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_normal: texture_2d<f32>;
+@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_normal: texture_2d<f32>;
 ///#endif
 
 ///#if SPECULAR_TEXTURE
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_specular: texture_2d<f32>;
+@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_specular: texture_2d<f32>;
 ///#endif
 
 ///#if EMISSION_TEXTURE
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_emission: texture_2d<f32>;
+@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_emission: texture_2d<f32>;
 ///#endif
 
-///#if SHADOW_MAP
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_shadow_map: texture_2d<f32>;
+///#if DIRECT_LIGHT
+@group(3) @binding(0) var shadow_sampler: sampler;
+@group(3) @binding(1) var shadow_map: texture_depth_2d;
 ///#endif
-
-@group(2) @binding(0) var<uniform> light_uniform: BaseLightUniform;
 
 var<push_constant> object: Object;
 
@@ -150,11 +150,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     color += material_uniform.emissive;
 ///#endif
 
-///#if SHADOW_MAP
+///#if DIRECT_LIGHT
+    let shadow = recv_shadow(input.position, shadow_sampler, shadow_map);
     color = color * shadow + ambient_color;
 ///#else
     color = color + ambient_color;
-///endif
+///#endif
 
     return vec4<f32>(color.xyz, 1.0);
 }

@@ -182,6 +182,7 @@ pub struct RenderPassContext<'b> {
     name: &'b str,
     parameter: &'b dyn Any,
     gpu: &'b WGPUResource,
+    pub registry: &'b ResourceRegistry,
 }
 
 impl<'b> RenderPassContext<'b> {
@@ -262,6 +263,7 @@ impl DynPass for RenderPass {
             name: &self.name,
             parameter,
             gpu: backend.gpu(),
+            registry: registry,
         };
         {
             let mut copy_engine = backend.dispatch_copy(&self.name);

@@ -13,7 +13,7 @@ use std::{any::Any, cell::RefCell, sync::Arc};
 use app::{App, AppEventProcessor};
 use geometry::{cube::CubeMeshBuilder, plane::PlaneMeshBuilder};
 use phong_render::{
-    light::{DirectLightBuilder, SceneLights},
+    light::{DirectLightBuilder, PointLightBuilder, SceneLights, ShadowConfig, SpotLightBuilder},
     material::PhongMaterialFaceBuilder,
     PhongPluginFactory,
 };
@@ -85,13 +85,40 @@ impl MainLogic {
         scene.set_main_camera(camera);
 
         let light = DirectLightBuilder::new()
-            .position(Vec3f::new(5f32, 5f32, 5f32))
+            .position(Vec3f::new(10f32, 10f32, 10f32))
             .direction(Vec3f::new(-2f32, -2f32, -1f32))
             .color(Color::new(0.7f32, 0.7f32, 0.62f32, 1f32))
-            .cast_shadow(true)
+            .cast_shadow(ShadowConfig {
+                cast_shadow: true,
+                ..Default::default()
+            })
             .build();
         lights.set_direct_light(light);
         lights.set_ambient(Color::new(0.2f32, 0.2f32, 0.2f32, 1.0f32));
+
+        let point_light = PointLightBuilder::new()
+            .position(Vec3f::new(5f32, 5f32, 5f32))
+            .color(Color::new(0.5f32, 0.5f32, 0.62f32, 1f32))
+            .cast_shadow(ShadowConfig {
+                cast_shadow: true,
+                ..Default::default()
+            })
+            .build();
+
+        // lights.add_point_light(point_light);
+
+        let spot_light = SpotLightBuilder::new()
+            .position(Vec3f::new(5f32, 5f32, 5f32))
+            .direction(Vec3f::new(-1f32, -1f32, -1f32))
+            .color(Color::new(0.5f32, 0.8f32, 0.62f32, 1f32))
+            .cast_shadow(ShadowConfig {
+                cast_shadow: true,
+                ..Default::default()
+            })
+            .build();
+
+        // lights.add_spot_light(spot_light);
+
         scene.set_rebuild_flag();
     }
 }

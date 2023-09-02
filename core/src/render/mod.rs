@@ -155,10 +155,10 @@ impl HardwareRenderer {
         let inner = self.inner.as_ref().unwrap();
         if let Some(camera) = scene.main_camera_ref() {
             let vp = camera.vp();
-            let direction = camera.to() - camera.from();
+            let direction = (camera.to() - camera.from()).normalize();
             let data = GlobalUniform3d {
                 mat: vp,
-                direction: Vec4f::new(direction.x, direction.y, direction.z, 1.0f32).normalize(),
+                direction: Vec4f::new(direction.x, direction.y, direction.z, 1.0f32),
             };
             p.gpu
                 .queue()
@@ -633,6 +633,38 @@ pub fn resolve_pipeline<'a>(
     let mut desc = PipelinePassResource { pass: vec![] };
 
     for pass in template.iter() {
+        let pipeline = resolve_single_pass(gpu, pass, &ins, config);
+        desc.pass.push(Arc::new(pipeline));
+    }
+
+    desc
+}
+
+pub fn resolve_pipeline2<'a>(
+    gpu: &WGPUResource,
+    template: &[Arc<tshader::Pass>],
+    ins: &[RenderDescriptorObject],
+    config: &ResolvePipelineConfig,
+) -> PipelinePassResource {
+    let mut desc = PipelinePassResource { pass: vec![] };
+
+    for (pass, ins) in template.iter().zip(ins.iter()) {
+        let pipeline = resolve_single_pass(gpu, pass, &ins, config);
+        desc.pass.push(Arc::new(pipeline));
+    }
+
+    desc
+}
+
+pub fn resolve_pipeline3<'a>(
+    gpu: &WGPUResource,
+    template: &[Arc<tshader::Pass>],
+    ins: &[RenderDescriptorObject],
+    config: &[ResolvePipelineConfig],
+) -> PipelinePassResource {
+    let mut desc = PipelinePassResource { pass: vec![] };
+
+    for ((pass, ins), config) in template.iter().zip(ins.iter()).zip(config.iter()) {
         let pipeline = resolve_single_pass(gpu, pass, &ins, config);
         desc.pass.push(Arc::new(pipeline));
     }

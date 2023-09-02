@@ -372,8 +372,16 @@ impl RenderObject {
         self.case_shadow = true;
     }
 
+    pub fn cast_shadow(&self) -> bool {
+        self.case_shadow
+    }
+
     pub fn set_recv_shadow(&mut self) {
         self.recv_shadow = true;
+    }
+
+    pub fn recv_shadow(&self) -> bool {
+        self.recv_shadow
     }
 
     pub fn set_name(&mut self, name: &str) {

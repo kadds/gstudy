@@ -96,7 +96,6 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     self.inner.material_buffer_collector.get(material);
 
                 pass.set_pipeline(pipeline.render());
-
                 pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
                 if let Some(b) = &material_bind_groups[0] {
                     pass.set_bind_group(1, b, &[]); // material bind group
@@ -119,28 +118,8 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     );
 
                     let b = self.inner.mesh_buffer_collector.get(&c, *id).unwrap();
+                    b.draw(&mesh, &mut pass);
 
-                    let index_type_u32 = mesh.indices_is_u32().unwrap_or_default();
-
-                    if let Some(index) = &b.index {
-                        if index_type_u32 {
-                            pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
-                        } else {
-                            pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint16);
-                        }
-                    }
-
-                    pass.set_vertex_buffer(0, b.vertex.slice(..));
-                    if let Some(properties) = &b.vertex_properties {
-                        pass.set_vertex_buffer(1, properties.slice(..));
-                    }
-
-                    // index
-                    if b.index.is_some() {
-                        pass.draw_indexed(0..mesh.index_count().unwrap(), 0, 0..1);
-                    } else {
-                        pass.draw(0..mesh.vertex_count() as u32, 0..1);
-                    }
                     pass.pop_debug_group();
                 }
             }

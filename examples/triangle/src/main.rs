@@ -46,11 +46,10 @@ impl MainLogic {
         scene.add(obj);
 
         let camera = Camera::new();
-        camera.make_orthographic(Vec4f::new(1f32, -1f32, -1f32, 1f32), 0.1f32, 7f32);
-        // camera.make_perspective(1f32, std::f32::consts::PI / 2f32, 0.01f32, 100f32);
+        camera.make_orthographic(Vec4f::new(-1f32, 1f32, 1f32, -1f32), 0.01f32, 1.01f32);
 
         camera.look_at(
-            Vec3f::new(0f32, 0f32, 5f32),
+            Vec3f::new(0f32, 0f32, 1f32),
             Vec3f::zeros(),
             Vec3f::new(0f32, 1f32, 0f32),
         );

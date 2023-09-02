@@ -17,6 +17,45 @@ pub struct ObjectBuffer {
     pub vertex_properties: Option<wgpu::Buffer>,
 }
 
+impl ObjectBuffer {
+    fn draw_inner<'a>(
+        &'a self,
+        mesh: &Mesh,
+        pass: &mut wgpu::RenderPass<'a>,
+        with_properties: bool,
+    ) {
+        pass.set_vertex_buffer(0, self.vertex.slice(..));
+        if with_properties {
+            if let Some(p) = &self.vertex_properties {
+                pass.set_vertex_buffer(1, p.slice(..));
+            }
+        }
+
+        let index_type_u32 = mesh.indices_is_u32().unwrap_or_default();
+
+        if let Some(index) = &self.index {
+            if index_type_u32 {
+                pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
+            } else {
+                pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint16);
+            }
+        }
+
+        // index
+        if self.index.is_some() {
+            pass.draw_indexed(0..mesh.index_count().unwrap(), 0, 0..1);
+        } else {
+            pass.draw(0..mesh.vertex_count() as u32, 0..1);
+        }
+    }
+    pub fn draw_no_properties<'a>(&'a self, mesh: &Mesh, pass: &mut wgpu::RenderPass<'a>) {
+        self.draw_inner(mesh, pass, false)
+    }
+    pub fn draw<'a>(&'a self, mesh: &Mesh, pass: &mut wgpu::RenderPass<'a>) {
+        self.draw_inner(mesh, pass, true)
+    }
+}
+
 fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> ObjectBuffer {
     let index = if let Some(index) = mesh.indices_view() {
         Some(
@@ -162,10 +201,10 @@ impl MaterialBufferCollector {
         });
     }
 
-    pub fn get(&self, material: &Material) -> (&Pipeline, &[Option<wgpu::BindGroup>]) {
+    pub fn get(&self, material: &Material, pass: usize) -> (&Pipeline, &[Option<wgpu::BindGroup>]) {
         let key = material.hash_key();
         let res = self.material_pipelines_cache.get(&key).unwrap();
-        let pipeline = &res.pipeline.pass[0];
+        let pipeline = &res.pipeline.pass[pass];
 
         (pipeline, res.bind_groups.get(&material.id()).unwrap())
     }
@@ -223,7 +262,14 @@ impl MaterialBufferInstantCollector {
     }
 
     pub fn get(&self, material: &Material) -> (&Pipeline, &[Option<wgpu::BindGroup>]) {
-        self.c.get(material)
+        self.c.get(material, 0)
+    }
+    pub fn get_pass(
+        &self,
+        material: &Material,
+        pass: usize,
+    ) -> (&Pipeline, &[Option<wgpu::BindGroup>]) {
+        self.c.get(material, pass)
     }
 
     pub fn recall(&mut self) {

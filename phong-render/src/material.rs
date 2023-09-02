@@ -120,13 +120,16 @@ impl PhongMaterialFaceBuilder {
             MaterialMap::None => {}
             MaterialMap::Constant(c) => {
                 variants.push("DIFFUSE_CONSTANT");
+                variants_add.push("DIFFUSE_CONSTANT");
                 uniform.write_all(any_as_u8_slice(&Vec4f::new(c.x, c.y, c.z, 0f32)));
             }
             MaterialMap::PreVertex => {
                 variants.push("DIFFUSE_VERTEX");
+                variants_add.push("DIFFUSE_VERTEX");
             }
             MaterialMap::Texture(_) => {
                 variants.push("DIFFUSE_TEXTURE");
+                variants_add.push("DIFFUSE_TEXTURE");
             }
         }
 
@@ -134,13 +137,16 @@ impl PhongMaterialFaceBuilder {
             MaterialMap::None => {}
             MaterialMap::Constant(c) => {
                 variants.push("SPECULAR_CONSTANT");
+                variants_add.push("SPECULAR_CONSTANT");
                 uniform.write_all(any_as_u8_slice(&Vec4f::new(c.x, c.y, c.z, 0f32)));
             }
             MaterialMap::PreVertex => {
                 variants.push("SPECULAR_VERTEX");
+                variants_add.push("SPECULAR_VERTEX");
             }
             MaterialMap::Texture(_) => {
                 variants.push("SPECULAR_TEXTURE");
+                variants_add.push("SPECULAR_TEXTURE");
             }
         }
 
@@ -149,9 +155,11 @@ impl PhongMaterialFaceBuilder {
             MaterialMap::Constant(_) => todo!(),
             MaterialMap::PreVertex => {
                 variants.push("NORMAL_VERTEX");
+                variants_add.push("NORMAL_VERTEX");
             }
             MaterialMap::Texture(_) => {
                 variants.push("NORMAL_TEXTURE");
+                variants_add.push("NORMAL_TEXTURE");
             }
         }
 

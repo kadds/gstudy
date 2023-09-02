@@ -351,6 +351,45 @@ impl ShaderTech {
         Ok(pass)
     }
 
+    pub fn register_variant_pass(
+        &self,
+        device: &wgpu::Device,
+        index: usize,
+        variants: &[&'static str],
+    ) -> anyhow::Result<Arc<Pass>> {
+        let mut l = self.variants_map.lock().unwrap();
+
+        let key = VariantKey {
+            name: variants_name(variants),
+            index: index as u32,
+        };
+        if let Some(v) = l.get(&key) {
+            return Ok(v.clone());
+        }
+
+        let shader_descriptor = self.compiler.compile_pass(index, variants)?;
+        // create vs, fs, cs
+        let label = format!("{}-{}", self.name, index);
+
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(&label),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_descriptor.source)),
+        });
+        let module = naga::front::wgsl::parse_str(&shader_descriptor.source)?;
+        let mut pass = Self::parse_pass(&shader_descriptor.include_shaders, module, shader_module)?;
+        pass.name = label;
+        log::info!(
+            "load variant {:?} for tech '{}', pass: {:?}",
+            key,
+            self.name,
+            pass
+        );
+
+        let pass = Arc::new(pass);
+        l.insert(key, pass.clone());
+        Ok(pass)
+    }
+
     pub fn register_variant(
         &self,
         device: &wgpu::Device,
