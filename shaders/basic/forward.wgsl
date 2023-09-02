@@ -59,7 +59,7 @@ var<push_constant> object: Object;
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput{
     var output: VertexOutput;
-    output.position = camera_uniform.vp * object.model * vec4<f32>(input.position, 1.0);
+    output.position = camera_uniform.vp * (object.model * vec4<f32>(input.position, 1.0));
 ///#if CONST_COLOR
     output.color = material_uniform.color;
 ///#else

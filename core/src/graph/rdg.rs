@@ -314,7 +314,7 @@ impl RenderGraphBuilder {
         g: &mut Graph,
         resource_nodes: &mut HashMap<ResourceId, NodeIndex>,
     ) -> NodeIndex {
-        let (inputs, outputs, _) = pass.inputs_outputs();
+        let (inputs, outputs, target) = pass.inputs_outputs();
 
         let inputs: Vec<(ResourceId, ResourceUsage)> = inputs
             .textures
@@ -330,6 +330,7 @@ impl RenderGraphBuilder {
             .collect();
 
         // link input nodes
+        let target = target.clone();
 
         let index = g.add_node(Node::Pass(pass));
 
@@ -357,6 +358,41 @@ impl RenderGraphBuilder {
 
                 resource_nodes.insert(id, node_id);
                 g.add_edge(index, node_id, op.clone());
+            }
+        }
+
+        // link output resource
+        for color in &target.colors {
+            let op = ResourceUsage::TextureWrite;
+            if let PreferAttachment::Resource(id) = &color.prefer_attachment {
+                if *id == RT_RESOLVE_COLOR_RESOURCE_ID {
+                    continue;
+                }
+                let node_id = resource_nodes.get(id);
+                if let Some(node_id) = node_id {
+                    g.add_edge(index, *node_id, op.clone());
+                } else {
+                    let res = self.resource_map.get(&id).cloned().unwrap();
+                    let node_id = g.add_node(Node::Resource(res));
+
+                    resource_nodes.insert(*id, node_id);
+                    g.add_edge(index, node_id, op.clone());
+                }
+            }
+        }
+        if let Some(depth) = &target.depth {
+            let op = ResourceUsage::TextureWrite;
+            if let PreferAttachment::Resource(id) = &depth.prefer_attachment {
+                let node_id = resource_nodes.get(id);
+                if let Some(node_id) = node_id {
+                    g.add_edge(index, *node_id, op.clone());
+                } else {
+                    let res = self.resource_map.get(&id).cloned().unwrap();
+                    let node_id = g.add_node(Node::Resource(res));
+
+                    resource_nodes.insert(*id, node_id);
+                    g.add_edge(index, node_id, op.clone());
+                }
             }
         }
         index
@@ -465,70 +501,6 @@ impl RenderGraphBuilder {
             main_pass_list.insert(0, index);
         }
 
-        // add clear pass
-        // for (_, res) in &self.resource_map {
-        //     match &res.inner {
-        //         ResourceType::Texture(t) => {
-        //             if let Some(colors) = &t.clear {
-        //                 let mut desc = RenderTargetDescriptor {
-        //                     colors: smallvec::smallvec![],
-        //                     depth: None,
-        //                 };
-        //                 match colors {
-        //                     ClearValue::Color(c) => desc.colors.push(ColorRenderTargetDescriptor {
-        //                         prefer_attachment: pass::PreferAttachment::Resource(res.id),
-        //                         ops: resource::ResourceOps {
-        //                             load: Some(colors.clone()),
-        //                             store: true,
-        //                         },
-        //                     }),
-        //                     ClearValue::Depth(d) => {
-        //                         desc.depth = Some(DepthRenderTargetDescriptor {
-        //                             prefer_attachment: pass::PreferAttachment::Resource(res.id),
-        //                             depth_ops: Some(resource::ResourceOps {
-        //                                 load: Some(colors.clone()),
-        //                                 store: true,
-        //                             }),
-        //                             stencil_ops: None,
-        //                         })
-        //                     }
-        //                     ClearValue::Stencil(s) => {
-        //                         desc.depth = Some(DepthRenderTargetDescriptor {
-        //                             prefer_attachment: pass::PreferAttachment::Resource(res.id),
-        //                             depth_ops: None,
-        //                             stencil_ops: Some(resource::ResourceOps {
-        //                                 load: Some(colors.clone()),
-        //                                 store: true,
-        //                             }),
-        //                         })
-        //                     }
-        //                     ClearValue::DepthAndStencil((d, s)) => {
-        //                         desc.depth = Some(DepthRenderTargetDescriptor {
-        //                             prefer_attachment: pass::PreferAttachment::Resource(res.id),
-        //                             depth_ops: Some(resource::ResourceOps {
-        //                                 load: Some(colors.clone()),
-        //                                 store: true,
-        //                             }),
-        //                             stencil_ops: Some(resource::ResourceOps {
-        //                                 load: Some(colors.clone()),
-        //                                 store: true,
-        //                             }),
-        //                         })
-        //                     }
-        //                 };
-        //                 let index = g.add_node(Node::Pass(Box::new(
-        //                     ClearPassBuilder::new(format!("clear resource {}", res.id))
-        //                         .render_target(desc)
-        //                         .build(),
-        //                 )));
-        //                 main_pass_list.insert(0, index);
-        //             }
-        //         }
-        //         ResourceType::ImportTexture(t) => {}
-        //         _ => (),
-        //     }
-        // }
-
         let mut connect = |from: NodeIndex, to: NodeIndex| {
             // create resource
             let resource_id = RT_COLOR_RESOURCE_ID;
@@ -619,7 +591,7 @@ impl RenderGraphBuilder {
             let mut resource_lifetime_map = HashMap::new();
             for (index, job) in jobs.jobs.iter().enumerate() {
                 if let RenderJob::PassCall((node_index, _)) = job {
-                    let resources = g.neighbors(*node_index);
+                    let resources = g.neighbors_undirected(*node_index);
                     for resource in resources {
                         if let Node::Resource(resource) = g.node_weight(resource).unwrap() {
                             match resource.inner {

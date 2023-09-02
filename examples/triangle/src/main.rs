@@ -3,7 +3,7 @@ use core::{
     material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
     mesh::{builder::MeshBuilder, StaticGeometry},
     scene::{Camera, RenderObject, Scene},
-    types::{Size, Vec3f, Vec4f, Color},
+    types::{Color, Size, Vec3f, Vec4f},
 };
 use std::{any::Any, sync::Arc};
 

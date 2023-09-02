@@ -2,7 +2,7 @@
 ///#include "camera.wgsl"
 ///#include "./light.wgsl"
 ///#include "./material.wgsl"
-///#if DIFFUSE_TEXTURE || NORMAL_TEXTURE || SPECULAR_TEXTURE || EMISSIVE_TEXTURE
+///#if DIFFUSE_TEXTURE || NORMAL_TEXTURE || SPECULAR_TEXTURE || EMISSIVE_TEXTURE 
 ///#decl UV
 ///#endif
 
@@ -62,7 +62,7 @@ struct BaseLightUniform {
 @group(0) @binding(0) var<uniform> camera_uniform: CameraUniform;
 @group(1) @binding(0) var<uniform> material_uniform: MaterialUniform;
 
-///#if UV
+///#if UV || SHADOW_MAP
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler_tex: sampler;
 ///#endif
 
@@ -74,12 +74,16 @@ struct BaseLightUniform {
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_normal: texture_2d<f32>;
 ///#endif
 
-///#if HEIGHT_TEX
-@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_height: texture_2d<f32>;
+///#if SPECULAR_TEXTURE
+@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_specular: texture_2d<f32>;
 ///#endif
 
-///#if EMISSION_TEX
+///#if EMISSION_TEXTURE
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_emission: texture_2d<f32>;
+///#endif
+
+///#if SHADOW_MAP
+@group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_shadow_map: texture_2d<f32>;
 ///#endif
 
 @group(2) @binding(0) var<uniform> light_uniform: BaseLightUniform;
@@ -121,7 +125,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     obj.normal = transform_normal_worldspace(input.normal, object.inverse_model);
 ///#endif
 
-    var color = ambient(obj, light_uniform.ambient);
+    var ambient_color = ambient(obj, light_uniform.ambient);
+
+    var color = vec3<f32>(0.0, 0.0, 0.0);
 
 ///#if DIRECT_LIGHT
     var light: LightInfo;
@@ -143,6 +149,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
 ///#elseif EMISSIVE_CONSTANT
     color += material_uniform.emissive;
 ///#endif
+
+///#if SHADOW_MAP
+    color = color * shadow + ambient_color;
+///#else
+    color = color + ambient_color;
+///endif
 
     return vec4<f32>(color.xyz, 1.0);
 }

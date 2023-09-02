@@ -223,17 +223,25 @@ fn parse_primitive_indices(
                 anyhow::bail!("dimension for indices invalid");
             }
         }
+        let mut has_color = false;
+        let mut has_texture = false;
 
         for (semantic, _) in p.attributes() {
             match semantic {
                 gltf::Semantic::Colors(_) => {
-                    mesh_builder.add_property(MeshPropertyType::Color);
+                    has_color = true;
                 }
                 gltf::Semantic::TexCoords(_) => {
-                    mesh_builder.add_property(MeshPropertyType::TexCoord);
+                    has_texture = true;
                 }
                 _ => (),
             }
+        }
+        if has_color {
+            mesh_builder.add_property(MeshPropertyType::new::<Color>("color"));
+        }
+        if has_texture {
+            mesh_builder.add_property(MeshPropertyType::new::<Vec2f>("texture"));
         }
 
         match indices.data_type() {
@@ -314,7 +322,8 @@ fn parse_primitive_vertices(
                 match accessor.dimensions() {
                     gltf::accessor::Dimensions::Vec4 => {
                         let data: &[Vec4f] = any_as_x_slice_array(buf);
-                        mesh_builder.add_property_vertices(MeshPropertyType::Color, data);
+                        mesh_builder
+                            .add_property_vertices(MeshPropertyType::new::<Color>("color"), data);
                     }
                     gltf::accessor::Dimensions::Vec3 => {
                         let data: &[Vec3f] = any_as_x_slice_array(buf);
@@ -322,7 +331,10 @@ fn parse_primitive_vertices(
                         for block in data {
                             trans_data.push(Vec4f::new(block[0], block[1], block[2], 1f32));
                         }
-                        mesh_builder.add_property_vertices(MeshPropertyType::Color, &trans_data);
+                        mesh_builder.add_property_vertices(
+                            MeshPropertyType::new::<Color>("color"),
+                            &trans_data,
+                        );
                     }
                     _ => {
                         anyhow::bail!("color should be vec3f/vec4f");
@@ -350,7 +362,8 @@ fn parse_primitive_vertices(
                     data.push(Vec2f::new(block[0], block[1]));
                 }
 
-                mesh_builder.add_property_vertices(MeshPropertyType::TexCoord, &data);
+                mesh_builder
+                    .add_property_vertices(MeshPropertyType::new::<Vec2f>("texture"), &data);
             }
             gltf::Semantic::Joints(_index) => {}
             gltf::Semantic::Weights(_index) => {}
@@ -388,7 +401,7 @@ impl<'a> ParseContext<'a> {
                 MaterialMapKey::Gltf(idx)
             } else {
                 // query default
-                if mesh_builder.has_property(MeshPropertyType::Color) {
+                if mesh_builder.has_property(MeshPropertyType::new::<Color>("color")) {
                     log::info!(
                         "load mesh {:?} fallback material to default_vertex_color",
                         mesh.name()

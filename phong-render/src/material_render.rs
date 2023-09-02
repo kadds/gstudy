@@ -1,5 +1,12 @@
 use core::{
-    graph::rdg::{pass::RenderPassExecutor, RenderPassBuilder},
+    backends::wgpu_backend::{ClearValue, ResourceOps},
+    graph::rdg::{
+        pass::{
+            DepthRenderTargetDescriptor, PreferAttachment, RenderPassExecutor,
+            RenderTargetDescriptor,
+        },
+        RenderPassBuilder,
+    },
     render::{
         collector::{
             MaterialBufferInstantCollector, MaterialBufferInstantiation, MeshBufferCollector,
@@ -8,7 +15,8 @@ use core::{
         resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
         ResolvePipelineConfig,
     },
-    types::{Mat3x3f, Mat4x4f, Vec4f},
+    scene::Camera,
+    types::{Mat3x3f, Mat4x4f, Vec3u, Vec4f},
     util::{any_as_u8_slice, any_as_u8_slice_array},
 };
 use std::{
@@ -17,6 +25,7 @@ use std::{
 };
 
 use tshader::{LoadTechConfig, ShaderTech};
+use wgpu::util::DeviceExt;
 
 use crate::{light::SceneLights, material::PhongMaterialFace};
 
@@ -42,30 +51,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         context: core::graph::rdg::pass::RenderPassContext<'b>,
         engine: &mut core::graph::rdg::backend::GraphCopyEngine,
     ) -> Option<()> {
-        let mut shared = self.shared.lock().unwrap();
-        shared.mesh_buffer_collector.recall();
-        shared.material_buffer_collector.recall();
         let rs = take_rs::<PhongMaterialFace>(&context)?;
-        let c = rs.scene.get_container();
-
-        for layer in &rs.list {
-            for indirect in &layer.material {
-                let material = indirect.material.as_ref();
-                shared
-                    .material_buffer_collector
-                    .add_pipeline_and_copy_buffer(
-                        material,
-                        &layer.main_camera.bind_group_layout,
-                        &rs.gpu,
-                    );
-                // create index/vertex buffer
-                let objects = layer.objects(indirect);
-
-                for id in objects {
-                    shared.mesh_buffer_collector.add(&c, *id, engine.device());
-                }
-            }
-        }
 
         Some(())
     }
@@ -290,6 +276,35 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 name: "phong".into(),
             })
             .unwrap();
+
+        let shadow_tech = setup_resource
+            .shader_loader
+            .load_tech(LoadTechConfig {
+                name: "shadow".into(),
+            })
+            .unwrap();
+        let shadow_template = shadow_tech.register_variant(gpu.device(), &[&[]]).unwrap();
+
+        let mut ins = RenderDescriptorObject::new();
+
+        let depth_format = wgpu::TextureFormat::Depth32Float;
+
+        // ins = ins.set_primitive(|p: &mut _| *p = *material.primitive());
+        ins = ins.set_depth(depth_format, |depth: &mut _| {
+            depth.depth_compare = wgpu::CompareFunction::Less;
+            depth.depth_write_enabled = true;
+        });
+
+        let shadow_pipeline = Arc::new(resolve_pipeline(
+            &gpu,
+            &shadow_template,
+            ins,
+            &ResolvePipelineConfig {
+                constant_stages: vec![wgpu::ShaderStages::VERTEX],
+                global_bind_group_layout: Some(&setup_resource.main_camera.bind_group_layout),
+            },
+        ));
+
         let mut scene_shared = PhongMaterialSceneSharedData {
             lights: vec![],
             variants: vec![],
@@ -302,11 +317,24 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         let extra_lights = lights.extra_lights();
         let has_direct_light = lights.has_direct_light();
 
+        let mut direct_shadow_map = None;
+
         if has_direct_light {
             light_variants.push("DIRECT_LIGHT");
             let light_uniform = lights.base_uniform();
             let buffer = gpu.new_wvp_buffer_from(Some("Direct light"), &light_uniform);
             scene_shared.lights.push(buffer);
+            if lights.direct_light_cast_shadow() {
+                let res = g.allocate_texture(
+                    "direct shadow map".into(),
+                    Vec3u::new(2048, 2048, 1),
+                    wgpu::TextureFormat::Depth32Float,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    Some(ClearValue::Depth(1f32)),
+                    1,
+                );
+                direct_shadow_map = Some(res);
+            }
         }
 
         scene_shared.variants = light_variants;
@@ -326,6 +354,10 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
 
         let mut base_pass = RenderPassBuilder::new("phong forward base pass");
         base_pass.default_color_depth_render_target();
+        if let Some(shadow_map) = direct_shadow_map {
+            base_pass.read_texture(shadow_map);
+        }
+
         let shared = Arc::new(Mutex::new(shared));
 
         base_pass.async_execute(Arc::new(Mutex::new(PhongMaterialBaseRenderer {
@@ -346,6 +378,26 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
 
                 g.add_render_pass(add_pass);
             }
+        }
+
+        // add shadow pass
+        if lights.direct_light_cast_shadow() {
+            let mut shadow_pass = RenderPassBuilder::new("phong's direct light shadow pass");
+            shadow_pass.render_target(RenderTargetDescriptor {
+                colors: smallvec::smallvec![],
+                depth: Some(DepthRenderTargetDescriptor {
+                    prefer_attachment: PreferAttachment::Resource(direct_shadow_map.unwrap()),
+                    depth_ops: Some(ResourceOps::load_store()),
+                    stencil_ops: None,
+                }),
+            });
+            shadow_pass.async_execute(Arc::new(Mutex::new(ShadowRenderer {
+                shared: shared.clone(),
+                pipeline: shadow_pipeline,
+                cameras: vec![lights.direct_light_camera()],
+                cameras_bind_group: vec![],
+            })));
+            g.add_render_pass(shadow_pass);
         }
     }
 }
@@ -464,4 +516,143 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
 
         vec![Some(bind_group), Some(light_bind_group)]
     }
+}
+
+pub struct ShadowRenderer {
+    shared: Arc<Mutex<PhongMaterialSharedData>>,
+    pipeline: Arc<PipelinePassResource>,
+    cameras: Vec<Arc<Camera>>,
+    cameras_bind_group: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
+}
+
+impl RenderPassExecutor for ShadowRenderer {
+    fn prepare<'b>(
+        &'b mut self,
+        context: core::graph::rdg::pass::RenderPassContext<'b>,
+        engine: &mut core::graph::rdg::backend::GraphCopyEngine,
+    ) -> Option<()> {
+        let mut shared = self.shared.lock().unwrap();
+        shared.mesh_buffer_collector.recall();
+        shared.material_buffer_collector.recall();
+        let rs = take_rs::<PhongMaterialFace>(&context)?;
+        let c = rs.scene.get_container();
+
+        for layer in &rs.list {
+            for indirect in &layer.material {
+                let material = indirect.material.as_ref();
+                shared
+                    .material_buffer_collector
+                    .add_pipeline_and_copy_buffer(
+                        material,
+                        &layer.main_camera.bind_group_layout,
+                        &rs.gpu,
+                    );
+                // create index/vertex buffer
+                let objects = layer.objects(indirect);
+
+                for id in objects {
+                    shared.mesh_buffer_collector.add(&c, *id, engine.device());
+                }
+            }
+        }
+        if self.cameras_bind_group.len() > 0 {
+            for (camera, (buffer, _)) in self.cameras.iter().zip(self.cameras_bind_group.iter()) {
+                let data = camera.uniform_3d();
+                engine.gpu().queue().write_buffer(buffer, 0, &data);
+            }
+        }
+        Some(())
+    }
+
+    fn queue<'b>(
+        &'b mut self,
+        context: core::graph::rdg::pass::RenderPassContext<'b>,
+        device: &wgpu::Device,
+    ) {
+        if self.cameras_bind_group.len() < self.cameras.len() {
+            for camera in &self.cameras {
+                let data = camera.uniform_3d();
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: &data,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &self.pipeline.pass[0].get_bind_group_layout(0),
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    }],
+                });
+                self.cameras_bind_group.push((buffer, bind_group));
+            }
+        }
+    }
+
+    fn render<'b>(
+        &'b mut self,
+        context: core::graph::rdg::pass::RenderPassContext<'b>,
+        engine: &mut core::graph::rdg::backend::GraphRenderEngine,
+    ) {
+        let rs = take_rs::<PhongMaterialFace>(&context).unwrap();
+        let c = rs.scene.get_container();
+        let shared = self.shared.lock().unwrap();
+
+        for layer in &rs.list {
+            let mut pass = engine.begin(layer.layer);
+
+            for indirect in &layer.material {
+                let objects = layer.objects(indirect);
+
+                pass.set_pipeline(self.pipeline.pass[0].render());
+                pass.set_bind_group(0, &self.cameras_bind_group[0].1, &[]); // camera bind group
+
+                // object bind_group
+                for id in objects {
+                    let obj = match c.get(id) {
+                        Some(v) => v,
+                        None => continue,
+                    };
+                    let obj = obj.o();
+                    pass.push_debug_group(&format!("object {}", obj.name()));
+                    let mesh = obj.geometry().mesh();
+                    let object_uniform = obj.geometry().transform();
+                    pass.set_push_constants(
+                        wgpu::ShaderStages::VERTEX,
+                        0,
+                        any_as_u8_slice(object_uniform.mat()),
+                    );
+
+                    let b = shared.mesh_buffer_collector.get(&c, *id).unwrap();
+
+                    let index_type_u32 = mesh.indices_is_u32().unwrap_or_default();
+
+                    if let Some(index) = &b.index {
+                        if index_type_u32 {
+                            pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
+                        } else {
+                            pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint16);
+                        }
+                    }
+
+                    pass.set_vertex_buffer(0, b.vertex.slice(..));
+
+                    // index
+                    if b.index.is_some() {
+                        pass.draw_indexed(0..mesh.index_count().unwrap(), 0, 0..1);
+                    } else {
+                        pass.draw(0..mesh.vertex_count() as u32, 0..1);
+                    }
+                    pass.pop_debug_group();
+                }
+            }
+        }
+    }
+
+    fn cleanup<'b>(&'b mut self, context: core::graph::rdg::pass::RenderPassContext<'b>) {}
 }

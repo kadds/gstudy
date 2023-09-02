@@ -149,30 +149,8 @@ impl CubeMeshBuilder {
             builder.add_property_vertices(
                 property,
                 &[
-                    z,
-                    z, 
-                    z, 
-                    z,
-                    ny,
-                    ny,
-                    ny,
-                    ny,
-                    x,
-                    x,
-                    x,
-                    x,
-                    y,
-                    y,
-                    y,
-                    y,
-                    nx,
-                    nx,
-                    nx,
-                    nx,
+                    z, z, z, z, ny, ny, ny, ny, x, x, x, x, y, y, y, y, nx, nx, nx, nx, nz, nz, nz,
                     nz,
-                    nz,
-                    nz,
-                    nz
                 ],
             );
         }

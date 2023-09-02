@@ -23,28 +23,28 @@ pub enum RenderStage {
     Cleanup,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum PreferAttachment {
     Default,
     None,
     Resource(ResourceId),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ColorRenderTargetDescriptor {
     pub prefer_attachment: PreferAttachment,
     pub resolve_attachment: PreferAttachment,
     pub ops: ResourceOps,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DepthRenderTargetDescriptor {
     pub prefer_attachment: PreferAttachment,
     pub depth_ops: Option<ResourceOps>,
     pub stencil_ops: Option<ResourceOps>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RenderTargetDescriptor {
     pub colors: smallvec::SmallVec<[ColorRenderTargetDescriptor; 1]>,
     pub depth: Option<DepthRenderTargetDescriptor>,

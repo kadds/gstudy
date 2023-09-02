@@ -3,7 +3,10 @@ use core::{
     types::{Color, Vec3f, Vec4f},
     util::any_as_u8_slice,
 };
-use std::{io::Write, sync::Mutex};
+use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+};
 
 #[repr(C)]
 struct DirectLightUniform {
@@ -15,7 +18,8 @@ struct DirectLightUniform {
 
 pub struct DirectLight {
     color: Color,
-    camera: Camera,
+    camera: Arc<Camera>,
+    pub(crate) cast_shadow: bool,
 }
 
 impl DirectLight {
@@ -37,6 +41,8 @@ pub struct DirectLightBuilder {
     shadow_rect: Vec4f,
     near: f32,
     far: f32,
+    cast_shadow: bool,
+    cast_shadow_distance: f32,
 }
 
 impl DirectLightBuilder {
@@ -47,7 +53,9 @@ impl DirectLightBuilder {
             dir: Vec3f::new(1f32, 0f32, 0f32),
             shadow_rect: Vec4f::new(-10f32, -10f32, 10f32, 10f32),
             near: 0.1f32,
-            far: 100f32,
+            far: 150f32,
+            cast_shadow: false,
+            cast_shadow_distance: 1000f32,
         }
     }
     pub fn color(mut self, color: Color) -> Self {
@@ -61,18 +69,29 @@ impl DirectLightBuilder {
     }
 
     pub fn direction(mut self, direction: Vec3f) -> Self {
-        self.dir = direction;
+        self.dir = direction.normalize();
+        self
+    }
+
+    pub fn cast_shadow(mut self, cast: bool) -> Self {
+        self.cast_shadow = cast;
+        self
+    }
+
+    pub fn cast_shadow_distance(mut self, distance: f32) -> Self {
+        self.cast_shadow_distance = distance;
         self
     }
 
     pub fn build(self) -> DirectLight {
         let c = Camera::new();
         c.make_orthographic(self.shadow_rect, self.near, self.far);
-        let to = self.position + self.dir;
+        let to = self.position + self.dir * self.cast_shadow_distance;
         c.look_at(self.position, to, Vec3f::new(0f32, 1f32, 0f32));
         DirectLight {
             color: self.color,
-            camera: c,
+            camera: Arc::new(c),
+            cast_shadow: self.cast_shadow,
         }
     }
 }
@@ -148,6 +167,24 @@ impl SceneLights {
         let inner = self.inner.lock().unwrap();
         let n = inner.point_light.len() + inner.spot_light.len();
         n
+    }
+
+    pub fn direct_light_cast_shadow(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .direct_light
+            .as_ref()
+            .map(|v| v.cast_shadow)
+            .unwrap_or_default()
+    }
+
+    pub fn direct_light_camera(&self) -> Arc<Camera> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .direct_light
+            .as_ref()
+            .map(|v| v.camera.clone())
+            .unwrap()
     }
 
     fn update_uniform_inner(inner: &mut SceneLightsInner) {

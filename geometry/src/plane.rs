@@ -1,5 +1,7 @@
-use core::{types::{Color, Vec3f}, mesh::{Mesh, builder::MeshBuilder}};
-
+use core::{
+    mesh::{builder::MeshBuilder, Mesh},
+    types::{Color, Vec3f},
+};
 
 pub struct PlaneMeshBuilder {
     normal: bool,
@@ -12,7 +14,14 @@ pub struct PlaneMeshBuilder {
 
 impl Default for PlaneMeshBuilder {
     fn default() -> Self {
-        Self { normal: false, color: false, segments_x: 1, segments_z: 1, colors: vec![], default_color: Color::default(), }
+        Self {
+            normal: false,
+            color: false,
+            segments_x: 1,
+            segments_z: 1,
+            colors: vec![],
+            default_color: Color::default(),
+        }
     }
 }
 
@@ -75,7 +84,7 @@ impl PlaneMeshBuilder {
                 vertices.push(Vec3f::new(-x_cur, 0f32, -z_cur));
                 vertices.push(Vec3f::new(x_cur, 0f32, -z_cur));
 
-                indices.extend_from_slice(&[n, n + 1, n + 2, n + 3, n + 2, n+1]);
+                indices.extend_from_slice(&[n, n + 1, n + 2, n + 3, n + 2, n + 1]);
                 n += 4;
 
                 z_cur = z_next;
@@ -87,7 +96,7 @@ impl PlaneMeshBuilder {
 
         if self.normal {
             let mut normals = vec![];
-            for _  in 0..vertices.len() {
+            for _ in 0..vertices.len() {
                 normals.push(Vec3f::new(0f32, 1f32, 0f32));
             }
             builder.add_property_vertices(property, &normals);

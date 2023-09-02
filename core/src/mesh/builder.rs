@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use indexmap::{IndexSet, IndexMap};
+use indexmap::{IndexMap, IndexSet};
 
 use crate::{
     types::{Rectu, Vec3f},

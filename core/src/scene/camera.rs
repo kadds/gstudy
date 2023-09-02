@@ -1,8 +1,8 @@
-use std::{fmt::Debug, sync::Mutex};
+use std::{fmt::Debug, io::Write, sync::Mutex};
 
 use crate::{
     types::{Frustum, Mat4x4f, Vec2f, Vec3f, Vec4f},
-    util::angle2rad,
+    util::{angle2rad, any_as_u8_slice},
 };
 
 #[derive(Debug, Clone)]
@@ -79,6 +79,17 @@ impl Project {
             Project::Orthographic(o) => o.gen(),
         }
     }
+}
+
+#[repr(C)]
+struct Uniform3d {
+    mat: Mat4x4f,
+    direction: Vec4f,
+}
+
+#[repr(C)]
+struct Uniform2d {
+    size: Vec4f,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +190,18 @@ impl Camera {
                 ])
             }
         }
+    }
+
+    pub fn uniform_3d(&self) -> Vec<u8> {
+        let mut data = vec![];
+        let vp = self.vp();
+        let dir = self.to() - self.from();
+        let uniform = Uniform3d {
+            mat: vp,
+            direction: Vec4f::new(dir.x, dir.y, dir.z, 0.0f32),
+        };
+        data.write_all(any_as_u8_slice(&uniform));
+        data
     }
 
     pub fn vp(&self) -> Mat4x4f {

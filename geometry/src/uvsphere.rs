@@ -1,5 +1,7 @@
-use core::{mesh::{Mesh, builder::MeshBuilder}, types::{Vec3f, Color}};
-
+use core::{
+    mesh::{builder::MeshBuilder, Mesh},
+    types::{Color, Vec3f},
+};
 
 pub struct UVSphereBuilder {
     normal: bool,
@@ -11,7 +13,13 @@ pub struct UVSphereBuilder {
 
 impl Default for UVSphereBuilder {
     fn default() -> Self {
-        Self { normal: false, color: false, segments_u: 8, segments_v: 12, default_color: Color::default() }
+        Self {
+            normal: false,
+            color: false,
+            segments_u: 8,
+            segments_v: 12,
+            default_color: Color::default(),
+        }
     }
 }
 
@@ -54,7 +62,7 @@ impl UVSphereBuilder {
         for i in 0..self.segments_v {
             let phi = std::f32::consts::PI * (i + 1) as f32 / self.segments_v as f32;
             for j in 0..self.segments_u {
-                let theta = 2f32 * std::f32::consts::PI * j as f32 / self.segments_u as f32; 
+                let theta = 2f32 * std::f32::consts::PI * j as f32 / self.segments_u as f32;
                 let x = phi.sin() * theta.cos() * 0.5;
                 let y = phi.cos() * 0.5;
                 let z = phi.sin() * theta.sin() * 0.5;
@@ -71,14 +79,14 @@ impl UVSphereBuilder {
         for i in 0..self.segments_u {
             let idx0 = (i + 1) % self.segments_u + 1;
             let idx1 = i + 1;
-            indices.extend_from_slice(&[0, idx0, idx1]); 
+            indices.extend_from_slice(&[0, idx0, idx1]);
 
-            let idx3 = (i + 1) % self.segments_u + 1 + self.segments_u * (self.segments_v -2);
-            let idx2 = i + 1 + self.segments_u*(self.segments_v - 2);
-            indices.extend_from_slice(&[vertices.len() as u32 - 1, idx2, idx3]); 
+            let idx3 = (i + 1) % self.segments_u + 1 + self.segments_u * (self.segments_v - 2);
+            let idx2 = i + 1 + self.segments_u * (self.segments_v - 2);
+            indices.extend_from_slice(&[vertices.len() as u32 - 1, idx2, idx3]);
         }
 
-        for i in 0..self.segments_v-2 {
+        for i in 0..self.segments_v - 2 {
             let base0 = (i + 1) * self.segments_u + 1;
             let base1 = i * self.segments_u + 1;
 
@@ -107,5 +115,4 @@ impl UVSphereBuilder {
 
         builder.build().unwrap()
     }
-
 }

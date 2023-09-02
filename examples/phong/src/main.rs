@@ -4,7 +4,7 @@ use core::{
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
-        Camera, RenderObject, Scene, Transform, TransformBuilder,
+        Camera, RenderObject, Scene, TransformBuilder,
     },
     types::{Color, Size, Vec3f},
 };
@@ -46,7 +46,7 @@ impl MainLogic {
 
             let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
                 TransformBuilder::new()
-                    .translate(Vec3f::new(0f32, 0.5f32, 0f32))
+                    .translate(Vec3f::new(0f32, 0.5001f32, 0f32))
                     .build(),
             );
             let obj = RenderObject::new(Box::new(geometry), material.clone());
@@ -85,9 +85,10 @@ impl MainLogic {
         scene.set_main_camera(camera);
 
         let light = DirectLightBuilder::new()
-            .position(Vec3f::new(10f32, 10f32, 10f32))
+            .position(Vec3f::new(5f32, 5f32, 5f32))
             .direction(Vec3f::new(-2f32, -2f32, -1f32))
             .color(Color::new(0.7f32, 0.7f32, 0.62f32, 1f32))
+            .cast_shadow(true)
             .build();
         lights.set_direct_light(light);
         lights.set_ambient(Color::new(0.2f32, 0.2f32, 0.2f32, 1.0f32));

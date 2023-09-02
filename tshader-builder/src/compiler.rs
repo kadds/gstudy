@@ -124,7 +124,12 @@ impl ShaderTechCompiler {
 
         let res = preprocessor.process(real_path.as_os_str().to_str().unwrap())?;
 
-        log::debug!("compile {} pass {} success \n{}", self.source, pass_index, res);
+        log::debug!(
+            "compile {} pass {} success \n{}",
+            self.source,
+            pass_index,
+            res
+        );
         let shaders = self.config.pass[pass_index]
             .shaders
             .iter()
