@@ -58,6 +58,7 @@ impl UVSphereBuilder {
         let mut indices = vec![];
         let mut normals = vec![];
         vertices.push(Vec3f::new(0f32, 0.5f32, 0f32));
+        normals.push(Vec3f::new(0f32, 0.5f32, 0f32).normalize());
 
         for i in 0..self.segments_v {
             let phi = std::f32::consts::PI * (i + 1) as f32 / self.segments_v as f32;
@@ -75,6 +76,7 @@ impl UVSphereBuilder {
         }
 
         vertices.push(Vec3f::new(0f32, -0.5f32, 0f32));
+        normals.push(Vec3f::new(0f32, -0.5f32, 0f32).normalize());
 
         for i in 0..self.segments_u {
             let idx0 = (i + 1) % self.segments_u + 1;

@@ -129,8 +129,12 @@ impl ShaderTech {
                             multisampled,
                         }
                     }
-                    naga::TypeInner::Sampler { comparison: _ } => {
-                        wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
+                    naga::TypeInner::Sampler { comparison } => {
+                        if comparison {
+                            wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison)
+                        } else {
+                            wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
+                        }
                     }
                     _ => {
                         anyhow::bail!("unsupported type in address space Handle var {:?}", t.name)

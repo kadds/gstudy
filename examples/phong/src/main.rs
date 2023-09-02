@@ -7,11 +7,12 @@ use core::{
         Camera, RenderObject, Scene, TransformBuilder,
     },
     types::{Color, Size, Vec3f},
+    util::angle2rad,
 };
 use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{App, AppEventProcessor};
-use geometry::{cube::CubeMeshBuilder, plane::PlaneMeshBuilder};
+use geometry::{cube::CubeMeshBuilder, plane::PlaneMeshBuilder, uvsphere::UVSphereBuilder};
 use phong_render::{
     light::{DirectLightBuilder, PointLightBuilder, SceneLights, ShadowConfig, SpotLightBuilder},
     material::PhongMaterialFaceBuilder,
@@ -54,6 +55,38 @@ impl MainLogic {
         }
 
         {
+            let mesh = CubeMeshBuilder::default()
+                .enable_normal()
+                .enable_color(Color::new(0.4f32, 0.8f32, 0.4f32, 1f32))
+                .build();
+
+            let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
+                TransformBuilder::new()
+                    .translate(Vec3f::new(0f32, 1.2501f32, 0f32))
+                    .scale(Vec3f::new(0.5f32, 0.5f32, 0.5f32))
+                    .build(),
+            );
+            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            scene.add(obj);
+        }
+
+        {
+            let mesh = UVSphereBuilder::default()
+                .enable_normal()
+                .set_segments(32, 24)
+                .enable_color(Color::new(0.6f32, 0.7f32, 0.8f32, 1f32))
+                .build();
+
+            let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
+                TransformBuilder::new()
+                    .translate(Vec3f::new(1.2f32, 0.501f32, -0.2f32))
+                    .build(),
+            );
+            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            scene.add(obj);
+        }
+
+        {
             let mesh = PlaneMeshBuilder::default()
                 .enable_normal()
                 .enable_color(Color::new(0.2f32, 0.2f32, 0.22f32, 1f32))
@@ -61,7 +94,7 @@ impl MainLogic {
 
             let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
                 TransformBuilder::new()
-                    .scale(Vec3f::new(100f32, 1f32, 100f32))
+                    .scale(Vec3f::new(20f32, 1f32, 20f32))
                     .build(),
             );
             let obj = RenderObject::new(Box::new(geometry), material.clone());
@@ -85,16 +118,18 @@ impl MainLogic {
         scene.set_main_camera(camera);
 
         let light = DirectLightBuilder::new()
-            .position(Vec3f::new(10f32, 10f32, 10f32))
-            .direction(Vec3f::new(-2f32, -2f32, -1f32))
+            .position(Vec3f::new(5f32, 5.8f32, 5f32))
+            .direction(Vec3f::new(-2f32, -2f32, -2f32))
             .color(Color::new(0.7f32, 0.7f32, 0.62f32, 1f32))
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
+                pcf: true,
                 ..Default::default()
             })
             .build();
         lights.set_direct_light(light);
-        lights.set_ambient(Color::new(0.2f32, 0.2f32, 0.2f32, 1.0f32));
+        // lights.set_ambient(Color::new(0.0f32, 0.0f32, 0.0f32, 1.0f32));
+        lights.set_ambient(Color::new(0.3f32, 0.3f32, 0.3f32, 1.0f32));
 
         let point_light = PointLightBuilder::new()
             .position(Vec3f::new(5f32, 5f32, 5f32))
@@ -108,16 +143,18 @@ impl MainLogic {
         // lights.add_point_light(point_light);
 
         let spot_light = SpotLightBuilder::new()
-            .position(Vec3f::new(5f32, 5f32, 5f32))
-            .direction(Vec3f::new(-1f32, -1f32, -1f32))
-            .color(Color::new(0.5f32, 0.8f32, 0.62f32, 1f32))
+            .position(Vec3f::new(-5f32, 6f32, -5f32))
+            .direction(Vec3f::new(0.2f32, -0.4f32, 0.2f32))
+            .cutoff(angle2rad(20f32), angle2rad(28f32))
+            .color(Color::new(0.78f32, 0.78f32, 0.65f32, 1f32))
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
+                pcf: true,
                 ..Default::default()
             })
             .build();
 
-        // lights.add_spot_light(spot_light);
+        lights.add_spot_light(spot_light);
 
         scene.set_rebuild_flag();
     }

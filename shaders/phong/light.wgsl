@@ -26,36 +26,72 @@ fn specular(object: ObjectInfo, light: LightInfo, view: vec3<f32>, shininess: f3
     return factor * color;
 }
 
-struct DirectLight {
-    color: vec3<f32>,
-    placement: f32,
-    direction: vec3<f32>,
-    placement2: f32,
-}
-
 fn transform_normal_worldspace(normal: vec3<f32>, world_inv: mat4x4<f32>) -> vec3<f32> {
     return normalize(normal * mat3x3<f32>(world_inv[0].xyz, world_inv[1].xyz, world_inv[2].xyz));
 }
 
-fn recv_shadow(position: vec4<f32>, sampler_tex: sampler, shadow_tex: texture_depth_2d) -> f32 {
-    let uv = vec2<f32>(0.0, 0.0);
-    let color = textureSample(shadow_tex, sampler_tex, uv);
-    return color;
-}
+///#if SHADOW_PCF
+fn recv_shadow_visibility(pos: vec3<f32>, normal: vec3<f32>, light_dir: vec3<f32>, 
+    sampler_tex: sampler_comparison, shadow_tex: texture_depth_2d, size: vec2<f32>) -> f32 {
+    let ov = 1.0 / size;
 
+    // let bias = max(0.01 * (1.0 - dot(normal, -light_dir)), 0.005);
+    var visibility = 0.0;
+    let bias = 0.0;
+
+    for (var x = -1; x <= 1; x++) {
+        for (var y = -1; y <= 1; y++) {
+            visibility += textureSampleCompare(shadow_tex, sampler_tex, pos.xy + vec2<f32>(vec2(x, y)) * ov, pos.z - bias);
+        }
+    }
+
+    if pos.z > 1.0 {
+        return 1.0;
+    }
+
+    return visibility / 9.0;
+}
+///#else
+fn recv_shadow_visibility(pos: vec3<f32>, normal: vec3<f32>, light_dir: vec3<f32>, 
+    sampler_tex: sampler_comparison, shadow_tex: texture_depth_2d, size: vec2<f32>) -> f32 {
+
+    // let bias = max(0.05 * (1.0 - dot(normal, -light_dir)), 0.005);
+    let bias = 0.0;
+
+    var visibility = textureSampleCompare(shadow_tex, sampler_tex, pos.xy, pos.z - bias);
+
+    if pos.z >= 1.0 {
+        return 1.0;
+    }
+
+    return visibility;
+}
+///#endif
+
+struct DirectLight {
+    color: vec3<f32>,
+    size_x: f32,
+    direction: vec3<f32>,
+    size_y: f32,
+    vp: mat4x4<f32>,
+}
 
 struct PointLight {
     color: vec3<f32>,
     placement: f32,
     position: vec3<f32>,
     placement2: f32,
+    vp: mat4x4<f32>,
 }
 
 struct SpotLight {
+    vp: mat4x4<f32>,
     color: vec3<f32>,
-    placement: f32,
+    size_x: f32,
     position: vec3<f32>,
-    cutoff: f32,
+    size_y: f32,
     direction: vec3<f32>,
+    placement: f32,
+    cutoff: f32,
     cutoff_outer: f32,
 }

@@ -514,9 +514,11 @@ impl WGPUBackend {
         features.insert(Features::PUSH_CONSTANTS);
         features.insert(Features::MULTI_DRAW_INDIRECT);
         features.insert(Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+        features.insert(Features::ADDRESS_MODE_CLAMP_TO_BORDER);
 
         let mut minimal_features = wgpu::Features::empty();
         minimal_features.insert(Features::PUSH_CONSTANTS);
+        minimal_features.insert(Features::ADDRESS_MODE_CLAMP_TO_BORDER);
 
         let (device, queue) =
             request_optional_feature(&adapter, features, limits, minimal_features, minimal_limits);
@@ -565,10 +567,10 @@ impl WGPUBackend {
         );
 
         let mut texture_data2 = vec![];
-        texture_data2.push(255u32);
-        texture_data2.push(255u32);
-        texture_data2.push(255u32);
-        texture_data2.push(255u32);
+        texture_data2.push(u16::MAX);
+        texture_data2.push(u16::MAX);
+        texture_data2.push(u16::MAX);
+        texture_data2.push(u16::MAX);
 
         let default_shadow_texture = device.create_texture_with_data(
             &queue,
@@ -582,7 +584,7 @@ impl WGPUBackend {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm,
+                format: wgpu::TextureFormat::Depth16Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },

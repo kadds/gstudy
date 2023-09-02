@@ -195,7 +195,7 @@ impl Camera {
     pub fn uniform_3d(&self) -> Vec<u8> {
         let mut data = vec![];
         let vp = self.vp();
-        let dir = self.to() - self.from();
+        let dir = (self.to() - self.from()).normalize();
         let uniform = Uniform3d {
             mat: vp,
             direction: Vec4f::new(dir.x, dir.y, dir.z, 0.0f32),

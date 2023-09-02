@@ -81,12 +81,32 @@ impl Material {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MaterialBuilder {
     name: String,
     primitive: wgpu::PrimitiveState,
     blend: Option<wgpu::BlendState>,
     face: Option<Box<dyn MaterialFace>>,
+}
+
+impl Default for MaterialBuilder {
+    fn default() -> Self {
+        Self {
+            // RenderDescriptorObject
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            blend: Default::default(),
+            face: Default::default(),
+            name: "".to_owned(),
+        }
+    }
 }
 
 impl Clone for MaterialBuilder {

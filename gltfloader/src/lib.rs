@@ -506,7 +506,7 @@ impl<'a> ParseContext<'a> {
             let mut primitive = wgpu::PrimitiveState::default();
             let mut material_builder = MaterialBuilder::default();
             if material.double_sided() {
-                primitive.cull_mode = None;
+                primitive.cull_mode = Some(wgpu::Face::Back);
             }
             material_builder = material_builder
                 .primitive(primitive)

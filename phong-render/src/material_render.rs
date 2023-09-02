@@ -30,14 +30,20 @@ mod base;
 mod shadow;
 
 use crate::{
-    light::{Light, SceneLights, TLight},
+    light::{BaseLightUniform, Light, SceneLights, TLight},
     material::PhongMaterialFace,
 };
 
 use self::shadow::ShadowRenderer;
 
+enum LightUniformHolder {
+    Base(Arc<Mutex<BaseLightUniform>>),
+    BaseLight((Arc<Mutex<BaseLightUniform>>, Arc<Light>)),
+    Light(Arc<Light>),
+}
+
 struct PhongMaterialSceneSharedData {
-    lights: Vec<Arc<Light>>,
+    lights_uniforms: Vec<LightUniformHolder>,
     lights_buffer: Vec<wgpu::Buffer>,
     variants_base: Vec<&'static str>,
     variants_add: Vec<Vec<&'static str>>,
@@ -144,6 +150,12 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToBorder,
+            address_mode_v: wgpu::AddressMode::ClampToBorder,
+            address_mode_w: wgpu::AddressMode::ClampToBorder,
+            border_color: Some(wgpu::SamplerBorderColor::OpaqueWhite),
+            compare: Some(wgpu::CompareFunction::LessEqual),
+
             ..Default::default()
         }));
 
@@ -187,7 +199,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         };
 
         let mut scene_shared = PhongMaterialSceneSharedData {
-            lights: vec![],
+            lights_uniforms: vec![],
             lights_buffer: vec![],
             variants_base: vec![],
             variants_add: vec![],
@@ -201,40 +213,55 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
 
         if has_direct_light {
             variants_base.push("DIRECT_LIGHT");
-            scene_shared.lights.push(lights.direct_light().clone());
+            scene_shared
+                .lights_uniforms
+                .push(LightUniformHolder::BaseLight((
+                    lights.base_uniform(),
+                    lights.direct_light().clone(),
+                )));
+            if lights.direct_light().shadow_config().pcf {
+                variants_base.push("SHADOW_PCF");
+            }
+        } else {
+            scene_shared
+                .lights_uniforms
+                .push(LightUniformHolder::Base(lights.base_uniform()));
         }
 
         scene_shared.variants_base = variants_base;
 
         for light in lights.extra_lights() {
-            scene_shared.lights.push(light.clone());
+            scene_shared
+                .lights_uniforms
+                .push(LightUniformHolder::Light(light.clone()));
             let tag = match light.as_ref() {
                 Light::Spot(s) => "SPOT_LIGHT",
                 Light::Point(p) => "POINT_LIGHT",
                 _ => panic!(),
             };
-            variants_add.push(vec![tag]);
+            let mut res = vec![tag];
+            if light.shadow_config().pcf {
+                res.push("SHADOW_PCF");
+            }
+            variants_add.push(res);
         }
 
-        for (index, light) in scene_shared.lights.iter().enumerate() {
-            let mut data = light.light_uniform();
-            if has_direct_light && index == 0 {
-                let mut data2 = lights.base_uniform();
-                data2.write_all(&data);
-                data = data2;
-            }
+        for (index, light) in scene_shared.lights_uniforms.iter().enumerate() {
+            let len = match &light {
+                LightUniformHolder::Base(b) => lights.base_uniform_len(),
+                LightUniformHolder::BaseLight((b, l)) => {
+                    lights.base_uniform_len() + l.light_uniform_len()
+                }
+                LightUniformHolder::Light(l) => l.light_uniform_len(),
+            };
             scene_shared
                 .lights_buffer
-                .push(
-                    gpu.device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("light uniform"),
-                            // size: data.len() as u64,
-                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
-                            contents: &data,
-                            // mapped_at_creation: false,
-                        }),
-                );
+                .push(gpu.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("light uniform"),
+                    size: len as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+                    mapped_at_creation: false,
+                }));
         }
 
         scene_shared.variants_add = variants_add;
@@ -272,12 +299,16 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
 
         base_pass.async_execute(Arc::new(Mutex::new(base::PhongMaterialBaseRenderer {
             shared: shared.clone(),
-            has_shadow_pass: shadow_pipeline.is_some() & has_direct_light,
+            has_shadow_pass: shadow_pipeline.is_some()
+                && has_direct_light
+                && lights.direct_light().shadow_config().cast_shadow,
             shadow_map_sampler: shadow_sampler.clone(),
             shadow_map_binding: None,
+            has_direct_light: has_direct_light,
             shadow_map_id: shadow_map_id.clone(),
         })));
         g.add_render_pass(base_pass);
+        shadow_map_id = ShadowMap::BuiltIn(gpu.default_shadow_texture());
 
         for (index, light) in lights.extra_lights().iter().enumerate() {
             let mut add_pass = RenderPassBuilder::new(format!("phong forward add pass {}", index));
@@ -290,7 +321,6 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             if let Some(res) = res {
                 add_pass.read_texture(res);
                 shadow_map_id = ShadowMap::PreFrame(res);
-                add_pass.read_texture(res);
             }
 
             // add pass
@@ -302,6 +332,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 shadow_map_binding: None,
                 shadow_map_sampler: shadow_sampler.clone(),
                 shadow_map_id: shadow_map_id.clone(),
+                has_shadow_pass: light.shadow_config().cast_shadow,
             })));
 
             g.add_render_pass(add_pass);
@@ -343,6 +374,11 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
         ins = ins.set_depth(depth_format, |depth: &mut _| {
             depth.depth_compare = wgpu::CompareFunction::Less;
             depth.depth_write_enabled = true;
+            depth.bias = wgpu::DepthBiasState {
+                constant: 1,
+                slope_scale: 0.2f32,
+                clamp: 0.5f32,
+            }
         });
         instances.push(ins);
         config.push(ResolvePipelineConfig {
@@ -351,6 +387,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
         });
 
         for add in &self.scene_shared.variants_add {
+            log::info!("create phong material render with add pass pipeline");
             let mut variants_add2 = variants_add.clone();
             variants_add2.extend_from_slice(add);
 
@@ -366,8 +403,8 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
                 ColorTargetBuilder::new(gpu.surface_format())
                     .set_blender(wgpu::BlendState {
                         color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Src,
-                            dst_factor: wgpu::BlendFactor::Dst,
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
                             operation: wgpu::BlendOperation::Add,
                         },
                         alpha: wgpu::BlendComponent::REPLACE,
@@ -377,8 +414,13 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
             let depth_format = wgpu::TextureFormat::Depth32Float;
             ins = ins.set_primitive(|p: &mut _| *p = *material.primitive());
             ins = ins.set_depth(depth_format, |depth: &mut _| {
-                depth.depth_compare = wgpu::CompareFunction::Less;
-                depth.depth_write_enabled = true;
+                depth.depth_compare = wgpu::CompareFunction::Equal;
+                depth.depth_write_enabled = false;
+                depth.bias = wgpu::DepthBiasState {
+                    constant: 1,
+                    slope_scale: 0.2f32,
+                    clamp: 0.5f32,
+                }
             });
             instances.push(ins);
             config.push(ResolvePipelineConfig {
@@ -450,7 +492,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
 
         for (light, buffer) in self
             .scene_shared
-            .lights
+            .lights_uniforms
             .iter()
             .zip(self.scene_shared.lights_buffer.iter())
         {

@@ -36,10 +36,6 @@ impl MainLogic {
             BasicMaterialFaceBuilder::new().texture(MaterialMap::PreVertex);
         let material = MaterialBuilder::default()
             .face(basic_material_builder.build())
-            .primitive(wgpu::PrimitiveState {
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            })
             .build(&scene.context());
 
         let obj = RenderObject::new(Box::new(geometry), material);

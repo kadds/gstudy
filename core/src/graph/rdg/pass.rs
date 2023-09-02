@@ -128,7 +128,11 @@ impl RenderTargetState {
                 }
             }
         }
-        None
+        return Some(ResourceOps {
+            load: None,
+            store: true,
+        });
+        // None
     }
 
     pub fn depth(

@@ -1,6 +1,6 @@
 use core::{
     scene::Camera,
-    types::{Color, Vec2f, Vec3f, Vec4f},
+    types::{Color, Mat4x4f, Vec2f, Vec3f, Vec4f},
     util::{angle2rad, any_as_u8_slice},
 };
 use std::sync::{Arc, Mutex};
@@ -10,20 +10,23 @@ pub struct ShadowConfig {
     pub cast_shadow: bool,
     pub size: Vec2f,
     pub offset: f32,
+    pub pcf: bool,
 }
 
 impl Default for ShadowConfig {
     fn default() -> Self {
         Self {
-            cast_shadow: true,
+            cast_shadow: false,
             size: Vec2f::new(1024f32, 1024f32),
             offset: 0.01f32,
+            pcf: false,
         }
     }
 }
 
 pub trait TLight {
     fn light_uniform(&self) -> Vec<u8>;
+    fn light_uniform_len(&self) -> usize;
     fn shadow_uniform(&self) -> Vec<u8>;
     fn shadow_config(&self) -> &ShadowConfig;
 }
@@ -40,6 +43,14 @@ impl TLight for Light {
             Light::Direct(d) => d.light_uniform(),
             Light::Spot(s) => s.light_uniform(),
             Light::Point(p) => p.light_uniform(),
+        }
+    }
+
+    fn light_uniform_len(&self) -> usize {
+        match self {
+            Light::Direct(d) => d.light_uniform_len(),
+            Light::Spot(s) => s.light_uniform_len(),
+            Light::Point(p) => p.light_uniform_len(),
         }
     }
 
@@ -63,9 +74,10 @@ impl TLight for Light {
 #[repr(C)]
 struct DirectLightUniform {
     color: Vec3f,
-    _a: f32,
+    size_x: f32,
     dir: Vec3f,
-    _b: f32,
+    size_y: f32,
+    vp: Mat4x4f,
 }
 
 #[repr(C)]
@@ -74,16 +86,33 @@ struct PointLightUniform {
     _a: f32,
     pos: Vec3f,
     _b: f32,
+    vp: Mat4x4f,
 }
 
 #[repr(C)]
 struct SpotLightUniform {
+    vp: Mat4x4f,
     color: Vec3f,
-    _a: f32,
+    size_x: f32,
     pos: Vec3f,
-    cutoff: f32,
+    size_y: f32,
     dir: Vec3f,
+    placement: f32,
+    cutoff: f32,
     cutoff_outer: f32,
+    placement2: f32,
+    placement3: f32,
+}
+
+#[repr(C)]
+pub struct BaseLightUniform {
+    ambient: Vec4f,
+}
+
+impl BaseLightUniform {
+    pub fn as_bytes(&self) -> &[u8] {
+        any_as_u8_slice(self)
+    }
 }
 
 pub struct DirectLight {
@@ -97,11 +126,15 @@ impl TLight for DirectLight {
         let dir = (self.camera.to() - self.camera.from()).normalize();
         let u = DirectLightUniform {
             color: Vec3f::new(self.color.x, self.color.y, self.color.z),
-            _a: 0f32,
+            size_x: self.shadow.size.x,
             dir: dir,
-            _b: 0f32,
+            size_y: self.shadow.size.y,
+            vp: self.camera.vp(),
         };
         any_as_u8_slice(&u).to_owned()
+    }
+    fn light_uniform_len(&self) -> usize {
+        std::mem::size_of::<DirectLightUniform>()
     }
 
     fn shadow_uniform(&self) -> Vec<u8> {
@@ -127,8 +160,12 @@ impl TLight for PointLight {
             _a: 0f32,
             pos: self.pos,
             _b: 0f32,
+            vp: self.camera.vp(),
         };
         any_as_u8_slice(&u).to_owned()
+    }
+    fn light_uniform_len(&self) -> usize {
+        std::mem::size_of::<PointLightUniform>()
     }
     fn shadow_uniform(&self) -> Vec<u8> {
         self.camera.uniform_3d()
@@ -152,13 +189,22 @@ impl TLight for SpotLight {
     fn light_uniform(&self) -> Vec<u8> {
         let u = SpotLightUniform {
             color: Vec3f::new(self.color.x, self.color.y, self.color.z),
-            _a: 0f32,
+            size_x: self.shadow.size.x,
+            size_y: self.shadow.size.y,
+            placement: 0f32,
             pos: self.pos,
             cutoff: self.cutoff,
             dir: self.dir,
             cutoff_outer: self.cutoff_outer,
+            vp: self.camera.vp(),
+            placement2: 0f32,
+            placement3: 0f32,
         };
         any_as_u8_slice(&u).to_owned()
+    }
+
+    fn light_uniform_len(&self) -> usize {
+        std::mem::size_of::<SpotLightUniform>()
     }
 
     fn shadow_uniform(&self) -> Vec<u8> {
@@ -173,15 +219,17 @@ impl TLight for SpotLight {
 struct SceneLightsInner {
     direct_light: Option<Arc<Light>>,
     extra_lights: Vec<Arc<Light>>,
-    ambient: Color,
+    base: Arc<Mutex<BaseLightUniform>>,
 }
 
 impl Default for SceneLightsInner {
     fn default() -> Self {
         Self {
-            ambient: Vec4f::new(0.2f32, 0.2f32, 0.2f32, 1.0f32),
             extra_lights: vec![],
             direct_light: None,
+            base: Arc::new(Mutex::new(BaseLightUniform {
+                ambient: Vec4f::new(0.2f32, 0.2f32, 0.2f32, 1.0f32),
+            })),
         }
     }
 }
@@ -201,7 +249,8 @@ impl Default for SceneLights {
 impl SceneLights {
     pub fn set_ambient(&self, ambient: Color) {
         let mut inner = self.inner.lock().unwrap();
-        inner.ambient = ambient;
+        let mut base = inner.base.lock().unwrap();
+        base.ambient = ambient;
     }
     pub fn set_direct_light(&self, light: DirectLight) {
         let mut inner = self.inner.lock().unwrap();
@@ -232,9 +281,13 @@ impl SceneLights {
         inner.direct_light.clone().unwrap()
     }
 
-    pub fn base_uniform(&self) -> Vec<u8> {
+    pub fn base_uniform_len(&self) -> usize {
+        std::mem::size_of::<BaseLightUniform>()
+    }
+
+    pub fn base_uniform(&self) -> Arc<Mutex<BaseLightUniform>> {
         let inner = self.inner.lock().unwrap();
-        any_as_u8_slice(&inner.ambient).to_owned()
+        inner.base.clone()
     }
 
     pub fn any_shadow(&self) -> bool {
@@ -281,9 +334,9 @@ impl DirectLightBuilder {
             color: Color::new(0.5f32, 0.5f32, 0.5f32, 1f32),
             position: Vec3f::new(0f32, 0f32, 0f32),
             dir: Vec3f::new(1f32, 0f32, 0f32),
-            shadow_rect: Vec4f::new(-10f32, 10f32, 10f32, -10f32),
-            near: 0.00001f32,
-            far: 30f32,
+            shadow_rect: Vec4f::new(-5f32, -5f32, 5f32, 5f32),
+            near: 0.0001f32,
+            far: 12f32,
             shadow: ShadowConfig::default(),
         }
     }
@@ -307,12 +360,14 @@ impl DirectLightBuilder {
         self
     }
 
-    pub fn build(mut self) -> DirectLight {
+    pub fn build(self) -> DirectLight {
         let c = Camera::new();
 
         c.make_orthographic(self.shadow_rect, self.near, self.far);
-        let to = self.position + self.dir;
-        c.look_at(self.position, to, Vec3f::new(0f32, 1f32, 0f32));
+        let distance = 10f32;
+        // let to = self.position + self.dir * distance;
+        let to = Vec3f::default();
+        c.look_at(self.position, to, Vec3f::new(1f32, 1f32, 0f32));
         DirectLight {
             color: self.color,
             camera: c,
@@ -392,8 +447,8 @@ impl SpotLightBuilder {
             color: Color::new(1f32, 1f32, 1f32, 1f32),
             position: Vec3f::zeros(),
             dir: Vec3f::new(0f32, -1f32, 0f32),
-            cutoff: angle2rad(90f32),
-            cutoff_outer: angle2rad(120f32),
+            cutoff: angle2rad(60f32),
+            cutoff_outer: angle2rad(90f32),
             shadow: ShadowConfig::default(),
         }
     }
@@ -426,9 +481,9 @@ impl SpotLightBuilder {
 
     pub fn build(self) -> SpotLight {
         let c = Camera::new();
-        // c.make_orthographic(self.shadow_rect, self.near, self.far);
-        // let to = self.position + self.dir;
-        // c.look_at(self.position, to, Vec3f::new(0f32, 1f32, 0f32));
+        c.make_perspective(1.0f32, angle2rad(90f32), 0.1f32, 40f32);
+        let to = Vec3f::default();
+        c.look_at(self.position, to, Vec3f::new(0f32, 1f32, 0f32));
         SpotLight {
             color: self.color,
             pos: self.position,
