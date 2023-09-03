@@ -76,13 +76,14 @@ impl PlaneMeshBuilder {
         let mut indices = vec![];
         for _ in 0..self.segments_x {
             let x_next = x_cur + dx;
+            z_cur = z_beg;
             for _ in 0..self.segments_z {
                 let z_next = z_cur + dz;
                 // add plane
-                vertices.push(Vec3f::new(-x_cur, 0f32, z_cur));
+                vertices.push(Vec3f::new(x_cur, 0f32, z_next));
+                vertices.push(Vec3f::new(x_next, 0f32, z_next));
                 vertices.push(Vec3f::new(x_cur, 0f32, z_cur));
-                vertices.push(Vec3f::new(-x_cur, 0f32, -z_cur));
-                vertices.push(Vec3f::new(x_cur, 0f32, -z_cur));
+                vertices.push(Vec3f::new(x_next, 0f32, z_cur));
 
                 indices.extend_from_slice(&[n, n + 1, n + 2, n + 3, n + 2, n + 1]);
                 n += 4;

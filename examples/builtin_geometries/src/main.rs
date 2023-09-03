@@ -49,6 +49,7 @@ impl MainLogic {
         {
             let mesh = PlaneMeshBuilder::default()
                 .enable_color(Color::new(0.8f32, 0.8f32, 0.8f32, 1.0f32))
+                .set_segments(4, 4)
                 .build();
 
             let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
@@ -64,7 +65,7 @@ impl MainLogic {
         {
             let mesh = UVSphereBuilder::default()
                 .enable_color(Color::new(0.2f32, 0.7f32, 0.7f32, 1f32))
-                .set_segments(32, 16)
+                .set_segments(48, 32)
                 .build();
 
             let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
