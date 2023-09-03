@@ -12,7 +12,7 @@ use core::{
 use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{App, AppEventProcessor};
-use geometry::{cube::CubeMeshBuilder, plane::PlaneMeshBuilder, uvsphere::UVSphereBuilder};
+use geometry::{mesh::CubeMeshBuilder, mesh::PlaneMeshBuilder, mesh::UVSphereBuilder};
 use phong_render::{
     light::{DirectLightBuilder, PointLightBuilder, SceneLights, ShadowConfig, SpotLightBuilder},
     material::PhongMaterialFaceBuilder,

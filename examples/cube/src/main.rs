@@ -11,7 +11,7 @@ use core::{
 use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{App, AppEventProcessor};
-use geometry::cube::CubeMeshBuilder;
+use geometry::mesh::CubeMeshBuilder;
 use window::{HardwareRenderPluginFactory, Msaa, MsaaResource, WindowPluginFactory};
 
 #[derive(Default)]

@@ -1,6 +1,5 @@
 use core::{
     mesh::{builder::MeshBuilder, Mesh},
-    scene::{Transform, TransformBuilder},
     types::{Color, Vec3f},
 };
 

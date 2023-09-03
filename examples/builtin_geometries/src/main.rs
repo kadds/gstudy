@@ -11,7 +11,7 @@ use core::{
 use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{App, AppEventProcessor};
-use geometry::{cube::CubeMeshBuilder, plane::PlaneMeshBuilder, uvsphere::UVSphereBuilder};
+use geometry::mesh::*;
 use window::{HardwareRenderPluginFactory, Msaa, MsaaResource, WindowPluginFactory};
 
 #[derive(Default)]
@@ -71,6 +71,22 @@ impl MainLogic {
                 TransformBuilder::new()
                     .translate(Vec3f::new(-3f32, 1.8f32, 1f32))
                     .scale(Vec3f::new(1.5f32, 1.5f32, 1.5f32))
+                    .build(),
+            );
+
+            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            scene.add(obj);
+        }
+
+        {
+            let mesh = CircleMeshBuilder::default()
+                .enable_color(Color::new(0.9f32, 0.7f32, 0.7f32, 1f32))
+                .set_segments(48)
+                .build();
+
+            let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
+                TransformBuilder::new()
+                    .translate(Vec3f::new(-2f32, 0.1f32, 0.4f32))
                     .build(),
             );
 
