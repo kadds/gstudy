@@ -1,12 +1,8 @@
 use core::{
     backends::wgpu_backend::{ClearValue, ResourceOps},
-    context::ResourceRef,
     graph::rdg::{
-        pass::{
-            DepthRenderTargetDescriptor, PreferAttachment, RenderPassExecutor,
-            RenderTargetDescriptor,
-        },
-        RenderPassBuilder, ResourceRegistry,
+        pass::{DepthRenderTargetDescriptor, PreferAttachment, RenderTargetDescriptor},
+        RenderPassBuilder,
     },
     render::{
         collector::{
@@ -16,15 +12,11 @@ use core::{
         resolve_pipeline, resolve_pipeline2, resolve_pipeline3, ColorTargetBuilder,
         PipelinePassResource, RenderDescriptorObject, ResolvePipelineConfig,
     },
-    types::{Mat4x4f, Vec2f, Vec3u},
+    types::Vec3u,
 };
-use std::{
-    io::Write,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use tshader::{LoadTechConfig, ShaderTech};
-use wgpu::util::DeviceExt;
 
 mod base;
 mod shadow;
@@ -86,12 +78,6 @@ fn copy_vertex_data(
     Some(())
 }
 
-#[derive(Clone)]
-pub enum ShadowMap {
-    BuiltIn(ResourceRef),
-    PreFrame(u32),
-}
-
 pub struct PhongMaterialRendererFactory {}
 
 impl PhongMaterialRendererFactory {
@@ -147,9 +133,9 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
     ) {
         let shadow_sampler = Arc::new(gpu.device().create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow_sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
             address_mode_u: wgpu::AddressMode::ClampToBorder,
             address_mode_v: wgpu::AddressMode::ClampToBorder,
             address_mode_w: wgpu::AddressMode::ClampToBorder,
@@ -219,6 +205,9 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                     lights.base_uniform(),
                     lights.direct_light().clone(),
                 )));
+            if lights.direct_light().shadow_config().cast_shadow {
+                variants_base.push("SHADOW");
+            }
             if lights.direct_light().shadow_config().pcf {
                 variants_base.push("SHADOW_PCF");
             }
@@ -240,6 +229,9 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 _ => panic!(),
             };
             let mut res = vec![tag];
+            if light.shadow_config().cast_shadow {
+                res.push("SHADOW");
+            }
             if light.shadow_config().pcf {
                 res.push("SHADOW_PCF");
             }
@@ -283,7 +275,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         let mut base_pass = RenderPassBuilder::new("phong forward base pass");
         base_pass.default_color_depth_render_target();
 
-        let mut shadow_map_id = ShadowMap::BuiltIn(gpu.default_shadow_texture());
+        let mut shadow_map_id = None;
         if has_direct_light {
             let res = self.add_shadow_pass_for_light(
                 lights.direct_light(),
@@ -293,7 +285,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             );
             if let Some(res) = res {
                 base_pass.read_texture(res);
-                shadow_map_id = ShadowMap::PreFrame(res);
+                shadow_map_id = Some(res)
             }
         }
 
@@ -305,10 +297,10 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             shadow_map_sampler: shadow_sampler.clone(),
             shadow_map_binding: None,
             has_direct_light: has_direct_light,
-            shadow_map_id: shadow_map_id.clone(),
+            shadow_map_id,
         })));
         g.add_render_pass(base_pass);
-        shadow_map_id = ShadowMap::BuiltIn(gpu.default_shadow_texture());
+        shadow_map_id = None;
 
         for (index, light) in lights.extra_lights().iter().enumerate() {
             let mut add_pass = RenderPassBuilder::new(format!("phong forward add pass {}", index));
@@ -320,7 +312,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             );
             if let Some(res) = res {
                 add_pass.read_texture(res);
-                shadow_map_id = ShadowMap::PreFrame(res);
+                shadow_map_id = Some(res)
             }
 
             // add pass
@@ -331,7 +323,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 index,
                 shadow_map_binding: None,
                 shadow_map_sampler: shadow_sampler.clone(),
-                shadow_map_id: shadow_map_id.clone(),
+                shadow_map_id: shadow_map_id,
                 has_shadow_pass: light.shadow_config().cast_shadow,
             })));
 

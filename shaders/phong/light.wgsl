@@ -68,20 +68,32 @@ fn recv_shadow_visibility(pos: vec3<f32>, normal: vec3<f32>, light_dir: vec3<f32
 }
 ///#endif
 
+fn get_attenuation(distance: f32, at: vec4<f32>) -> f32 {
+    if at.w < distance {
+        return 0.0;
+    }
+    let attenuation = at.x + at.y * distance + at.z * distance * distance;
+    return 2.0 / (attenuation + 1.0);
+}
+
 struct DirectLight {
     color: vec3<f32>,
     size_x: f32,
     direction: vec3<f32>,
     size_y: f32,
     vp: mat4x4<f32>,
+    attenuation: vec4<f32>,
+    intensity: vec4<f32>,
 }
 
 struct PointLight {
     color: vec3<f32>,
-    placement: f32,
+    size_x: f32,
     position: vec3<f32>,
-    placement2: f32,
+    size_y: f32,
     vp: mat4x4<f32>,
+    attenuation: vec4<f32>,
+    intensity: vec4<f32>,
 }
 
 struct SpotLight {
@@ -94,4 +106,7 @@ struct SpotLight {
     placement: f32,
     cutoff: f32,
     cutoff_outer: f32,
+    placement2: f32,
+    intensity: f32,
+    attenuation: vec4<f32>,
 }

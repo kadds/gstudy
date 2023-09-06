@@ -12,7 +12,7 @@ use std::{
 
 use crate::{light::TLight, material::PhongMaterialFace};
 
-use super::{copy_vertex_data, LightUniformHolder, PhongMaterialSharedData, ShadowMap};
+use super::{copy_vertex_data, LightUniformHolder, PhongMaterialSharedData};
 
 fn copy_light_uniform(light: &LightUniformHolder, buffer: &wgpu::Buffer, gpu: &WGPUResource) {
     let mut data = vec![];
@@ -56,7 +56,7 @@ pub struct PhongMaterialBaseRenderer {
     pub has_direct_light: bool,
     pub shadow_map_binding: Option<wgpu::BindGroup>,
     pub shadow_map_sampler: Arc<wgpu::Sampler>,
-    pub shadow_map_id: ShadowMap,
+    pub shadow_map_id: Option<u32>,
 }
 impl RenderPassExecutor for PhongMaterialBaseRenderer {
     fn prepare<'b>(
@@ -96,37 +96,37 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         }
 
         if self.has_direct_light {
-            // create shadow map bind_group
-            let mut layout = None;
+            if let Some(res_id) = &self.shadow_map_id {
+                // create shadow map bind_group
+                let mut layout = None;
 
-            for layer in &rs.list {
-                for indirect in &layer.material {
-                    let material = indirect.material.as_ref();
-                    let pipeline = shared.material_buffer_collector.get(&material);
-                    layout = Some(pipeline.0.get_bind_group_layout(3));
-                    break;
+                for layer in &rs.list {
+                    for indirect in &layer.material {
+                        let material = indirect.material.as_ref();
+                        let pipeline = shared.material_buffer_collector.get(&material);
+                        layout = Some(pipeline.0.get_bind_group_layout(3));
+                        break;
+                    }
                 }
-            }
-            let shadow_map = match &self.shadow_map_id {
-                ShadowMap::BuiltIn(res) => res.clone(),
-                ShadowMap::PreFrame(id) => context.registry.get(*id),
-            };
-            let mut entries = vec![];
-            entries.push(wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Sampler(self.shadow_map_sampler.as_ref()),
-            });
-            entries.push(wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(shadow_map.texture_view()),
-            });
+                let shadow_map = context.registry.get(*res_id);
 
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("phong shadow map bind group"),
-                entries: &entries,
-                layout: layout.as_ref().unwrap(),
-            });
-            self.shadow_map_binding = Some(bind_group)
+                let mut entries = vec![];
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(self.shadow_map_sampler.as_ref()),
+                });
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(shadow_map.texture_view()),
+                });
+
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("phong shadow map bind group"),
+                    entries: &entries,
+                    layout: layout.as_ref().unwrap(),
+                });
+                self.shadow_map_binding = Some(bind_group)
+            }
         }
     }
 
@@ -194,7 +194,7 @@ pub struct PhongMaterialAddRenderer {
     pub index: usize,
     pub shadow_map_binding: Option<wgpu::BindGroup>,
     pub shadow_map_sampler: Arc<wgpu::Sampler>,
-    pub shadow_map_id: ShadowMap,
+    pub shadow_map_id: Option<u32>,
     pub has_shadow_pass: bool,
 }
 
@@ -221,38 +221,37 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
         let rs = take_rs::<PhongMaterialFace>(&context).unwrap();
         let shared = self.shared.lock().unwrap();
 
-        let mut layout = None;
+        if let Some(res_id) = &self.shadow_map_id {
+            let mut layout = None;
 
-        for layer in &rs.list {
-            for indirect in &layer.material {
-                let material = indirect.material.as_ref();
-                let pipeline = shared
-                    .material_buffer_collector
-                    .get_pass(&material, self.index + 1);
-                layout = Some(pipeline.0.get_bind_group_layout(3));
-                break;
+            for layer in &rs.list {
+                for indirect in &layer.material {
+                    let material = indirect.material.as_ref();
+                    let pipeline = shared
+                        .material_buffer_collector
+                        .get_pass(&material, self.index + 1);
+                    layout = Some(pipeline.0.get_bind_group_layout(3));
+                    break;
+                }
             }
-        }
-        let shadow_map = match &self.shadow_map_id {
-            ShadowMap::BuiltIn(res) => res.clone(),
-            ShadowMap::PreFrame(id) => context.registry.get(*id),
-        };
-        let mut entries = vec![];
-        entries.push(wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::Sampler(self.shadow_map_sampler.as_ref()),
-        });
-        entries.push(wgpu::BindGroupEntry {
-            binding: 1,
-            resource: wgpu::BindingResource::TextureView(shadow_map.texture_view()),
-        });
+            let shadow_map = context.registry.get(*res_id);
+            let mut entries = vec![];
+            entries.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Sampler(self.shadow_map_sampler.as_ref()),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(shadow_map.texture_view()),
+            });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("phong shadow map bind group"),
-            entries: &entries,
-            layout: layout.as_ref().unwrap(),
-        });
-        self.shadow_map_binding = Some(bind_group)
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("phong shadow map bind group"),
+                entries: &entries,
+                layout: layout.as_ref().unwrap(),
+            });
+            self.shadow_map_binding = Some(bind_group)
+        }
     }
 
     fn render<'b>(

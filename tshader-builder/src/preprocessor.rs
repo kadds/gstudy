@@ -157,6 +157,12 @@ fn atomic_counter(
     })))
 }
 
+struct IfCondition {
+    disabled: bool,
+    enter: bool,
+    depth: u32,
+}
+
 #[derive(Default)]
 struct PreprocessorContext<'a> {
     config: PreprocessorConfig,
@@ -313,7 +319,7 @@ impl<'a> PreprocessorContext<'a> {
         let commands = r.commands.take().unwrap();
 
         let mut index = 0;
-        let mut if_stack = Vec::new();
+        let mut if_stack = Vec::<IfCondition>::new();
 
         for command in commands {
             match command {
@@ -328,12 +334,26 @@ impl<'a> PreprocessorContext<'a> {
                     }
                 }
                 Command::If(cond) => {
-                    let enter = match self.eval(&cond.cond)? {
+                    let mut enter = match self.eval(&cond.cond)? {
                         EvalVal::Bool(ok) => ok,
                         EvalVal::None => false,
                         _ => return Err(anyhow::anyhow!("if expr result type is not expected")),
                     };
-                    if_stack.push((enter, enter));
+                    let mut disabled = enter;
+
+                    if let Some(v) = if_stack.last() {
+                        if !v.enter {
+                            enter = false;
+                            disabled = true;
+                        }
+                    }
+
+                    log::debug!("enter [{}] if {:?}", enter, cond.cond);
+                    if_stack.push(IfCondition {
+                        enter,
+                        disabled,
+                        depth: 1,
+                    });
                 }
                 Command::ElseIf(cond) => {
                     let enter = match self.eval(&cond.cond)? {
@@ -341,41 +361,65 @@ impl<'a> PreprocessorContext<'a> {
                         EvalVal::None => false,
                         _ => return Err(anyhow::anyhow!("if expr result type is not expected")),
                     };
-                    if let Some(v) = if_stack.last_mut() {
-                        if !v.1 {
-                            v.0 = enter;
-                            if enter {
-                                v.1 = true;
-                            }
+                    if let Some(v) = if_stack.last() {
+                        log::debug!(
+                            "enter [{}] before {} elseif {:?}",
+                            enter,
+                            v.disabled,
+                            cond.cond
+                        );
+                        if !v.disabled {
+                            if_stack.push(IfCondition {
+                                disabled: enter,
+                                enter,
+                                depth: v.depth + 1,
+                            });
                         } else {
-                            // donot enter
-                            v.0 = false;
+                            // do not enter
+                            if_stack.push(IfCondition {
+                                disabled: true,
+                                enter: false,
+                                depth: v.depth + 1,
+                            });
                         }
                     } else {
                         return Err(anyhow::anyhow!("elseif condition is not expected"));
                     }
                 }
                 Command::Else(_cond) => {
-                    if let Some(v) = if_stack.last_mut() {
-                        if !v.1 {
-                            v.0 = true;
-                            v.1 = true;
+                    if let Some(v) = if_stack.last() {
+                        log::debug!("enter [true] before {} else", v.disabled);
+                        if !v.disabled {
+                            if_stack.push(IfCondition {
+                                disabled: true,
+                                enter: true,
+                                depth: v.depth + 1,
+                            });
                         } else {
                             // donot enter
-                            v.0 = false;
+                            if_stack.push(IfCondition {
+                                disabled: true,
+                                enter: false,
+                                depth: v.depth + 1,
+                            });
                         }
                     } else {
                         return Err(anyhow::anyhow!("else condition is not expected"));
                     }
                 }
                 Command::EndIf(_cond) => {
-                    if if_stack.pop().is_none() {
+                    if if_stack.len() == 0 {
                         return Err(anyhow::anyhow!("endif condition is not expected"));
+                    }
+                    let last_condition = if_stack.pop().unwrap();
+                    log::debug!("pop {} endif", last_condition.depth - 1);
+                    for _ in 0..(last_condition.depth - 1) {
+                        if_stack.pop();
                     }
                 }
                 Command::Raw(raw) => {
                     if let Some(v) = if_stack.last() {
-                        if !v.0 {
+                        if !v.enter {
                             continue;
                         }
                     }
@@ -383,7 +427,7 @@ impl<'a> PreprocessorContext<'a> {
                 }
                 Command::Decl(decl) => {
                     if let Some(v) = if_stack.last() {
-                        if !v.0 {
+                        if !v.enter {
                             continue;
                         }
                     }
@@ -396,7 +440,7 @@ impl<'a> PreprocessorContext<'a> {
                 }
                 Command::Assign(assign) => {
                     if let Some(v) = if_stack.last() {
-                        if !v.0 {
+                        if !v.enter {
                             continue;
                         }
                     }
@@ -409,7 +453,7 @@ impl<'a> PreprocessorContext<'a> {
                 }
                 Command::Reference(ident) => {
                     if let Some(v) = if_stack.last() {
-                        if !v.0 {
+                        if !v.enter {
                             continue;
                         }
                     }

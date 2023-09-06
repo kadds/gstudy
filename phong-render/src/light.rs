@@ -72,21 +72,50 @@ impl TLight for Light {
 }
 
 #[repr(C)]
+pub struct Attenuation {
+    pub constant: f32,
+    pub linear: f32,
+    pub exp: f32,
+    pub clip_distance: f32,
+}
+
+impl Default for Attenuation {
+    fn default() -> Self {
+        Self {
+            constant: 1.0f32,
+            linear: 0.25f32,
+            exp: 0.045f32,
+            clip_distance: 1000f32,
+        }
+    }
+}
+
+#[repr(C)]
 struct DirectLightUniform {
     color: Vec3f,
     size_x: f32,
     dir: Vec3f,
     size_y: f32,
     vp: Mat4x4f,
+    attenuation: Vec4f,
+    intensity: f32,
+    _a0: f32,
+    _a1: f32,
+    _a2: f32,
 }
 
 #[repr(C)]
 struct PointLightUniform {
     color: Vec3f,
-    _a: f32,
+    size_x: f32,
     pos: Vec3f,
-    _b: f32,
+    size_y: f32,
     vp: Mat4x4f,
+    attenuation: Vec4f,
+    intensity: f32,
+    _a0: f32,
+    _a1: f32,
+    _a2: f32,
 }
 
 #[repr(C)]
@@ -101,7 +130,8 @@ struct SpotLightUniform {
     cutoff: f32,
     cutoff_outer: f32,
     placement2: f32,
-    placement3: f32,
+    intensity: f32,
+    attenuation: Vec4f,
 }
 
 #[repr(C)]
@@ -119,6 +149,8 @@ pub struct DirectLight {
     color: Color,
     camera: Camera,
     shadow: ShadowConfig,
+    attenuation: Attenuation,
+    intensity: f32,
 }
 
 impl TLight for DirectLight {
@@ -130,6 +162,16 @@ impl TLight for DirectLight {
             dir: dir,
             size_y: self.shadow.size.y,
             vp: self.camera.vp(),
+            attenuation: Vec4f::new(
+                self.attenuation.constant,
+                self.attenuation.linear,
+                self.attenuation.exp,
+                self.attenuation.clip_distance,
+            ),
+            intensity: self.intensity,
+            _a0: 0f32,
+            _a1: 0f32,
+            _a2: 0f32,
         };
         any_as_u8_slice(&u).to_owned()
     }
@@ -151,16 +193,28 @@ pub struct PointLight {
     pos: Vec3f,
     camera: Camera,
     shadow: ShadowConfig,
+    attenuation: Attenuation,
+    intensity: f32,
 }
 
 impl TLight for PointLight {
     fn light_uniform(&self) -> Vec<u8> {
         let u = PointLightUniform {
             color: Vec3f::new(self.color.x, self.color.y, self.color.z),
-            _a: 0f32,
+            size_x: self.shadow.size.x,
             pos: self.pos,
-            _b: 0f32,
+            size_y: self.shadow.size.y,
             vp: self.camera.vp(),
+            attenuation: Vec4f::new(
+                self.attenuation.constant,
+                self.attenuation.linear,
+                self.attenuation.exp,
+                self.attenuation.clip_distance,
+            ),
+            intensity: self.intensity,
+            _a0: 0f32,
+            _a1: 0f32,
+            _a2: 0f32,
         };
         any_as_u8_slice(&u).to_owned()
     }
@@ -183,6 +237,8 @@ pub struct SpotLight {
     cutoff_outer: f32,
     camera: Camera,
     shadow: ShadowConfig,
+    attenuation: Attenuation,
+    intensity: f32,
 }
 
 impl TLight for SpotLight {
@@ -198,7 +254,13 @@ impl TLight for SpotLight {
             cutoff_outer: self.cutoff_outer,
             vp: self.camera.vp(),
             placement2: 0f32,
-            placement3: 0f32,
+            intensity: self.intensity,
+            attenuation: Vec4f::new(
+                self.attenuation.constant,
+                self.attenuation.linear,
+                self.attenuation.exp,
+                self.attenuation.clip_distance,
+            ),
         };
         any_as_u8_slice(&u).to_owned()
     }
@@ -248,7 +310,7 @@ impl Default for SceneLights {
 
 impl SceneLights {
     pub fn set_ambient(&self, ambient: Color) {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         let mut base = inner.base.lock().unwrap();
         base.ambient = ambient;
     }
@@ -326,6 +388,8 @@ pub struct DirectLightBuilder {
     near: f32,
     far: f32,
     shadow: ShadowConfig,
+    attenuation: Attenuation,
+    intensity: f32,
 }
 
 impl DirectLightBuilder {
@@ -338,6 +402,8 @@ impl DirectLightBuilder {
             near: 0.0001f32,
             far: 12f32,
             shadow: ShadowConfig::default(),
+            attenuation: Attenuation::default(),
+            intensity: 1f32,
         }
     }
     pub fn color(mut self, color: Color) -> Self {
@@ -360,11 +426,20 @@ impl DirectLightBuilder {
         self
     }
 
+    pub fn attenuation(mut self, attenuation: Attenuation) -> Self {
+        self.attenuation = attenuation;
+        self
+    }
+
+    pub fn intensity(mut self, intensity: f32) -> Self {
+        self.intensity = intensity;
+        self
+    }
+
     pub fn build(self) -> DirectLight {
         let c = Camera::new();
 
         c.make_orthographic(self.shadow_rect, self.near, self.far);
-        let distance = 10f32;
         // let to = self.position + self.dir * distance;
         let to = Vec3f::default();
         c.look_at(self.position, to, Vec3f::new(1f32, 1f32, 0f32));
@@ -372,6 +447,8 @@ impl DirectLightBuilder {
             color: self.color,
             camera: c,
             shadow: self.shadow,
+            attenuation: self.attenuation,
+            intensity: self.intensity,
         }
     }
 }
@@ -386,6 +463,8 @@ pub struct PointLightBuilder {
     color: Color,
     position: Vec3f,
     shadow: ShadowConfig,
+    attenuation: Attenuation,
+    intensity: f32,
 }
 
 impl PointLightBuilder {
@@ -394,6 +473,8 @@ impl PointLightBuilder {
             color: Color::new(1f32, 1f32, 1f32, 1f32),
             position: Vec3f::zeros(),
             shadow: ShadowConfig::default(),
+            attenuation: Attenuation::default(),
+            intensity: 1f32,
         }
     }
 
@@ -411,6 +492,15 @@ impl PointLightBuilder {
         self.shadow = config;
         self
     }
+    pub fn attenuation(mut self, attenuation: Attenuation) -> Self {
+        self.attenuation = attenuation;
+        self
+    }
+
+    pub fn intensity(mut self, intensity: f32) -> Self {
+        self.intensity = intensity;
+        self
+    }
 
     pub fn build(self) -> PointLight {
         let c = Camera::new();
@@ -422,6 +512,8 @@ impl PointLightBuilder {
             pos: self.position,
             camera: c,
             shadow: self.shadow,
+            attenuation: self.attenuation,
+            intensity: self.intensity,
         }
     }
 }
@@ -439,6 +531,8 @@ pub struct SpotLightBuilder {
     cutoff: f32,
     cutoff_outer: f32,
     shadow: ShadowConfig,
+    attenuation: Attenuation,
+    intensity: f32,
 }
 
 impl SpotLightBuilder {
@@ -450,6 +544,8 @@ impl SpotLightBuilder {
             cutoff: angle2rad(60f32),
             cutoff_outer: angle2rad(90f32),
             shadow: ShadowConfig::default(),
+            attenuation: Attenuation::default(),
+            intensity: 1f32,
         }
     }
 
@@ -479,6 +575,15 @@ impl SpotLightBuilder {
         self
     }
 
+    pub fn attenuation(mut self, attenuation: Attenuation) -> Self {
+        self.attenuation = attenuation;
+        self
+    }
+    pub fn intensity(mut self, intensity: f32) -> Self {
+        self.intensity = intensity;
+        self
+    }
+
     pub fn build(self) -> SpotLight {
         let c = Camera::new();
         c.make_perspective(1.0f32, angle2rad(90f32), 0.1f32, 40f32);
@@ -492,6 +597,8 @@ impl SpotLightBuilder {
             cutoff_outer: self.cutoff_outer,
             camera: c,
             shadow: self.shadow,
+            attenuation: self.attenuation,
+            intensity: self.intensity,
         }
     }
 }

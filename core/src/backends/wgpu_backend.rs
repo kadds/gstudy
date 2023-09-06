@@ -97,17 +97,12 @@ pub struct WGPUResource {
     instance: Arc<WGPUInstance>,
     context: Arc<RContext>,
     default_texture_id: ResourceRef,
-    default_shadow_texture_id: ResourceRef,
     default_sampler_id: ResourceRef,
 }
 
 impl WGPUResource {
     pub fn default_texture(&self) -> ResourceRef {
         self.default_texture_id.clone()
-    }
-
-    pub fn default_shadow_texture(&self) -> ResourceRef {
-        self.default_shadow_texture_id.clone()
     }
 
     pub fn default_sampler(&self) -> ResourceRef {
@@ -566,31 +561,6 @@ impl WGPUBackend {
             any_as_u8_slice_array(&texture_data),
         );
 
-        let mut texture_data2 = vec![];
-        texture_data2.push(u16::MAX);
-        texture_data2.push(u16::MAX);
-        texture_data2.push(u16::MAX);
-        texture_data2.push(u16::MAX);
-
-        let default_shadow_texture = device.create_texture_with_data(
-            &queue,
-            &wgpu::TextureDescriptor {
-                label: Some("default texture"),
-                size: wgpu::Extent3d {
-                    width: 2,
-                    height: 2,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Depth16Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-            any_as_u8_slice_array(&texture_data2),
-        );
-
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("default sampler"),
             address_mode_u: AddressMode::Repeat,
@@ -607,7 +577,6 @@ impl WGPUBackend {
         });
 
         let default_texture_id = context.register_texture(default_texture);
-        let default_shadow_texture_id = context.register_texture(default_shadow_texture);
         let default_sampler_id = context.register_sampler(default_sampler);
 
         // config first time
@@ -621,7 +590,6 @@ impl WGPUBackend {
             inner: WGPUResource {
                 context,
                 default_texture_id,
-                default_shadow_texture_id,
                 default_sampler_id,
                 instance: Arc::new(WGPUInstance {
                     instance,

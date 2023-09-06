@@ -8,6 +8,7 @@ pub mod lathe;
 pub mod octahedron;
 pub mod plane;
 pub mod ring;
+pub mod skybox;
 pub mod tetrahedron;
 pub mod torus;
 pub mod torusknot;

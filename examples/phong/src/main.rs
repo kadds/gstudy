@@ -31,7 +31,7 @@ impl MainLogic {
             .diffuse(MaterialMap::PreVertex)
             .normal(MaterialMap::PreVertex)
             .specular(MaterialMap::Constant(Color::new(
-                0.8f32, 0.8f32, 0.8f32, 1f32,
+                0.7f32, 0.7f32, 0.7f32, 1f32,
             )))
             .shininess(4f32);
 
@@ -119,8 +119,9 @@ impl MainLogic {
 
         let light = DirectLightBuilder::new()
             .position(Vec3f::new(5f32, 5.8f32, 5f32))
-            .direction(Vec3f::new(-2f32, -2f32, -2f32))
-            .color(Color::new(0.7f32, 0.7f32, 0.62f32, 1f32))
+            .direction(Vec3f::new(-0f32, -2f32, -0f32))
+            .color(Color::new(0.5f32, 0.5f32, 0.5f32, 1f32))
+            .intensity(0.8f32)
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
                 pcf: true,
@@ -129,27 +130,28 @@ impl MainLogic {
             .build();
         lights.set_direct_light(light);
         // lights.set_ambient(Color::new(0.0f32, 0.0f32, 0.0f32, 1.0f32));
-        lights.set_ambient(Color::new(0.3f32, 0.3f32, 0.3f32, 1.0f32));
+        lights.set_ambient(Color::new(0.2f32, 0.2f32, 0.2f32, 1.0f32));
 
         let point_light = PointLightBuilder::new()
-            .position(Vec3f::new(5f32, 5f32, 5f32))
-            .color(Color::new(0.5f32, 0.5f32, 0.62f32, 1f32))
+            .position(Vec3f::new(2f32, 4f32, -4f32))
+            .color(Color::new(0.67f32, 0.52f32, 0.51f32, 1f32))
+            .intensity(0.8f32)
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
                 ..Default::default()
             })
             .build();
 
-        // lights.add_point_light(point_light);
+        lights.add_point_light(point_light);
 
         let spot_light = SpotLightBuilder::new()
-            .position(Vec3f::new(-5f32, 6f32, -5f32))
+            .position(Vec3f::new(-5f32, 4f32, -5f32))
             .direction(Vec3f::new(0.2f32, -0.4f32, 0.2f32))
             .cutoff(angle2rad(20f32), angle2rad(28f32))
-            .color(Color::new(0.78f32, 0.78f32, 0.65f32, 1f32))
+            .color(Color::new(0.51f32, 0.44f32, 0.7f32, 1f32))
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
-                pcf: true,
+                pcf: false,
                 ..Default::default()
             })
             .build();

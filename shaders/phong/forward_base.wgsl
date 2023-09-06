@@ -47,7 +47,7 @@ struct VertexOutput {
 ///#if UV
     @location(#{POSITION_VERTEX_OUTPUT}) uv: vec2<f32>,
 ///#endif
-///#if DIRECT_LIGHT
+///#if SHADOW
     @location(#{POSITION_VERTEX_OUTPUT}) shadow_position: vec3<f32>,
 ///#endif
     @builtin(position) position: vec4<f32>,
@@ -86,7 +86,7 @@ struct BaseLightUniform {
 @group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_emission: texture_2d<f32>;
 ///#endif
 
-///#if DIRECT_LIGHT
+///#if SHADOW
 @group(3) @binding(0) var shadow_sampler: sampler_comparison;
 @group(3) @binding(1) var shadow_map: texture_depth_2d;
 ///#endif
@@ -109,7 +109,7 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 ///#if UV
     output.uv = input.uv;
 ///#endif
-///#if DIRECT_LIGHT
+///#if SHADOW
     let pos_camera = light_uniform.direct.vp * (object.model * vec4<f32>(input.position, 1.0));
     let pos_camera_norm = pos_camera.xyz / pos_camera.w;
     let p = pos_camera_norm.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
@@ -139,10 +139,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     var color = vec3<f32>(0.0, 0.0, 0.0);
 
 ///#if DIRECT_LIGHT
+    let intensity = light_uniform.direct.intensity.x;
     var light: LightInfo;
     light.dir = light_uniform.direct.direction;
     light.color = light_uniform.direct.color;
-    color += diffuse(obj, light);
+    color += diffuse(obj, light) * intensity;
 ///#if SPECULAR_VERTEX
     obj.color = input.specular;
 ///#elseif SPECULAR_CONSTANT
@@ -159,7 +160,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     color += material_uniform.emissive;
 ///#endif
 
-///#if DIRECT_LIGHT
+///#if SHADOW
     let size = vec2<f32>(light_uniform.direct.size_x, light_uniform.direct.size_y);
     let shadow = recv_shadow_visibility(input.shadow_position, 
         obj.normal, light.dir,

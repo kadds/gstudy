@@ -42,7 +42,9 @@ struct VertexOutput {
     @location(#{POSITION_VERTEX_OUTPUT}) uv: vec2<f32>,
 ///#endif
     @location(#{POSITION_VERTEX_OUTPUT}) raw_position: vec3<f32>,
+///#if SHADOW
     @location(#{POSITION_VERTEX_OUTPUT}) shadow_position: vec3<f32>,
+///#endif
     @invariant  @builtin(position) position: vec4<f32>,
 };
 
@@ -75,8 +77,10 @@ struct AddLightUniform {
 @group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_specular: texture_2d<f32>;
 ///#endif
 
+///#if SHADOW
 @group(3) @binding(0) var shadow_sampler: sampler_comparison;
 @group(3) @binding(1) var shadow_map: texture_depth_2d;
+///#endif
 
 var<push_constant> object: Object;
 
@@ -98,9 +102,11 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 ///#elseif SPOT_LIGHT
     let pos_camera = light_uniform.spot.vp * (object.model * vec4<f32>(input.position, 1.0));
 ///#endif
+///#if SHADOW
     let pos_camera_norm = pos_camera.xyz / pos_camera.w;
     let p = pos_camera_norm.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     output.shadow_position = vec3<f32>(p.x, p.y, pos_camera_norm.z);
+///#endif
     output.raw_position = (object.model * vec4<f32>(input.position, 1.0)).xyz;
 
     return output;
@@ -124,14 +130,22 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     var color = vec3<f32>(0.0, 0.0, 0.0);
 
     var light: LightInfo;
+    var intensity = 1.0;
+    var attenuation: vec4<f32>;
 ///#if POINT_LIGHT
-    light.dir = input.position.xyz - light_uniform.point.position;
+    let distance = length(input.raw_position - light_uniform.point.position);
+    light.dir = normalize(input.raw_position - light_uniform.point.position);
     light.color = light_uniform.point.color;
+    intensity = light_uniform.point.intensity.x;
+    attenuation = light_uniform.point.attenuation;
 ///#elseif SPOT_LIGHT
+    let distance = length(input.raw_position - light_uniform.spot.position);
     light.dir = normalize(input.raw_position - light_uniform.spot.position);
     light.color = light_uniform.spot.color;
+    intensity = light_uniform.spot.intensity;
+    attenuation = light_uniform.spot.attenuation;
 ///#endif
-    color += diffuse(obj, light);
+    color += diffuse(obj, light) * intensity;
 
 ///#if SPECULAR_VERTEX
     obj.color = input.specular;
@@ -141,7 +155,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     obj.color = vec3<f32>(0.0, 0.0, 0.0);
 ///#endif
 
-    color += specular(obj, light, camera_uniform.dir, material_uniform.shininess);
+    color += specular(obj, light, camera_uniform.dir, material_uniform.shininess) * intensity;
 
 ///#if EMISSIVE_VERTEX
     color += input.emissive;
@@ -149,15 +163,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     color += material_uniform.emissive;
 ///#endif
 
+    var value = get_attenuation(distance, attenuation);
 ///#if POINT_LIGHT
+///#if SHADOW
     let size = vec2<f32>(light_uniform.point.size_x, light_uniform.point.size_y);
-    let shadow = recv_shadow_visibility(input.shadow_position, 
-        obj.normal, light.dir,
-        shadow_sampler, shadow_map, size);
+///#endif
+
 ///#elseif SPOT_LIGHT
 
     let theta = acos(dot(light.dir, light_uniform.spot.direction));
-    var value = 1.0;
     if theta > light_uniform.spot.cutoff_outer {
         value = 0.0; // shadow
     } else {
@@ -169,6 +183,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
         }
     }
 
+///#if SHADOW
     if value > 0.0 {
         let size = vec2<f32>(light_uniform.spot.size_x, light_uniform.spot.size_y);
         let shadow = recv_shadow_visibility(input.shadow_position, 
@@ -176,6 +191,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
             shadow_sampler, shadow_map, size);
         value *= shadow;
     }
+///#endif
 
 ///#endif
     color = color * value;
