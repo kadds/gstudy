@@ -564,14 +564,24 @@ fn resolve_single_pass<'a>(
             let mut ranges_size = Vec::new();
             let mut current = (0, 0);
             let mut offset = 0;
+            let mut has_instance_group_index = -1;
 
-            for (pos, format) in &pass.input_layout {
+            for (pos, (is_instance, format)) in &pass.input_layout {
                 if current.0 != pos.group {
                     if current.1 < vertex_attrs.len() {
                         ranges_size.push((current.1..vertex_attrs.len(), offset));
                     }
                     offset = 0;
                     current = (pos.group, vertex_attrs.len());
+                }
+                if *is_instance {
+                    if has_instance_group_index < 0 {
+                        has_instance_group_index = pos.group as i32;
+                    }
+                } else {
+                    if has_instance_group_index >= 0 {
+                        panic!("instance exists in previous position");
+                    }
                 }
                 vertex_attrs.push(wgpu::VertexAttribute {
                     format: *format,
@@ -584,9 +594,16 @@ fn resolve_single_pass<'a>(
                 ranges_size.push((current.1..vertex_attrs.len(), offset));
             }
             for (range, size) in ranges_size {
+                let step_mode = if (vertex_buffer_layouts.len() as i32) < has_instance_group_index
+                    || has_instance_group_index < 0
+                {
+                    wgpu::VertexStepMode::Vertex
+                } else {
+                    wgpu::VertexStepMode::Instance
+                };
                 vertex_buffer_layouts.push(wgpu::VertexBufferLayout {
                     array_stride: size as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
+                    step_mode,
                     attributes: &vertex_attrs[range],
                 });
             }

@@ -34,7 +34,7 @@ pub struct Pass {
     pub fs: Option<Shader>,
     pub cs: Option<Shader>,
 
-    pub input_layout: BTreeMap<ResourcePosition, wgpu::VertexFormat>,
+    pub input_layout: BTreeMap<ResourcePosition, (bool, wgpu::VertexFormat)>,
 
     pub constants: Vec<wgpu::PushConstantRange>,
     pub bind_layout: BTreeMap<ResourcePosition, wgpu::BindGroupLayoutEntry>,
@@ -223,9 +223,10 @@ impl ShaderTech {
 
     fn input_var_to_layouts(
         binding: naga::Binding,
+        name: &str,
         ty: &naga::Type,
         _module: &naga::Module,
-        layout: &mut BTreeMap<ResourcePosition, wgpu::VertexFormat>,
+        layout: &mut BTreeMap<ResourcePosition, (bool, wgpu::VertexFormat)>,
         new_group: &mut bool,
     ) -> anyhow::Result<()> {
         match binding {
@@ -248,14 +249,15 @@ impl ShaderTech {
                         && (size == naga::VectorSize::Quad || size == naga::VectorSize::Tri)
                     {
                         *new_group = true;
-                        layout.insert(ResourcePosition::new(0, 0), format);
+                        layout.insert(ResourcePosition::new(0, 0), (false, format));
                         return Ok(());
                     }
                 }
+                let is_instance = name.starts_with("instance");
                 if *new_group {
-                    layout.insert(ResourcePosition::new(1, location), format)
+                    layout.insert(ResourcePosition::new(1, location), (is_instance, format))
                 } else {
-                    layout.insert(ResourcePosition::new(0, location), format)
+                    layout.insert(ResourcePosition::new(0, location), (is_instance, format))
                 }
             }
         };
@@ -265,14 +267,21 @@ impl ShaderTech {
     fn inputs_to_layouts(
         args: &[naga::FunctionArgument],
         module: &naga::Module,
-        layout: &mut BTreeMap<ResourcePosition, wgpu::VertexFormat>,
+        layout: &mut BTreeMap<ResourcePosition, (bool, wgpu::VertexFormat)>,
     ) -> anyhow::Result<()> {
         let mut new_group = false;
 
         for arg in args {
             let ty = module.types.get_handle(arg.ty)?;
             if let Some(binding) = &arg.binding {
-                Self::input_var_to_layouts(binding.clone(), ty, module, layout, &mut new_group)?;
+                Self::input_var_to_layouts(
+                    binding.clone(),
+                    arg.name.as_ref().map(|v| v.as_str()).unwrap_or_default(),
+                    ty,
+                    module,
+                    layout,
+                    &mut new_group,
+                )?;
             } else {
                 match &ty.inner {
                     naga::TypeInner::Struct { members, span: _ } => {
@@ -281,7 +290,14 @@ impl ShaderTech {
                                 anyhow::anyhow!("not binding found at {:?}", ty.name)
                             })?;
                             let ty = module.types.get_handle(member.ty)?;
-                            Self::input_var_to_layouts(binding, ty, module, layout, &mut new_group)?
+                            Self::input_var_to_layouts(
+                                binding,
+                                member.name.as_ref().map(|v| v.as_str()).unwrap_or_default(),
+                                ty,
+                                module,
+                                layout,
+                                &mut new_group,
+                            )?
                         }
                     }
                     _ => {

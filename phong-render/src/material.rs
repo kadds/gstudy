@@ -131,6 +131,9 @@ impl PhongMaterialFaceBuilder {
                 variants.push("DIFFUSE_TEXTURE");
                 variants_add.push("DIFFUSE_TEXTURE");
             }
+            MaterialMap::Instance => {
+                panic!("diffuse instance is not supported");
+            }
         }
 
         match self.specular {
@@ -148,6 +151,9 @@ impl PhongMaterialFaceBuilder {
                 variants.push("SPECULAR_TEXTURE");
                 variants_add.push("SPECULAR_TEXTURE");
             }
+            MaterialMap::Instance => {
+                panic!("specular instance is not supported");
+            }
         }
 
         match self.normal {
@@ -160,6 +166,9 @@ impl PhongMaterialFaceBuilder {
             MaterialMap::Texture(_) => {
                 variants.push("NORMAL_TEXTURE");
                 variants_add.push("NORMAL_TEXTURE");
+            }
+            MaterialMap::Instance => {
+                panic!("normal instance is not supported");
             }
         }
 

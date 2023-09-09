@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     backends::wgpu_backend::WGPUResource,
     material::{Material, MaterialId},
-    mesh::Mesh,
+    mesh::{InstanceProperties, Mesh},
     scene::{Camera, SceneStorage},
 };
 
@@ -15,6 +15,8 @@ pub struct ObjectBuffer {
     pub index: Option<wgpu::Buffer>,
     pub vertex: wgpu::Buffer,
     pub vertex_properties: Option<wgpu::Buffer>,
+    pub instance_data: Option<wgpu::Buffer>,
+    pub instance_count: u32,
 }
 
 impl ObjectBuffer {
@@ -25,9 +27,11 @@ impl ObjectBuffer {
         with_properties: bool,
     ) {
         pass.set_vertex_buffer(0, self.vertex.slice(..));
+        let mut index = 1;
         if with_properties {
             if let Some(p) = &self.vertex_properties {
-                pass.set_vertex_buffer(1, p.slice(..));
+                pass.set_vertex_buffer(index, p.slice(..));
+                index += 1;
             }
         }
 
@@ -41,11 +45,16 @@ impl ObjectBuffer {
             }
         }
 
+        if let Some(instance) = &self.instance_data {
+            pass.set_vertex_buffer(index, instance.slice(..));
+            index += 1;
+        }
+
         // index
         if self.index.is_some() {
-            pass.draw_indexed(0..mesh.index_count().unwrap(), 0, 0..1);
+            pass.draw_indexed(0..mesh.index_count().unwrap(), 0, 0..self.instance_count);
         } else {
-            pass.draw(0..mesh.vertex_count() as u32, 0..1);
+            pass.draw(0..mesh.vertex_count() as u32, 0..self.instance_count);
         }
     }
     pub fn draw_no_properties<'a>(&'a self, mesh: &Mesh, pass: &mut wgpu::RenderPass<'a>) {
@@ -56,7 +65,12 @@ impl ObjectBuffer {
     }
 }
 
-fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> ObjectBuffer {
+fn create_static_object_buffer(
+    id: u64,
+    mesh: &Mesh,
+    instance: Option<&InstanceProperties>,
+    device: &wgpu::Device,
+) -> ObjectBuffer {
     let index = if let Some(index) = mesh.indices_view() {
         Some(
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -87,10 +101,29 @@ fn create_static_object_buffer(id: u64, mesh: &Mesh, device: &wgpu::Device) -> O
         None
     };
 
+    let (instance_data, count) = if let Some(ins) = &instance {
+        let view = ins.data.lock().unwrap();
+
+        (
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{} instance buffer", id)),
+                    contents: &view.view(),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            ),
+            view.count,
+        )
+    } else {
+        (None, 1)
+    };
+
     ObjectBuffer {
         index,
         vertex,
         vertex_properties,
+        instance_data,
+        instance_count: count as u32,
     }
 }
 
@@ -114,6 +147,7 @@ impl MeshBufferCollector {
         };
         let obj = obj.o();
         let mesh = obj.geometry().mesh();
+        let instance = obj.geometry().instance();
 
         // if obj.geometry().is_static() {
         //     self.inner.static_object_buffers.get_or(*id, |_| {
@@ -122,7 +156,7 @@ impl MeshBufferCollector {
         // } else {
         self.dynamic_object_buffers
             .entry(object_id)
-            .or_insert_with(|| create_static_object_buffer(object_id, &mesh, device));
+            .or_insert_with(|| create_static_object_buffer(object_id, &mesh, instance, device));
         // }
     }
 

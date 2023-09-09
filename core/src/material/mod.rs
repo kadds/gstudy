@@ -173,6 +173,7 @@ pub enum MaterialMap<T> {
     Constant(T),
     PreVertex,
     Texture(ResourceRef),
+    Instance,
 }
 
 impl<T> MaterialMap<T> {

@@ -1,5 +1,8 @@
 use core::{
-    mesh::{builder::MeshBuilder, Mesh},
+    mesh::{
+        builder::{MeshBuilder, MeshPropertiesBuilder, MeshPropertyType},
+        Mesh,
+    },
     types::{Color, Vec3f},
 };
 
@@ -44,14 +47,15 @@ impl UVSphereBuilder {
     }
 
     pub fn build(self) -> Mesh {
-        let mut builder = MeshBuilder::new();
-        let property = core::mesh::MeshPropertyType::new::<Vec3f>("normal_vertex");
+        let mut builder = MeshBuilder::default();
+        let mut properties_builder = MeshPropertiesBuilder::default();
+        let property = MeshPropertyType::new::<Vec3f>("normal_vertex");
         if self.normal {
-            builder.add_property(property);
+            properties_builder.add_property(property);
         }
-        let color_property = core::mesh::MeshPropertyType::new::<Color>("color");
+        let color_property = MeshPropertyType::new::<Color>("color");
         if self.color {
-            builder.add_property(color_property);
+            properties_builder.add_property(color_property);
         }
 
         let mut vertices = vec![];
@@ -106,14 +110,16 @@ impl UVSphereBuilder {
         builder.add_indices32(&indices);
 
         if self.normal {
-            builder.add_property_vertices(property, &normals);
+            properties_builder.add_property_data(property, &normals);
         }
 
         if self.color {
             let mut colors = vec![];
             colors.resize(vertices.len(), self.default_color);
-            builder.add_property_vertices(color_property, &colors);
+            properties_builder.add_property_data(color_property, &colors);
         }
+
+        builder.set_properties(properties_builder.build());
 
         builder.build().unwrap()
     }

@@ -367,9 +367,9 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
             depth.depth_compare = wgpu::CompareFunction::Less;
             depth.depth_write_enabled = true;
             depth.bias = wgpu::DepthBiasState {
-                constant: 1,
-                slope_scale: 0.2f32,
-                clamp: 0.5f32,
+                constant: 0,
+                slope_scale: 0.0f32,
+                clamp: 0.0f32,
             }
         });
         instances.push(ins);
@@ -409,9 +409,9 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
                 depth.depth_compare = wgpu::CompareFunction::Equal;
                 depth.depth_write_enabled = false;
                 depth.bias = wgpu::DepthBiasState {
-                    constant: 1,
-                    slope_scale: 0.2f32,
-                    clamp: 0.5f32,
+                    constant: 0,
+                    slope_scale: 0.0f32,
+                    clamp: 0.0f32,
                 }
             });
             instances.push(ins);

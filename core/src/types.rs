@@ -1,6 +1,7 @@
 use std::ops::Add;
 
 use nalgebra::{SMatrix, SimdPartialOrd, Vector2, Vector3, Vector4};
+use ordered_float::OrderedFloat;
 
 pub type Mat3x3f = SMatrix<f32, 3, 3>;
 pub type Mat4x4f = SMatrix<f32, 4, 4>;
@@ -46,9 +47,24 @@ pub trait Bound {
     fn in_frustum(&self, frustum: &Frustum) -> bool;
 }
 
+#[derive(Debug)]
 pub enum Boundary {
+    None,
     AABB(BoundBox),
     OBB,
+}
+
+impl Boundary {
+    pub fn distance(&self, pos: &Point3<f32>) -> OrderedFloat<f32> {
+        match self {
+            Boundary::None => OrderedFloat::<f32>(0f32),
+            Boundary::AABB(aabb) => {
+                let a = aabb.center().into();
+                OrderedFloat::<f32>(nalgebra::distance_squared(&a, pos))
+            }
+            Boundary::OBB => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]

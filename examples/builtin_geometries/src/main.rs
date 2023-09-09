@@ -12,7 +12,7 @@ use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{App, AppEventProcessor};
 use geometry::mesh::*;
-use window::{HardwareRenderPluginFactory, Msaa, MsaaResource, WindowPluginFactory};
+use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 
 #[derive(Default)]
 pub struct MainLogic {

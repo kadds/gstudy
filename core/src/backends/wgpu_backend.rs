@@ -1119,6 +1119,9 @@ impl GpuInputMainBuffer {
         data: &[u8],
     ) -> Range<u64> {
         let size = data.len() as u64;
+        if size == 0 {
+            return self.offset..self.offset;
+        }
 
         let mut bytes = self.stage.write_buffer(
             encoder,

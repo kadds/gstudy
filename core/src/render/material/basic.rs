@@ -110,14 +110,17 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
                     let obj = obj.o();
                     pass.push_debug_group(&format!("object {}", obj.name()));
                     let mesh = obj.geometry().mesh();
-                    let object_uniform = obj.geometry().transform();
-                    pass.set_push_constants(
-                        wgpu::ShaderStages::VERTEX,
-                        0,
-                        any_as_u8_slice(object_uniform.mat()),
-                    );
-
                     let b = self.inner.mesh_buffer_collector.get(&c, *id).unwrap();
+
+                    if b.instance_data.is_none() {
+                        let object_uniform = obj.geometry().transform();
+                        pass.set_push_constants(
+                            wgpu::ShaderStages::VERTEX,
+                            0,
+                            any_as_u8_slice(object_uniform.mat()),
+                        );
+                    }
+
                     b.draw(&mesh, &mut pass);
 
                     pass.pop_debug_group();

@@ -1,7 +1,10 @@
 use core::{
     context::RContext,
     material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
-    mesh::{builder::MeshBuilder, StaticGeometry},
+    mesh::{
+        builder::{MeshBuilder, MeshPropertiesBuilder, MeshPropertyType},
+        StaticGeometry,
+    },
     scene::{Camera, RenderObject, Scene},
     types::{Color, Size, Vec3f, Vec4f},
 };
@@ -14,16 +17,18 @@ pub struct MainLogic {}
 
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
-        let mut builder = MeshBuilder::new();
-        let property = core::mesh::MeshPropertyType::new::<Color>("color");
-        builder.add_property(property);
+        let mut builder = MeshBuilder::default();
+        let mut properties_builder = MeshPropertiesBuilder::default();
+        let property = MeshPropertyType::new::<Color>("color");
+        properties_builder.add_property(property);
+
         builder.add_position_vertices3(&[
             Vec3f::new(0f32, -0.5f32, 0f32),
             Vec3f::new(-0.7f32, 0.7f32, 0f32),
             Vec3f::new(0.7f32, 0.7f32, 0f32),
         ]);
         builder.add_indices32(&[0, 1, 2]);
-        builder.add_property_vertices(
+        properties_builder.add_property_data(
             property,
             &[
                 Vec4f::new(1f32, 0f32, 0f32, 1f32),
@@ -31,6 +36,7 @@ impl MainLogic {
                 Vec4f::new(0f32, 0f32, 1f32, 1f32),
             ],
         );
+        builder.set_properties(properties_builder.build());
 
         let mesh = builder.build().unwrap();
 

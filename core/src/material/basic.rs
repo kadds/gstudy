@@ -46,6 +46,7 @@ pub struct BasicMaterialFace {
     pub(crate) texture: MaterialMap<Color>,
     pub(crate) sampler: Option<ResourceRef>,
     pub(crate) alpha_test: Option<f32>,
+    pub(crate) instance: bool,
 
     parameter: BasicMaterialParameter,
 }
@@ -94,6 +95,7 @@ impl MaterialFace for BasicMaterialFace {
 #[derive(Default, Clone, Debug)]
 pub struct BasicMaterialFaceBuilder {
     alpha_test: Option<f32>,
+    instance: bool,
     sampler: Option<ResourceRef>,
     texture: MaterialMap<Color>,
 }
@@ -104,6 +106,10 @@ impl BasicMaterialFaceBuilder {
             alpha_test: None,
             ..Default::default()
         }
+    }
+    pub fn instance(mut self) -> Self {
+        self.instance = true;
+        self
     }
     pub fn texture(mut self, texture: MaterialMap<Color>) -> Self {
         self.texture = texture;
@@ -166,10 +172,27 @@ impl BasicMaterialFaceBuilder {
                     BasicMaterialParameter::Default(Parameter {})
                 }
             }
+            MaterialMap::Instance => {
+                if !self.instance {
+                    panic!("instance required")
+                }
+                variants.push("CONST_COLOR_INSTANCE");
+                if let Some(a) = self.alpha_test {
+                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
+                        alpha: a,
+                        ..Default::default()
+                    })
+                } else {
+                    BasicMaterialParameter::Default(Parameter {})
+                }
+            }
         };
 
         if self.alpha_test.is_some() {
             variants.push("ALPHA_TEST");
+        }
+        if self.instance {
+            variants.push("INSTANCE");
         }
 
         BasicMaterialFace {
@@ -179,6 +202,7 @@ impl BasicMaterialFaceBuilder {
             sampler: self.sampler,
             alpha_test: self.alpha_test,
             parameter,
+            instance: self.instance,
         }
     }
 }

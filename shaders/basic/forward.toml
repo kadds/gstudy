@@ -9,7 +9,7 @@ shaders = ["vs", "fs"]
 [pass.variants]
 excludes = []
 exclusives = []
-unit = ["TEXTURE", "VERTEX_COLOR", "ALPHA_TEST", "CONST_COLOR"]
+unit = ["TEXTURE", "VERTEX_COLOR", "ALPHA_TEST", "CONST_COLOR", "CONST_COLOR_INSTANCE", "INSTANCE"]
 
 
 [tech]

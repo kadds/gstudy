@@ -99,7 +99,7 @@ impl Sorter for DistanceSorter {
 
     fn sort_and_cull(&mut self) -> Vec<u64> {
         if let Some(c) = &self.camera {
-            let camera_pos = c.from();
+            let camera_pos = c.from().into();
             // cull first
             let frustum = c.frustum_worldspace();
 
@@ -113,22 +113,12 @@ impl Sorter for DistanceSorter {
                     if !o.visiable() {
                         None
                     } else {
-                        if let Some(aabb) = o.geometry().aabb() {
-                            if !aabb.in_frustum(&frustum) {
-                                return None;
-                            }
-                        }
-                        Some((
-                            o.geometry().aabb().map_or_else(
-                                || OrderedFloat(0f32),
-                                |aabb| {
-                                    let a = aabb.center().into();
-                                    let b = camera_pos.into();
-                                    OrderedFloat::<f32>(nalgebra::distance_squared(&a, &b))
-                                },
-                            ),
-                            v,
-                        ))
+                        // if let Some(aabb) = o.geometry().boundary() {
+                        //     if !aabb.in_frustum(&frustum) {
+                        //         return None;
+                        //     }
+                        // }
+                        Some((o.geometry().boundary().distance(&camera_pos), v))
                     }
                 })
                 .collect();

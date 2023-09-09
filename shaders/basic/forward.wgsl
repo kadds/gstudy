@@ -17,6 +17,15 @@ struct VertexInput {
 ///#if VERTEX_TEX
     @location(#{POSITION_VERTEX_INPUT}) uv: vec2<f32>,
 ///#endif
+///#if INSTANCE
+    @location(#{POSITION_VERTEX_INPUT}) instance_transform0: vec4<f32>,
+    @location(#{POSITION_VERTEX_INPUT}) instance_transform1: vec4<f32>,
+    @location(#{POSITION_VERTEX_INPUT}) instance_transform2: vec4<f32>,
+    @location(#{POSITION_VERTEX_INPUT}) instance_transform3: vec4<f32>,
+///#if CONST_COLOR_INSTANCE
+    @location(#{POSITION_VERTEX_INPUT}) instance_color: vec4<f32>,
+///#endif
+///#endif
 }
 
 struct VertexOutput {
@@ -54,14 +63,27 @@ struct MaterialUniform {
 @group(1) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_color: texture_2d<f32>;
 ///#endif
 
+///#if INSTANCE
+///#else
 var<push_constant> object: Object;
+///#endif
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput{
     var output: VertexOutput;
+///#if INSTANCE
+    let transform = mat4x4<f32>(input.instance_transform0, input.instance_transform1, 
+        input.instance_transform2, input.instance_transform3);
+
+    output.position = camera_uniform.vp * (transform * vec4<f32>(input.position, 1.0));
+///#else
     output.position = camera_uniform.vp * (object.model * vec4<f32>(input.position, 1.0));
+///#endif
+
 ///#if CONST_COLOR
     output.color = material_uniform.color;
+///#elseif CONST_COLOR_INSTANCE
+    output.color = input.instance_color;
 ///#else
     output.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
 ///#endif
