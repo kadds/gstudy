@@ -134,7 +134,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
 
     #[profiling::function]
     fn cleanup<'b>(&'b mut self, context: RenderPassContext<'b>) {
-        let rs = take_rs::<BasicMaterialFace>(&context).unwrap();
+        let _rs = take_rs::<BasicMaterialFace>(&context).unwrap();
         self.inner.mesh_buffer_collector.finish();
     }
 }
@@ -145,8 +145,8 @@ pub struct BasicMaterialRendererFactory {}
 impl MaterialRendererFactory for BasicMaterialRendererFactory {
     fn setup(
         &self,
-        materials: &[Arc<Material>],
-        gpu: &WGPUResource,
+        _materials: &[Arc<Material>],
+        _gpu: &WGPUResource,
         g: &mut crate::graph::rdg::RenderGraphBuilder,
         setup_resource: &SetupResource,
     ) {

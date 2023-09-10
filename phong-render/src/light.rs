@@ -159,7 +159,7 @@ impl TLight for DirectLight {
         let u = DirectLightUniform {
             color: Vec3f::new(self.color.x, self.color.y, self.color.z),
             size_x: self.shadow.size.x,
-            dir: dir,
+            dir,
             size_y: self.shadow.size.y,
             vp: self.camera.vp(),
             attenuation: Vec4f::new(

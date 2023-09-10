@@ -276,7 +276,7 @@ impl ShaderTech {
             if let Some(binding) = &arg.binding {
                 Self::input_var_to_layouts(
                     binding.clone(),
-                    arg.name.as_ref().map(|v| v.as_str()).unwrap_or_default(),
+                    arg.name.as_deref().unwrap_or_default(),
                     ty,
                     module,
                     layout,
@@ -292,7 +292,7 @@ impl ShaderTech {
                             let ty = module.types.get_handle(member.ty)?;
                             Self::input_var_to_layouts(
                                 binding,
-                                member.name.as_ref().map(|v| v.as_str()).unwrap_or_default(),
+                                member.name.as_deref().unwrap_or_default(),
                                 ty,
                                 module,
                                 layout,

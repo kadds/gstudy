@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    sync::{mpsc, Arc, Mutex},
+    sync::{mpsc, Arc},
 };
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    pass::{PreferAttachment, RenderTargetDescriptor, RenderTargetState},
+    pass::{RenderTargetDescriptor, RenderTargetState},
     resource::*,
     ResourceRegistry,
 };
@@ -61,7 +61,7 @@ impl GraphBackend {
                     self.gpu.context().register_texture(tex)
                 }
             }
-            ResourceType::Buffer(b) => {
+            ResourceType::Buffer(_b) => {
                 // let buf = self.gpu.device().create_buffer(&wgpu::BufferDescriptor {
                 //     label: None,
                 //     size: b.size,

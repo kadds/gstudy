@@ -12,8 +12,8 @@ use core::{
         controller::{orbit::OrbitCameraController, CameraController},
         Camera, RenderObject, Scene, TransformBuilder,
     },
-    types::{Color, Mat4x4f, Quaternion, Size, Vec3f, Vec4f},
-    util::{angle2rad, rad2angle},
+    types::{Mat4x4f, Quaternion, Size, Vec3f, Vec4f},
+    util::rad2angle,
 };
 use std::{
     any::Any,
@@ -23,7 +23,7 @@ use std::{
 
 use app::{App, AppEventProcessor};
 use geometry::mesh::*;
-use nalgebra::Unit;
+
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 
 #[derive(Default)]

@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{
-    backends::wgpu_backend::ClearValue,
-    types::{Color, Vec3u},
-};
+use crate::{backends::wgpu_backend::ClearValue, types::Vec3u};
 
 pub type ResourceId = u32;
 pub const RT_COLOR_RESOURCE_ID: ResourceId = 0;

@@ -4,7 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 
 use crate::{
     types::{Rectu, Vec3f},
-    util::{any_as_u8_slice, any_as_u8_slice_array},
+    util::any_as_u8_slice,
 };
 
 use super::{Indices, Mesh, PositionVertices};

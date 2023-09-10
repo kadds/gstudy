@@ -1,5 +1,3 @@
-use petgraph::stable_graph::NodeIndex;
-
 pub enum Dependency {
     Noset,
     BeforeNode(String),

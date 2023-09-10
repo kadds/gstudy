@@ -33,7 +33,7 @@ impl RenderPassExecutor for ShadowRenderer {
         let mut shared = self.shared.lock().unwrap();
         copy_vertex_data(&mut shared, context, engine.device())?;
 
-        if self.cameras_bind_group.len() > 0 {
+        if !self.cameras_bind_group.is_empty() {
             let data = self.light.shadow_uniform();
             engine
                 .gpu()
@@ -46,10 +46,10 @@ impl RenderPassExecutor for ShadowRenderer {
     #[profiling::function]
     fn queue<'b>(
         &'b mut self,
-        context: core::graph::rdg::pass::RenderPassContext<'b>,
+        _context: core::graph::rdg::pass::RenderPassContext<'b>,
         device: &wgpu::Device,
     ) {
-        if self.cameras_bind_group.len() == 0 {
+        if self.cameras_bind_group.is_empty() {
             let uniform = self.light.shadow_uniform();
 
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -120,5 +120,5 @@ impl RenderPassExecutor for ShadowRenderer {
     }
 
     #[profiling::function]
-    fn cleanup<'b>(&'b mut self, context: core::graph::rdg::pass::RenderPassContext<'b>) {}
+    fn cleanup<'b>(&'b mut self, _context: core::graph::rdg::pass::RenderPassContext<'b>) {}
 }

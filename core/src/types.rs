@@ -110,7 +110,7 @@ impl BoundBox {
 }
 
 impl Bound for BoundBox {
-    fn in_frustum(&self, frustum: &Frustum) -> bool {
+    fn in_frustum(&self, _frustum: &Frustum) -> bool {
         true
     }
 }
@@ -165,7 +165,7 @@ impl BoundSphere {
 }
 
 impl Bound for BoundSphere {
-    fn in_frustum(&self, frustum: &Frustum) -> bool {
+    fn in_frustum(&self, _frustum: &Frustum) -> bool {
         true
     }
 }

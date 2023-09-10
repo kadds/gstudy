@@ -9,8 +9,8 @@ use core::{
             MaterialBufferInstantCollector, MaterialBufferInstantiation, MeshBufferCollector,
         },
         material::{take_rs, MaterialRendererFactory},
-        resolve_pipeline, resolve_pipeline2, resolve_pipeline3, ColorTargetBuilder,
-        PipelinePassResource, RenderDescriptorObject, ResolvePipelineConfig,
+        resolve_pipeline, resolve_pipeline3, ColorTargetBuilder, PipelinePassResource,
+        RenderDescriptorObject, ResolvePipelineConfig,
     },
     types::Vec3u,
 };
@@ -126,7 +126,7 @@ impl PhongMaterialRendererFactory {
 impl MaterialRendererFactory for PhongMaterialRendererFactory {
     fn setup(
         &self,
-        materials: &[std::sync::Arc<core::material::Material>],
+        _materials: &[std::sync::Arc<core::material::Material>],
         gpu: &core::backends::wgpu_backend::WGPUResource,
         g: &mut core::graph::rdg::RenderGraphBuilder,
         setup_resource: &core::render::material::SetupResource,
@@ -171,7 +171,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             });
 
             let shadow_pipeline = Arc::new(resolve_pipeline(
-                &gpu,
+                gpu,
                 &shadow_template,
                 ins,
                 &ResolvePipelineConfig {
@@ -224,8 +224,8 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 .lights_uniforms
                 .push(LightUniformHolder::Light(light.clone()));
             let tag = match light.as_ref() {
-                Light::Spot(s) => "SPOT_LIGHT",
-                Light::Point(p) => "POINT_LIGHT",
+                Light::Spot(_s) => "SPOT_LIGHT",
+                Light::Point(_p) => "POINT_LIGHT",
                 _ => panic!(),
             };
             let mut res = vec![tag];
@@ -238,10 +238,10 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             variants_add.push(res);
         }
 
-        for (index, light) in scene_shared.lights_uniforms.iter().enumerate() {
+        for (_index, light) in scene_shared.lights_uniforms.iter().enumerate() {
             let len = match &light {
-                LightUniformHolder::Base(b) => lights.base_uniform_len(),
-                LightUniformHolder::BaseLight((b, l)) => {
+                LightUniformHolder::Base(_b) => lights.base_uniform_len(),
+                LightUniformHolder::BaseLight((_b, l)) => {
                     lights.base_uniform_len() + l.light_uniform_len()
                 }
                 LightUniformHolder::Light(l) => l.light_uniform_len(),
@@ -296,7 +296,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 && lights.direct_light().shadow_config().cast_shadow,
             shadow_map_sampler: shadow_sampler.clone(),
             shadow_map_binding: None,
-            has_direct_light: has_direct_light,
+            has_direct_light,
             shadow_map_id,
         })));
         g.add_render_pass(base_pass);
@@ -323,7 +323,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
                 index,
                 shadow_map_binding: None,
                 shadow_map_sampler: shadow_sampler.clone(),
-                shadow_map_id: shadow_map_id,
+                shadow_map_id,
                 has_shadow_pass: light.shadow_config().cast_shadow,
             })));
 
@@ -351,7 +351,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
 
         let base_template = self
             .tech
-            .register_variant_pass(&gpu.device(), 0, &variants)
+            .register_variant_pass(gpu.device(), 0, &variants)
             .unwrap();
 
         let mut passes = vec![];
@@ -385,7 +385,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
 
             let add_template = self
                 .tech
-                .register_variant_pass(&gpu.device(), 1, &variants_add2)
+                .register_variant_pass(gpu.device(), 1, &variants_add2)
                 .unwrap();
 
             passes.push(add_template);
@@ -421,7 +421,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
             });
         }
 
-        resolve_pipeline3(&gpu, &passes, &instances, &config)
+        resolve_pipeline3(gpu, &passes, &instances, &config)
     }
 
     fn create_bind_group(
@@ -482,7 +482,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
         let mut bind_groups = vec![];
         bind_groups.push(Some(bind_group));
 
-        for (light, buffer) in self
+        for (_light, buffer) in self
             .scene_shared
             .lights_uniforms
             .iter()
@@ -493,7 +493,7 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
             light_entries.push(wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &buffer,
+                    buffer: buffer,
                     offset: 0,
                     size: None,
                 }),

@@ -1,12 +1,5 @@
-use core::{
-    context::RContext,
-    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder},
-    mesh::{builder::MeshBuilder, StaticGeometry},
-    scene::{Camera, RenderObject, Scene},
-    types::{Size, Vec3f, Vec4f},
-    util::any_as_u8_slice_array,
-};
-use std::{any::Any, sync::Arc};
+use core::{context::RContext, scene::Scene, types::Size};
+use std::any::Any;
 
 use app::{App, AppEventProcessor};
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
@@ -14,7 +7,7 @@ use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 pub struct MainLogic {}
 
 impl MainLogic {
-    fn on_startup(&mut self, scene: &core::scene::Scene) {}
+    fn on_startup(&mut self, _scene: &core::scene::Scene) {}
 }
 
 impl AppEventProcessor for MainLogic {

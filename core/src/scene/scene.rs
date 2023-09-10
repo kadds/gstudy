@@ -316,7 +316,7 @@ impl Scene {
         self.storage.clear();
     }
 
-    pub fn resize(&self, logical: &Size, view_size: &Size) {
+    pub fn resize(&self, _logical: &Size, view_size: &Size) {
         let aspect = view_size.x as f32 / view_size.y as f32;
         // self.ui_camera_ref().make_orthographic();
         let c = self.cameras.lock().unwrap();
@@ -332,7 +332,7 @@ impl Scene {
     }
 
     pub fn get_resource<T: 'static + Send + Sync>(&self) -> Option<Arc<T>> {
-        let mut s = self.attach_resources.lock().unwrap();
+        let s = self.attach_resources.lock().unwrap();
         let id = std::any::TypeId::of::<T>();
         s.get(&id).and_then(|v| v.clone().downcast::<T>().ok())
     }

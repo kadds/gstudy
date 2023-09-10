@@ -219,7 +219,7 @@ pub trait DynPass: Debug {
 
     fn name(&self) -> &str;
 
-    fn is_default_render_target(&self, id: ResourceId) -> bool {
+    fn is_default_render_target(&self, _id: ResourceId) -> bool {
         false
     }
 
@@ -304,7 +304,7 @@ impl DynPass for RenderPass {
         c.cleanup(context);
     }
 
-    fn is_default_render_target(&self, id: ResourceId) -> bool {
+    fn is_default_render_target(&self, _id: ResourceId) -> bool {
         self.render_targets
             .colors
             .iter()

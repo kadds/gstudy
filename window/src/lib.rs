@@ -323,5 +323,5 @@ impl LooperPlugin for WindowLooperPlugin {
 }
 
 impl AppEventProcessor for WindowPlugin {
-    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {}
+    fn on_event(&mut self, _context: &app::AppEventContext, _event: &dyn Any) {}
 }

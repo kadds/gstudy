@@ -16,9 +16,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{
-    statistics::Statistics, window::Window, CEvent, DEvent, Event, StatisticsResource, WEvent,
-};
+use crate::{statistics::Statistics, window::Window, CEvent, DEvent, Event, WEvent};
 
 pub struct LooperEventSource {
     event_proxy: EventLoopProxy<DEvent>,

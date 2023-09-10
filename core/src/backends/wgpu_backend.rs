@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     num::NonZeroU64,
     ops::{Not, Range},
     sync::{Arc, Mutex},
@@ -398,7 +398,7 @@ impl WGPUResource {
 fn request_optional_feature(
     adapter: &wgpu::Adapter,
     features: wgpu::Features,
-    limits: Limits,
+    _limits: Limits,
     minimal_features: wgpu::Features,
     minimal_limits: Limits,
 ) -> (Device, Queue) {
@@ -628,14 +628,14 @@ impl ClearValue {
     pub fn depth(&self) -> Option<f32> {
         match self {
             ClearValue::Depth(d) => Some(*d),
-            ClearValue::DepthAndStencil((d, s)) => Some(*d),
+            ClearValue::DepthAndStencil((d, _s)) => Some(*d),
             _ => None,
         }
     }
     pub fn stencil(&self) -> Option<u32> {
         match self {
             ClearValue::Stencil(s) => Some(*s),
-            ClearValue::DepthAndStencil((d, s)) => Some(*s),
+            ClearValue::DepthAndStencil((_d, s)) => Some(*s),
             _ => None,
         }
     }
@@ -970,7 +970,7 @@ impl SharedBuffers {
         }
     }
 
-    fn new_buffer(&mut self, gpu: &WGPUResource) {
+    fn new_buffer(&mut self, _gpu: &WGPUResource) {
         // self.buffers.push(gpu.device.create_buffer())
     }
 
@@ -1061,7 +1061,7 @@ impl GpuMainBuffer {
 pub struct NullBufferAccessor;
 
 impl<'a> BufferAccessor<'a> for NullBufferAccessor {
-    fn buffer_slice(&self, id: u64, range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
+    fn buffer_slice(&self, _id: u64, _range: Range<u64>) -> Option<wgpu::BufferSlice<'a>> {
         None
     }
 }

@@ -285,7 +285,7 @@ impl Camera {
 
     pub fn is_perspective(&self) -> bool {
         let inner = self.inner.lock().unwrap();
-        if let Project::Orthographic(o) = &inner.project_var {
+        if let Project::Orthographic(_o) = &inner.project_var {
             false
         } else {
             true
@@ -335,7 +335,7 @@ impl Camera {
         let mut inner = self.inner.lock().unwrap();
         match &mut inner.project_var {
             Project::Perspective(p) => p.fovy,
-            Project::Orthographic(o) => 0f32,
+            Project::Orthographic(_o) => 0f32,
         }
     }
 
@@ -343,7 +343,7 @@ impl Camera {
         let mut inner = self.inner.lock().unwrap();
         match &mut inner.project_var {
             Project::Perspective(p) => p.aspect,
-            Project::Orthographic(o) => 0f32,
+            Project::Orthographic(_o) => 0f32,
         }
     }
 

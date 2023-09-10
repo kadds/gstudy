@@ -140,7 +140,7 @@ impl MainLogic {
     }
     fn main_side(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         ui: &mut egui::Ui,
         container: &Container,
         fps: f32,

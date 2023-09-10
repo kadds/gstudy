@@ -1,15 +1,11 @@
 use crate::{scene::Transform, types::*, util::any_as_u8_slice_array};
 use std::{
-    cell::RefCell,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
 
 use self::{
-    builder::{
-        FieldOffset, InstancePropertiesBuilder, InstancePropertyType, MeshPropertyType,
-        PropertiesFrame, Property,
-    },
+    builder::{InstancePropertyType, MeshPropertyType, PropertiesFrame},
     intersect::{IntersectResult, Ray},
 };
 
@@ -116,7 +112,7 @@ impl Mesh {
         self.vertex_count
     }
 
-    pub fn apply(&mut self, transform: &Transform) {
+    pub fn apply(&mut self, _transform: &Transform) {
         // let mut tmp = Vec::new();
         // core::mem::swap(&mut tmp, &mut self.vertices);
 
@@ -184,7 +180,7 @@ impl Geometry for StaticGeometry {
         self.mesh.clone()
     }
 
-    fn intersect(&self, ray: Ray) -> IntersectResult {
+    fn intersect(&self, _ray: Ray) -> IntersectResult {
         todo!()
     }
 

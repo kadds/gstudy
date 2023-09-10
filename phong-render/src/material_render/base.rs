@@ -1,9 +1,6 @@
 use core::{
-    backends::wgpu_backend::WGPUResource,
-    graph::rdg::pass::RenderPassExecutor,
-    render::material::take_rs,
-    types::Mat4x4f,
-    util::{any_as_u8_slice, any_as_u8_slice_array},
+    backends::wgpu_backend::WGPUResource, graph::rdg::pass::RenderPassExecutor,
+    render::material::take_rs, types::Mat4x4f, util::any_as_u8_slice_array,
 };
 use std::{
     io::Write,
@@ -105,7 +102,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
                 for layer in &rs.list {
                     for indirect in &layer.material {
                         let material = indirect.material.as_ref();
-                        let pipeline = shared.material_buffer_collector.get(&material);
+                        let pipeline = shared.material_buffer_collector.get(material);
                         layout = Some(pipeline.0.get_bind_group_layout(3));
                         break;
                     }
@@ -189,7 +186,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         }
     }
 
-    fn cleanup<'b>(&'b mut self, context: core::graph::rdg::pass::RenderPassContext<'b>) {}
+    fn cleanup<'b>(&'b mut self, _context: core::graph::rdg::pass::RenderPassContext<'b>) {}
 }
 
 pub struct PhongMaterialAddRenderer {
@@ -205,7 +202,7 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
     #[profiling::function]
     fn prepare<'b>(
         &'b mut self,
-        context: core::graph::rdg::pass::RenderPassContext<'b>,
+        _context: core::graph::rdg::pass::RenderPassContext<'b>,
         engine: &mut core::graph::rdg::backend::GraphCopyEngine,
     ) -> Option<()> {
         let shared = self.shared.lock().unwrap();
@@ -234,7 +231,7 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
                     let material = indirect.material.as_ref();
                     let pipeline = shared
                         .material_buffer_collector
-                        .get_pass(&material, self.index + 1);
+                        .get_pass(material, self.index + 1);
                     layout = Some(pipeline.0.get_bind_group_layout(3));
                     break;
                 }
@@ -319,5 +316,5 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
         }
     }
 
-    fn cleanup<'b>(&'b mut self, context: core::graph::rdg::pass::RenderPassContext<'b>) {}
+    fn cleanup<'b>(&'b mut self, _context: core::graph::rdg::pass::RenderPassContext<'b>) {}
 }

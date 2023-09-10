@@ -4,9 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use ordered_float::OrderedFloat;
-
-use crate::{material::MaterialId, types::Bound};
+use crate::material::MaterialId;
 
 use super::{Camera, SceneStorage, UNKNOWN_OBJECT};
 
@@ -103,7 +101,7 @@ impl Sorter for DistanceSorter {
         if let Some(c) = &self.camera {
             let camera_pos = c.from().into();
             // cull first
-            let frustum = c.frustum_worldspace();
+            let _frustum = c.frustum_worldspace();
 
             let mut res: Vec<_> = self
                 .objects
@@ -214,7 +212,7 @@ where
         let mut material_list = vec![];
         material_list.reserve(self.map.len());
 
-        for (material_id, (t, sort_key)) in &self.map {
+        for (material_id, (_t, sort_key)) in &self.map {
             material_list.push((*sort_key, *material_id));
         }
         material_list.sort_by(|a, b| a.0.cmp(&b.0));

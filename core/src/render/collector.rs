@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use wgpu::util::DeviceExt;
 
@@ -6,7 +6,7 @@ use crate::{
     backends::wgpu_backend::WGPUResource,
     material::{Material, MaterialId},
     mesh::{InstanceProperties, Mesh},
-    scene::{Camera, SceneStorage},
+    scene::SceneStorage,
 };
 
 use super::{common::FramedCache, Pipeline, PipelinePassResource};
@@ -160,7 +160,7 @@ impl MeshBufferCollector {
         // }
     }
 
-    pub fn get(&self, c: &SceneStorage, object_id: u64) -> Option<&ObjectBuffer> {
+    pub fn get(&self, _c: &SceneStorage, object_id: u64) -> Option<&ObjectBuffer> {
         self.dynamic_object_buffers.get(&object_id)
     }
 
@@ -213,7 +213,7 @@ impl MaterialBufferCollector {
         });
         c.material_bind_buffers.get_or(material.id(), |_| {
             let mut res = vec![];
-            for index in &c.pipeline.pass {
+            for _index in &c.pipeline.pass {
                 res.push(create_materia_buffer(material, gpu));
             }
             res

@@ -40,7 +40,7 @@ impl BasicMaterialLoader {
 
             map.insert(
                 MaterialMapKey::Default,
-                material_builder.build(&gpu.context()),
+                material_builder.build(gpu.context()),
             );
         }
         {
@@ -53,7 +53,7 @@ impl BasicMaterialLoader {
 
             map.insert(
                 MaterialMapKey::DefaultWithVertexColor,
-                material_builder.build(&gpu.context()),
+                material_builder.build(gpu.context()),
             );
         }
         Self { map, gpu }
@@ -238,12 +238,10 @@ impl MaterialLoader for BasicMaterialLoader {
         let idx = p.material().index();
         let key = if let Some(idx) = idx {
             MaterialMapKey::Gltf(idx)
+        } else if mesh_properties_builder.has_property(&color_property) {
+            MaterialMapKey::DefaultWithVertexColor
         } else {
-            if mesh_properties_builder.has_property(&color_property) {
-                MaterialMapKey::DefaultWithVertexColor
-            } else {
-                MaterialMapKey::Default
-            }
+            MaterialMapKey::Default
         };
 
         let material = self
