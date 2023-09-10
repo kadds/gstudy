@@ -1,22 +1,21 @@
 use app::plugin::{Plugin, PluginFactory};
 use app::AppEventProcessor;
 use gltf::texture::Sampler;
+use material_loader::basic_loader::BasicMaterialLoader;
+use material_loader::MaterialLoader;
 use nalgebra::Unit;
 mod taskpool;
 
 use core::backends::wgpu_backend::WGPUResource;
-use core::mesh::builder::MeshBuilder;
+use core::mesh::builder::{MeshBuilder, MeshPropertiesBuilder};
 use std::any::Any;
 
 use core::context::{RContext, RContextRef, ResourceRef, TagId};
-use core::material::basic::BasicMaterialFaceBuilder;
-use core::material::{Material, MaterialBuilder};
 use core::mesh::StaticGeometry;
-use core::mesh::{Geometry, MeshPropertyType};
-use core::render::default_blender;
 use core::scene::{Camera, RenderObject, Scene, Transform, TransformBuilder};
-use core::types::{BoundBox, Color, Size, Vec2f, Vec3f, Vec4f};
+use core::types::{BoundBox, Size, Vec3f, Vec4f};
 use core::util::any_as_x_slice_array;
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::{
@@ -77,33 +76,6 @@ impl<'a> GltfDataViewSource<'a> {
                 let end = s.offset as usize + s.size;
                 &m[s.offset as usize..end]
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum MaterialFaceBuilder {
-    Basic(BasicMaterialFaceBuilder),
-}
-
-#[derive(Debug, Hash, Eq, PartialEq)]
-enum MaterialMapKey {
-    Gltf(usize),
-    Default,
-    DefaultWithVertexColor,
-}
-
-#[derive(Debug)]
-struct MaterialMap {
-    pub map: HashMap<MaterialMapKey, Arc<Material>>,
-    context: Option<RContextRef>,
-}
-
-impl MaterialMap {
-    pub fn new(c: RContextRef) -> Self {
-        Self {
-            map: HashMap::new(),
-            context: Some(c),
         }
     }
 }
@@ -186,7 +158,7 @@ fn parse_sampler(original: &Sampler, gpu: &WGPUResource) -> ResourceRef {
 }
 
 #[derive(Debug, Default)]
-struct LoadResult {
+pub struct LoadResult {
     total_nodes: u64,
     total_meshes: u64,
     total_vertices: u64,
@@ -196,7 +168,7 @@ struct LoadResult {
     aabb: BoundBox,
 }
 
-struct GltfBufferView<'a> {
+pub struct GltfBufferView<'a> {
     buffer: Vec<GltfDataViewSource<'a>>,
     texture: Vec<GltfDataViewSource<'a>>,
 }
@@ -208,6 +180,7 @@ pub struct ParseContext<'a> {
     // opened_files: HashMap<Box<File>>,
     scene: Scene,
     res: LoadResult,
+    material_loader: Box<RefCell<dyn MaterialLoader>>,
 }
 
 fn parse_primitive_indices(
@@ -222,26 +195,6 @@ fn parse_primitive_indices(
             _ => {
                 anyhow::bail!("dimension for indices invalid");
             }
-        }
-        let mut has_color = false;
-        let mut has_texture = false;
-
-        for (semantic, _) in p.attributes() {
-            match semantic {
-                gltf::Semantic::Colors(_) => {
-                    has_color = true;
-                }
-                gltf::Semantic::TexCoords(_) => {
-                    has_texture = true;
-                }
-                _ => (),
-            }
-        }
-        if has_color {
-            mesh_builder.add_property(MeshPropertyType::new::<Color>("color"));
-        }
-        if has_texture {
-            mesh_builder.add_property(MeshPropertyType::new::<Vec2f>("texture"));
         }
 
         match indices.data_type() {
@@ -279,106 +232,12 @@ fn parse_primitive_indices(
     Ok(())
 }
 
-fn parse_primitive_vertices(
-    p: &gltf::Primitive,
-    mesh_builder: &mut MeshBuilder,
-    buf_view: &GltfBufferView,
-    res: &mut LoadResult,
-) -> anyhow::Result<()> {
-    for (semantic, accessor) in p.attributes() {
-        match semantic {
-            gltf::Semantic::Extras(ext) => {
-                log::info!("extra {}", ext);
-            }
-            gltf::Semantic::Positions => {
-                let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
-                match accessor.data_type() {
-                    gltf::accessor::DataType::F32 => {}
-                    _ => {
-                        anyhow::bail!("position invalid data type");
-                    }
-                };
-                match accessor.dimensions() {
-                    gltf::accessor::Dimensions::Vec3 => {
-                        let data: &[Vec3f] = any_as_x_slice_array(buf);
-                        res.total_vertices += data.len() as u64;
-                        mesh_builder.add_position_vertices3(data);
-                    }
-                    _ => {
-                        anyhow::bail!("position should be vec3f");
-                    }
-                };
-            }
-            gltf::Semantic::Normals => {}
-            gltf::Semantic::Tangents => {}
-            gltf::Semantic::Colors(_index) => {
-                let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
-                match accessor.data_type() {
-                    gltf::accessor::DataType::F32 => {}
-                    _ => {
-                        anyhow::bail!("color invalid data type");
-                    }
-                };
-                match accessor.dimensions() {
-                    gltf::accessor::Dimensions::Vec4 => {
-                        let data: &[Vec4f] = any_as_x_slice_array(buf);
-                        mesh_builder
-                            .add_property_vertices(MeshPropertyType::new::<Color>("color"), data);
-                    }
-                    gltf::accessor::Dimensions::Vec3 => {
-                        let data: &[Vec3f] = any_as_x_slice_array(buf);
-                        let mut trans_data = Vec::new();
-                        for block in data {
-                            trans_data.push(Vec4f::new(block[0], block[1], block[2], 1f32));
-                        }
-                        mesh_builder.add_property_vertices(
-                            MeshPropertyType::new::<Color>("color"),
-                            &trans_data,
-                        );
-                    }
-                    _ => {
-                        anyhow::bail!("color should be vec3f/vec4f");
-                    }
-                };
-            }
-            gltf::Semantic::TexCoords(_index) => {
-                let buf = buf_view.buffer[0].read_bytes_from_accessor(&accessor);
-                match accessor.data_type() {
-                    gltf::accessor::DataType::F32 => {}
-                    _ => {
-                        anyhow::bail!("texcoord invalid data type");
-                    }
-                };
-                match accessor.dimensions() {
-                    gltf::accessor::Dimensions::Vec2 => {}
-                    _ => {
-                        anyhow::bail!("texcoord should be vec2f");
-                    }
-                };
-
-                let f = any_as_x_slice_array(buf);
-                let mut data = Vec::new();
-                for block in f.chunks(2) {
-                    data.push(Vec2f::new(block[0], block[1]));
-                }
-
-                mesh_builder
-                    .add_property_vertices(MeshPropertyType::new::<Vec2f>("texture"), &data);
-            }
-            gltf::Semantic::Joints(_index) => {}
-            gltf::Semantic::Weights(_index) => {}
-        }
-    }
-    Ok(())
-}
-
 impl<'a> ParseContext<'a> {
     fn parse_mesh(
         &mut self,
         tag_id: TagId,
         buf_view: &mut GltfBufferView<'a>,
         mesh: gltf::Mesh,
-        material_map: &mut MaterialMap,
         transform: &Transform,
     ) -> anyhow::Result<BoundBox> {
         self.res.total_meshes += 1;
@@ -391,32 +250,20 @@ impl<'a> ParseContext<'a> {
 
             bound_box = &bound_box + &bb;
 
-            let mut mesh_builder = MeshBuilder::new();
+            let mut mesh_builder = MeshBuilder::default();
+            let mut mesh_properties_builder = MeshPropertiesBuilder::default();
 
             parse_primitive_indices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
-            parse_primitive_vertices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
 
-            let idx = p.material().index();
-            let key = if let Some(idx) = idx {
-                MaterialMapKey::Gltf(idx)
-            } else {
-                // query default
-                if mesh_builder.has_property(MeshPropertyType::new::<Color>("color")) {
-                    log::info!(
-                        "load mesh {:?} fallback material to default_vertex_color",
-                        mesh.name()
-                    );
-                    MaterialMapKey::DefaultWithVertexColor
-                } else {
-                    log::info!("load mesh {:?} fallback material to default", mesh.name());
-                    MaterialMapKey::Default
-                }
-            };
+            let material = self.material_loader.borrow().load_properties_vertices(
+                &p,
+                &mut mesh_builder,
+                &mut mesh_properties_builder,
+                buf_view,
+                &mut self.res,
+            )?;
 
-            let material = material_map
-                .map
-                .get(&key)
-                .ok_or(anyhow::anyhow!("material not found {:?}", idx))?;
+            mesh_builder.set_properties(mesh_properties_builder.build());
 
             let mut g = StaticGeometry::new(Arc::new(mesh_builder.build()?));
 
@@ -438,7 +285,6 @@ impl<'a> ParseContext<'a> {
         node: gltf::Node,
         tag_id: TagId,
         buf: &mut GltfBufferView<'a>,
-        material_map: &mut MaterialMap,
         transform: &Transform,
     ) -> anyhow::Result<()> {
         let d = node.transform().decomposed();
@@ -453,13 +299,13 @@ impl<'a> ParseContext<'a> {
         transform_node.mul_mut(transform);
 
         if let Some(mesh) = node.mesh() {
-            let bb = self.parse_mesh(tag_id, buf, mesh, material_map, &transform_node)?;
+            let bb = self.parse_mesh(tag_id, buf, mesh, &transform_node)?;
             self.res.aabb = &self.res.aabb + &bb;
         }
         self.res.total_nodes += 1;
 
         for node in node.children() {
-            self.parse_node(node, tag_id, buf, material_map, &transform_node)?;
+            self.parse_node(node, tag_id, buf, &transform_node)?;
         }
         Ok(())
     }
@@ -472,83 +318,17 @@ impl<'a> ParseContext<'a> {
         gltf: &gltf::Gltf,
         texture_map: &TextureMap,
         samplers: &[ResourceRef],
-    ) -> anyhow::Result<MaterialMap> {
-        let mut map = MaterialMap::new(self.ctx.clone());
-        // add default material
-        {
-            let mut material_builder = MaterialBuilder::default();
-            material_builder = material_builder.primitive(wgpu::PrimitiveState::default());
-            material_builder = material_builder.name("default");
-            let basic_material_builder = BasicMaterialFaceBuilder::default().texture(
-                core::material::MaterialMap::Constant(Color::new(1f32, 1f32, 0.8f32, 1f32)),
-            );
-            material_builder = material_builder.face(basic_material_builder.build());
-
-            map.map
-                .insert(MaterialMapKey::Default, material_builder.build(&self.ctx));
-        }
-        {
-            let mut material_builder = MaterialBuilder::default();
-            material_builder = material_builder.primitive(wgpu::PrimitiveState::default());
-            material_builder = material_builder.name("default vertex color");
-            let basic_material_builder =
-                BasicMaterialFaceBuilder::default().texture(core::material::MaterialMap::PreVertex);
-            material_builder = material_builder.face(basic_material_builder.build());
-
-            map.map.insert(
-                MaterialMapKey::DefaultWithVertexColor,
-                material_builder.build(&self.ctx),
-            );
-        }
-
+    ) -> anyhow::Result<()> {
         for material in gltf.materials() {
             let idx = material.index().unwrap_or_default();
-            let mut primitive = wgpu::PrimitiveState::default();
-            let mut material_builder = MaterialBuilder::default();
-            if material.double_sided() {
-                primitive.cull_mode = Some(wgpu::Face::Back);
-            }
-            material_builder = material_builder
-                .primitive(primitive)
-                .name(material.name().unwrap_or_default());
-
-            let mut basic_material_builder = BasicMaterialFaceBuilder::default();
-
-            let texture = material.pbr_metallic_roughness().base_color_texture();
-            if let Some(tex) = texture {
-                let texture_index = tex.texture().index();
-                let (sampler_index, texture) = texture_map.get(&texture_index).unwrap();
-                basic_material_builder = basic_material_builder
-                    .texture(core::material::MaterialMap::Texture(texture.clone()));
-                if let Some(index) = sampler_index {
-                    basic_material_builder =
-                        basic_material_builder.sampler(samplers[*index].clone());
-                } else {
-                    // use default
-                    basic_material_builder =
-                        basic_material_builder.sampler(self.gpu.default_sampler());
-                }
-            } else {
-                let color = material.pbr_metallic_roughness().base_color_factor();
-                basic_material_builder = basic_material_builder
-                    .texture(core::material::MaterialMap::Constant(color.into()));
-            }
-
-            match material.alpha_mode() {
-                gltf::material::AlphaMode::Opaque => {}
-                gltf::material::AlphaMode::Mask => {
-                    basic_material_builder.alpha_test(material.alpha_cutoff().unwrap_or(0.5f32));
-                }
-                gltf::material::AlphaMode::Blend => {
-                    material_builder = material_builder.blend(default_blender());
-                }
-            }
-            material_builder = material_builder.face(basic_material_builder.build());
-
-            map.map
-                .insert(MaterialMapKey::Gltf(idx), material_builder.build(&self.ctx));
+            self.material_loader.borrow_mut().load_material(
+                idx,
+                &material,
+                texture_map,
+                samplers,
+            )?;
         }
-        Ok(map)
+        Ok(())
     }
 
     fn load_buffers(
@@ -649,7 +429,6 @@ impl<'a> ParseContext<'a> {
         &mut self,
         gltf: &gltf::Gltf,
         buf_view: &mut GltfBufferView<'a>,
-        material_map: &mut MaterialMap,
     ) -> anyhow::Result<()> {
         for s in gltf.scenes() {
             let name = s.name().unwrap_or("gltf-scene");
@@ -657,7 +436,7 @@ impl<'a> ParseContext<'a> {
 
             let transform = Transform::default();
             for node in s.nodes() {
-                self.parse_node(node, tag_id, buf_view, material_map, &transform)?;
+                self.parse_node(node, tag_id, buf_view, &transform)?;
             }
             log::info!(
                 "model scene {} nodes {}",
@@ -749,6 +528,7 @@ impl<'a> ParseContext<'a> {
         pool: &'a TaskPool,
         ctx: RContextRef,
         gpu: Arc<WGPUResource>,
+        loader: Box<RefCell<dyn MaterialLoader>>,
     ) -> anyhow::Result<(Scene, LoadResult)> {
         let gltf = gltf::Gltf::open(path)?;
         let mut this = Self {
@@ -757,17 +537,32 @@ impl<'a> ParseContext<'a> {
             gpu,
             ctx,
             pool,
+            material_loader: loader,
         };
         let mut buf_view = this.load_buffers(&gltf, path)?;
 
         let (textures, samplers) = this.load_textures(&gltf, &buf_view)?;
-        let mut material_map = this.load_materials(&gltf, &textures, &samplers)?;
+        this.load_materials(&gltf, &textures, &samplers)?;
 
-        this.load_meshes(&gltf, &mut buf_view, &mut material_map)?;
+        this.load_meshes(&gltf, &mut buf_view)?;
         this.load_cameras(&gltf)?;
 
         Ok((this.scene, this.res))
     }
+}
+
+fn default_material_loader(
+    loader_name: &str,
+    gpu: Arc<WGPUResource>,
+) -> Box<RefCell<dyn MaterialLoader>> {
+    match loader_name {
+        "" | "basic" => {
+            return Box::new(RefCell::new(BasicMaterialLoader::new(gpu)));
+        }
+        _ => {}
+    };
+
+    Box::new(RefCell::new(BasicMaterialLoader::new(gpu)))
 }
 
 pub struct LoadRes {
@@ -777,19 +572,21 @@ pub struct LoadRes {
 }
 
 fn loader_main(
-    rx: mpsc::Receiver<(String, Arc<WGPUResource>)>,
+    rx: mpsc::Receiver<(String, String, Arc<WGPUResource>)>,
     tx: Arc<Mutex<VecDeque<LoadRes>>>,
     ctx: RContextRef,
 ) {
     let pool = TaskPoolBuilder::new().build();
     loop {
-        let (name, gpu) = rx.recv().unwrap();
+        let (name, loader, gpu) = rx.recv().unwrap();
         if name.is_empty() {
             break;
         }
 
         let path = PathBuf::from(name.clone());
-        let result = ParseContext::load(&path, &pool, ctx.clone(), gpu);
+        let loader = default_material_loader(&loader, gpu.clone());
+
+        let result = ParseContext::load(&path, &pool, ctx.clone(), gpu, loader);
         let (scene, result) = match result {
             Ok(val) => val,
             Err(err) => {
@@ -814,7 +611,7 @@ fn loader_main(
 
 pub struct Loader {
     thread: Option<std::thread::JoinHandle<()>>,
-    tx: mpsc::Sender<(String, Arc<WGPUResource>)>,
+    tx: mpsc::Sender<(String, String, Arc<WGPUResource>)>,
     result: Arc<Mutex<VecDeque<LoadRes>>>,
     gpu: Mutex<Option<Arc<WGPUResource>>>,
 }
@@ -837,10 +634,12 @@ impl Loader {
         this
     }
 
-    pub fn load_async<S: Into<String>>(&self, name: S) {
-        let _ = self
-            .tx
-            .send((name.into(), self.gpu.lock().unwrap().clone().unwrap()));
+    pub fn load_async<S: Into<String>>(&self, name: S, loader_name: &str) {
+        let _ = self.tx.send((
+            name.into(),
+            loader_name.to_owned(),
+            self.gpu.lock().unwrap().clone().unwrap(),
+        ));
     }
 
     fn take_result(&self) -> Vec<LoadRes> {

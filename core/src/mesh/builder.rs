@@ -79,8 +79,8 @@ impl<P> PropertiesBuilder<P>
 where
     P: Property,
 {
-    pub fn has_property(&mut self, property: P) -> bool {
-        self.properties.contains(&property)
+    pub fn has_property(&mut self, property: &P) -> bool {
+        self.properties.contains(property)
     }
 
     pub fn add_property(&mut self, property: P) {

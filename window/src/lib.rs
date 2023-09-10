@@ -10,7 +10,7 @@ use core::types::{Color, Size, Vec4f};
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub mod looper;
 pub mod statistics;
@@ -20,6 +20,7 @@ use app::plugin::{LooperPlugin, Plugin, PluginFactory};
 use app::AppEventProcessor;
 pub use looper::Looper;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use statistics::Statistics;
 pub use winit;
 mod util;
 
@@ -201,8 +202,6 @@ pub enum Event {
     FullScreen(bool),
 
     OpenUrl(String),
-
-    FpsUpdate(FPS),
 }
 
 pub struct WindowPluginFactory {
@@ -256,10 +255,8 @@ unsafe impl Sync for RawWindow {}
 pub type WindowSize = LockResource<(Size, Size)>;
 pub type ClearColor = LockResource<Color>;
 pub type MainWindowHandle = RawWindow;
-#[derive(Default, Clone, Debug, Copy)]
-pub struct FPS(pub f32);
 
-pub type FPSResource = LockResource<FPS>;
+pub type StatisticsResource = Mutex<Statistics>;
 
 #[derive(Default, Clone, Debug, Copy)]
 pub struct Msaa(pub u32);
@@ -302,8 +299,8 @@ impl LooperPlugin for WindowLooperPlugin {
             handle: looper.handle().unwrap(),
         });
         container.register_arc(gpu);
-        container.register(FPSResource::new(FPS(0f32)));
         container.register(MsaaResource::new(Msaa(1)));
+        container.register_arc(looper.statistics());
 
         struct Process(Rc<RefCell<dyn app::plugin::Runner>>);
 
@@ -326,12 +323,5 @@ impl LooperPlugin for WindowLooperPlugin {
 }
 
 impl AppEventProcessor for WindowPlugin {
-    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {
-        if let Some(ev) = event.downcast_ref::<Event>() {
-            if let Event::FpsUpdate(fps) = ev {
-                let f = context.container.get::<FPSResource>().unwrap();
-                f.set(*fps);
-            }
-        }
-    }
+    fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {}
 }

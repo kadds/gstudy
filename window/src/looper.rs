@@ -3,7 +3,11 @@ use core::{
     context::RContextRef,
     event::{EventProcessor, EventRegistry, EventSender, EventSource, ProcessEventResult},
 };
-use std::{any::Any, cell::RefCell, sync::Arc};
+use std::{
+    any::Any,
+    cell::RefCell,
+    sync::{Arc, Mutex},
+};
 
 use instant::Duration;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
@@ -12,7 +16,9 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{statistics::Statistics, window::Window, CEvent, DEvent, Event, WEvent};
+use crate::{
+    statistics::Statistics, window::Window, CEvent, DEvent, Event, StatisticsResource, WEvent,
+};
 
 pub struct LooperEventSource {
     event_proxy: EventLoopProxy<DEvent>,
@@ -23,14 +29,12 @@ pub struct Looper {
     main_window: Option<RefCell<Window>>,
 
     event_proxy: EventLoopProxy<DEvent>,
-    frame: Statistics,
+    frame: Arc<Mutex<Statistics>>,
     event_registry: LoopEventRegistry,
 
     auto_exit: bool,
     has_render_event: bool,
     is_first_update: bool,
-
-    fps: u32,
 }
 
 impl EventSender for LooperEventSource {
@@ -90,12 +94,14 @@ impl Looper {
             main_window: None,
 
             event_proxy,
-            frame: Statistics::new(Duration::from_millis(1000), Some(1.0 / 60.0)),
+            frame: Arc::new(Mutex::new(Statistics::new(
+                Duration::from_millis(1000),
+                Some(1.0 / 60.0),
+            ))),
             event_registry: LoopEventRegistry::default(),
             auto_exit: true,
             has_render_event: false,
             is_first_update: true,
-            fps: 0,
         }
     }
 
@@ -107,6 +113,10 @@ impl Looper {
         LooperEventSource {
             event_proxy: self.event_proxy.clone(),
         }
+    }
+
+    pub fn statistics(&self) -> Arc<Mutex<Statistics>> {
+        self.frame.clone()
     }
 
     pub fn handle(&self) -> Option<RawWindowHandle> {
@@ -192,7 +202,7 @@ impl Looper {
                     self.has_render_event = true;
                     log::debug!("pre update event");
                     profiling::scope!("pre update");
-                    self.frame.new_frame();
+                    self.frame.lock().unwrap().new_frame();
                     let _ = self
                         .event_proxy
                         .send_event(Box::new(CEvent::Update(*delta)));
@@ -266,7 +276,7 @@ impl Looper {
                 }
             }
             WEvent::RedrawEventsCleared => {
-                let (_, d, ok) = self.frame.next_frame();
+                let (_, d, ok) = self.frame.lock().unwrap().next_frame();
                 if ok && !self.has_render_event {
                     if self.is_first_update {
                         self.is_first_update = false;
@@ -295,19 +305,13 @@ impl Looper {
 
         match ret {
             ControlFlow::Wait => {
-                let (ins, _, _) = self.frame.next_frame();
+                let (ins, _, _) = self.frame.lock().unwrap().next_frame();
                 ret = ControlFlow::WaitUntil(ins);
             }
             ControlFlow::ExitWithCode(_) => {
                 log::warn!("app exit");
             }
             _ => {}
-        }
-        if self.frame.changed() && self.fps != self.frame.fps() as u32 {
-            self.fps = self.frame.fps() as u32;
-            log::info!("fps {}", self.frame.fps());
-            let _ =
-                event_proxy.send_event(Box::new(Event::FpsUpdate(crate::FPS(self.frame.fps()))));
         }
         ret
     }

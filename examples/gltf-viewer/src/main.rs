@@ -13,7 +13,9 @@ use app::{container::Container, App, AppEventProcessor};
 use egui_render::EguiPluginFactory;
 use gltfloader::{GltfPluginFactory, Loader};
 use rfd::{FileDialog, MessageDialog};
-use window::{FPSResource, HardwareRenderPluginFactory, MainWindowHandle, WindowPluginFactory};
+use window::{
+    HardwareRenderPluginFactory, MainWindowHandle, StatisticsResource, WindowPluginFactory,
+};
 
 #[derive(Default)]
 struct CameraSideState {
@@ -120,6 +122,22 @@ impl AppEventProcessor for MainLogic {
 }
 
 impl MainLogic {
+    fn load_window(&self, container: &Container, loader_name: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let main_window = container.get::<MainWindowHandle>().unwrap();
+            let file = FileDialog::new()
+                .set_parent(&*main_window)
+                .add_filter("gltf", &["gltf", "glb"])
+                .set_title("load gltf file")
+                .pick_file();
+
+            if let Some(file) = file {
+                let loader = container.get::<Loader>().unwrap();
+                loader.load_async(file.to_str().unwrap_or_default(), loader_name);
+            }
+        }
+    }
     fn main_side(
         &mut self,
         ctx: &egui::Context,
@@ -129,23 +147,19 @@ impl MainLogic {
     ) {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("Load scene").clicked() {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let main_window = container.get::<MainWindowHandle>().unwrap();
-                        let file = FileDialog::new()
-                            .set_parent(&*main_window)
-                            .add_filter("gltf", &["gltf", "glb"])
-                            .set_title("load gltf file")
-                            .pick_file();
-
-                        if let Some(file) = file {
-                            let loader = container.get::<Loader>().unwrap();
-                            loader.load_async(file.to_str().unwrap_or_default());
-                        }
-                    }
+                if ui.button("Load scene(basic)").clicked() {
+                    self.load_window(container, "basic");
                     ui.close_menu();
                 }
+                if ui.button("Load scene(phong)").clicked() {
+                    self.load_window(container, "phong");
+                    ui.close_menu();
+                }
+                if ui.button("Load scene(pbr)").clicked() {
+                    self.load_window(container, "pbr");
+                    ui.close_menu();
+                }
+
                 if ui.button("Clear scene").clicked() {
                     container.get::<Scene>().unwrap().remove_all();
                     ui.close_menu();
@@ -327,13 +341,13 @@ impl MainLogic {
     }
 
     fn draw_egui(&mut self, ctx: &egui::Context, container: &Container) {
-        let fps = container.get::<FPSResource>().unwrap();
-        let fps = fps.get();
+        let fs = container.get::<StatisticsResource>().unwrap();
+        let fps = fs.lock().unwrap().fps();
 
         egui::Window::new("Control")
             .min_width(180f32)
             .default_width(240f32)
-            .show(ctx, |ui| self.main_side(ctx, ui, container, fps.0));
+            .show(ctx, |ui| self.main_side(ctx, ui, container, fps));
 
         let reset = egui::Window::new("Camera")
             .open(&mut self.show_camera_side)
