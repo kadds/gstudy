@@ -13,3 +13,7 @@ egui-render = {path = "../../egui-render"}
 egui = "0.22.0"
 app = {path = "../../app"}
 log = "0.4"
+profiling = "1.0"
+
+[features]
+profile-with-tracy = ["profiling/profile-with-tracy"]

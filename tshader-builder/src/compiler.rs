@@ -80,8 +80,13 @@ impl ShaderTechCompiler {
 
         let source =
             std::fs::read_to_string(&source_path).map_err(|e| anyhow::anyhow!("{} {:?}", e, p))?;
-        let mut config: Config = toml::from_str(&source)?;
-        config.pass.sort_by_key(|k| k.index);
+
+        let config = {
+            profiling::scope!("parse shader config");
+            let mut config: Config = toml::from_str(&source)?;
+            config.pass.sort_by_key(|k| k.index);
+            config
+        };
 
         Ok(Self {
             config,
@@ -96,6 +101,7 @@ impl ShaderTechCompiler {
         pass_index: usize,
         variants: &[&'static str],
     ) -> anyhow::Result<PassShaderSourceDescriptor> {
+        profiling::scope!("compile pass");
         let mut cfg = PreprocessorConfig::default();
 
         let mut set = HashSet::new();

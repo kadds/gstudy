@@ -59,6 +59,7 @@ pub struct PhongMaterialBaseRenderer {
     pub shadow_map_id: Option<u32>,
 }
 impl RenderPassExecutor for PhongMaterialBaseRenderer {
+    #[profiling::function]
     fn prepare<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -78,6 +79,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         Some(())
     }
 
+    #[profiling::function]
     fn queue<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -130,6 +132,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         }
     }
 
+    #[profiling::function]
     fn render<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -199,6 +202,7 @@ pub struct PhongMaterialAddRenderer {
 }
 
 impl RenderPassExecutor for PhongMaterialAddRenderer {
+    #[profiling::function]
     fn prepare<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -213,6 +217,7 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
         Some(())
     }
 
+    #[profiling::function]
     fn queue<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -254,6 +259,7 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
         }
     }
 
+    #[profiling::function]
     fn render<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,

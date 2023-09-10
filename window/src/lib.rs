@@ -51,6 +51,7 @@ impl HardwareRenderPlugin {
     }
 
     fn render(&mut self, texture: ResourceRef, container: &Container) {
+        profiling::scope!("hardware render body");
         let gpu = container.get::<WGPUResource>().unwrap();
         let (view_size, logic_size) = container.get::<WindowSize>().unwrap().get();
 

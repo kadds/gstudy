@@ -38,6 +38,7 @@ impl Sorter for UISceneSorter {
         self.object_position.insert(object, pos);
     }
 
+    #[profiling::function]
     fn sort_and_cull(&mut self) -> Vec<u64> {
         let res: Vec<_> = self
             .objects
@@ -97,6 +98,7 @@ impl Sorter for DistanceSorter {
         self.objects.insert(object);
     }
 
+    #[profiling::function]
     fn sort_and_cull(&mut self) -> Vec<u64> {
         if let Some(c) = &self.camera {
             let camera_pos = c.from().into();
@@ -206,6 +208,7 @@ where
         }
     }
 
+    #[profiling::function]
     fn sort_and_cull(&mut self) -> Vec<u64> {
         let mut res = vec![];
         let mut material_list = vec![];

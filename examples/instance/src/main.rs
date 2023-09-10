@@ -177,7 +177,8 @@ impl AppEventProcessor for MainLogic {
     }
 }
 
-fn main() {
+fn do_main() {
+    profiling::scope!("app");
     env_logger::init();
     let context = RContext::new();
 
@@ -186,4 +187,15 @@ fn main() {
     app.register_plugin(HardwareRenderPluginFactory);
     app.add_event_processor(Box::new(MainLogic::default()));
     app.run();
+}
+
+fn main() {
+    #[cfg(feature = "profile-with-tracy")]
+    {
+        let _ = profiling::tracy_client::Client::start();
+        do_main();
+        return;
+    }
+
+    do_main();
 }

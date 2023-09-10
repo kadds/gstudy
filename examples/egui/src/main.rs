@@ -32,7 +32,8 @@ fn draw_egui(ctx: &egui::Context) {
     egui::Window::new("Inspection").show(ctx, |ui| ctx.inspection_ui(ui));
 }
 
-fn main() {
+fn do_main() {
+    profiling::scope!("app");
     env_logger::init();
     let context = RContext::new();
 
@@ -42,4 +43,15 @@ fn main() {
     app.register_plugin(EguiPluginFactory {});
     app.add_event_processor(Box::new(MainLogic {}));
     app.run();
+}
+
+fn main() {
+    #[cfg(feature = "profile-with-tracy")]
+    {
+        let _ = profiling::tracy_client::Client::start();
+        do_main();
+        return;
+    }
+
+    do_main();
 }

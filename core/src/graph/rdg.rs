@@ -104,6 +104,7 @@ pub struct RenderGraph {
 }
 
 impl RenderGraph {
+    #[profiling::function]
     pub fn execute(&mut self, backend: GraphBackend, context: &dyn Any) {
         let main_jobs = &self.render_jobs_list[0];
         {
@@ -398,6 +399,7 @@ impl RenderGraphBuilder {
         index
     }
 
+    #[profiling::function]
     pub fn compile(mut self) -> RenderGraph {
         let present = self.present_node.take().unwrap();
         let mut pass_nodes = Vec::new();

@@ -167,39 +167,7 @@ impl Looper {
         })
     }
 
-    fn process(&mut self, event: &dyn Any) -> ControlFlow {
-        if let Some(c) = event.downcast_ref::<CEvent>() {
-            match c {
-                core::event::Event::PreUpdate(delta) => {
-                    self.has_render_event = true;
-                    log::debug!("pre update");
-                    self.frame.new_frame();
-                    let _ = self
-                        .event_proxy
-                        .send_event(Box::new(CEvent::Update(*delta)));
-                }
-                core::event::Event::Update(delta) => {
-                    log::debug!("update");
-                    let _ = self
-                        .event_proxy
-                        .send_event(Box::new(CEvent::PostUpdate(*delta)));
-                }
-                core::event::Event::PostRender => {
-                    self.has_render_event = false;
-                }
-                _ => (),
-            }
-        } else if let Some(c) = event.downcast_ref::<Event>() {
-            if let Event::Exit = c {
-                return ControlFlow::Exit;
-            }
-            if self.auto_exit {
-                if let Event::CloseRequested = c {
-                    let _ = self.event_proxy.send_event(Box::new(Event::Exit));
-                }
-            }
-        }
-
+    fn process_inner(&mut self, event: &dyn Any) -> ControlFlow {
         let mut w = self.main_window.as_mut().unwrap().borrow_mut();
         w.on_event(
             &LooperEventSource {
@@ -214,6 +182,61 @@ impl Looper {
                 event_proxy: self.event_proxy.clone(),
             },
         )
+    }
+
+    fn process(&mut self, event: &dyn Any) -> ControlFlow {
+        if let Some(c) = event.downcast_ref::<CEvent>() {
+            match c {
+                core::event::Event::PreUpdate(delta) => {
+                    profiling::finish_frame!();
+                    self.has_render_event = true;
+                    log::debug!("pre update event");
+                    profiling::scope!("pre update");
+                    self.frame.new_frame();
+                    let _ = self
+                        .event_proxy
+                        .send_event(Box::new(CEvent::Update(*delta)));
+                    return self.process_inner(event);
+                }
+                core::event::Event::Update(delta) => {
+                    log::debug!("update");
+                    profiling::scope!("update event");
+                    let _ = self
+                        .event_proxy
+                        .send_event(Box::new(CEvent::PostUpdate(*delta)));
+                    return self.process_inner(event);
+                }
+                core::event::Event::PostUpdate(_) => {
+                    self.has_render_event = false;
+                    profiling::scope!("post update event");
+                    return self.process_inner(event);
+                }
+                core::event::Event::PreRender => {
+                    profiling::scope!("pre render event");
+                    return self.process_inner(event);
+                }
+                core::event::Event::Render(_) => {
+                    profiling::scope!("render event");
+                    return self.process_inner(event);
+                }
+                core::event::Event::PostRender => {
+                    profiling::scope!("post render event");
+                    return self.process_inner(event);
+                }
+                _ => (),
+            }
+        } else if let Some(c) = event.downcast_ref::<Event>() {
+            if let Event::Exit = c {
+                return ControlFlow::Exit;
+            }
+            if self.auto_exit {
+                if let Event::CloseRequested = c {
+                    let _ = self.event_proxy.send_event(Box::new(Event::Exit));
+                }
+            }
+        }
+
+        self.process_inner(event)
     }
 
     fn on_event(

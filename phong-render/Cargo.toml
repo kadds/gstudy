@@ -14,4 +14,4 @@ app = {path = "../app"}
 tshader = {path="../tshader"}
 fxhash = "0.2.1"
 smallvec = "1.10"
-
+profiling = "1.0"

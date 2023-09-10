@@ -17,3 +17,4 @@ dashmap = "5.4.0"
 tshader-builder = {path="../tshader-builder"}
 wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
 log = "0.4"
+profiling = "1.0"

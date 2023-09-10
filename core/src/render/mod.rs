@@ -176,6 +176,7 @@ impl HardwareRenderer {
 }
 
 impl ModuleRenderer for HardwareRenderer {
+    #[profiling::function]
     fn setup(
         &mut self,
         g: &mut RenderGraphBuilder,
@@ -229,10 +230,12 @@ impl ModuleRenderer for HardwareRenderer {
                     continue;
                 }
             };
+            profiling::scope!("material setup", &format!("{:?}", mat_face_id));
             f.setup(&materials, &gpu, g, &setup_resource);
         }
     }
 
+    #[profiling::function]
     fn render(&mut self, p: RenderParameter) {
         self.copy_camera_uniform(&p);
 

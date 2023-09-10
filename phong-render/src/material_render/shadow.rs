@@ -24,6 +24,7 @@ pub struct ShadowRenderer {
 }
 
 impl RenderPassExecutor for ShadowRenderer {
+    #[profiling::function]
     fn prepare<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -42,6 +43,7 @@ impl RenderPassExecutor for ShadowRenderer {
         Some(())
     }
 
+    #[profiling::function]
     fn queue<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -71,6 +73,7 @@ impl RenderPassExecutor for ShadowRenderer {
         }
     }
 
+    #[profiling::function]
     fn render<'b>(
         &'b mut self,
         context: core::graph::rdg::pass::RenderPassContext<'b>,
@@ -116,5 +119,6 @@ impl RenderPassExecutor for ShadowRenderer {
         }
     }
 
+    #[profiling::function]
     fn cleanup<'b>(&'b mut self, context: core::graph::rdg::pass::RenderPassContext<'b>) {}
 }

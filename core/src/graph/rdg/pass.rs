@@ -262,6 +262,8 @@ impl DynPass for RenderPass {
         render_target_state: &RenderTargetState,
         parameter: &dyn Any,
     ) {
+        profiling::scope!(&self.name);
+
         let mut c = self.inner.lock().unwrap();
         let context = RenderPassContext {
             name: &self.name,
@@ -270,6 +272,7 @@ impl DynPass for RenderPass {
             registry: registry,
         };
         {
+            profiling::scope!("copy engine");
             let mut copy_engine = backend.dispatch_copy(&self.name);
             if c.prepare(context, &mut copy_engine).is_none() {
                 // clear target
@@ -283,10 +286,13 @@ impl DynPass for RenderPass {
                 return;
             }
         }
-
-        c.queue(context, backend.gpu().device());
+        {
+            profiling::scope!("queue engine");
+            c.queue(context, backend.gpu().device());
+        }
 
         {
+            profiling::scope!("render engine");
             let mut render_engine = backend.dispatch_render(
                 &self.name,
                 &self.render_targets,
@@ -452,6 +458,7 @@ impl DynPass for ClearPass {
         &self.name
     }
 
+    #[profiling::function]
     fn execute(
         &self,
         registry: &ResourceRegistry,

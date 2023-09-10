@@ -12,3 +12,7 @@ app = {path = "../../app"}
 phong-render = {path="../../phong-render"}
 geometry = {path="../../geometry"}
 env_logger = "0.10"
+profiling = "1.0"
+
+[features]
+profile-with-tracy = ["profiling/profile-with-tracy"]

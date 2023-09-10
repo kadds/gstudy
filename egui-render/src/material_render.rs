@@ -39,6 +39,7 @@ pub struct EguiMaterialHardwareRenderer {
 impl EguiMaterialHardwareRenderer {}
 
 impl RenderPassExecutor for EguiMaterialHardwareRenderer {
+    #[profiling::function]
     fn prepare<'a>(
         &'a mut self,
         context: RenderPassContext<'a>,
@@ -95,6 +96,8 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
 
         Some(())
     }
+
+    #[profiling::function]
     fn queue<'b>(&'b mut self, context: RenderPassContext<'b>, device: &wgpu::Device) {
         let inner = &mut self.inner;
 
@@ -127,6 +130,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         }
     }
 
+    #[profiling::function]
     fn render<'b>(
         &'b mut self,
         context: RenderPassContext<'b>,
@@ -163,6 +167,7 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         }
     }
 
+    #[profiling::function]
     fn cleanup<'b>(&'b mut self, _context: RenderPassContext<'b>) {
         self.inner.draw_index_buffer.clear();
     }

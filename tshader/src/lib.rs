@@ -377,6 +377,7 @@ impl ShaderTech {
         index: usize,
         variants: &[&'static str],
     ) -> anyhow::Result<Arc<Pass>> {
+        profiling::scope!("register_variant_pass");
         let mut l = self.variants_map.lock().unwrap();
 
         let key = VariantKey {
@@ -415,6 +416,7 @@ impl ShaderTech {
         device: &wgpu::Device,
         variants_list: &[&[&'static str]],
     ) -> anyhow::Result<Vec<Arc<Pass>>> {
+        profiling::scope!("register_variant");
         let mut pass_list = vec![];
         let mut l = self.variants_map.lock().unwrap();
 
@@ -486,6 +488,7 @@ impl Loader {
         })
     }
 
+    #[profiling::function]
     pub fn load_tech(&self, config: LoadTechConfig) -> anyhow::Result<Arc<ShaderTech>> {
         let mut map = self.tech_map.lock().unwrap();
         if !map.contains_key(&config) {

@@ -15,3 +15,4 @@ webbrowser = "0.8"
 instant = "0.1.12"
 app = {path = "../app"}
 raw-window-handle = "0.5.2"
+profiling = "1.0"

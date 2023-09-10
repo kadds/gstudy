@@ -13,3 +13,7 @@ env_logger = "0.10"
 wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
 geometry = {path="../../geometry"}
 nalgebra = "0.32.2"
+profiling = "1.0"
+
+[features]
+profile-with-tracy = ["profiling/profile-with-tracy"]

@@ -49,7 +49,7 @@ pub struct EguiRenderer {
     cursor: egui::CursorIcon,
     must_render: bool,
     ppi: f32,
-    has_udpate: bool,
+    has_update: bool,
     mouse_in_ui: bool,
     keyboard_in_ui: bool,
 }
@@ -71,7 +71,7 @@ impl EguiRenderer {
             cursor: egui::CursorIcon::default(),
             must_render: true,
             ppi: 1.0f32,
-            has_udpate: false,
+            has_update: false,
             mouse_in_ui: false,
             keyboard_in_ui: false,
         };
@@ -114,11 +114,12 @@ impl EguiRenderer {
             egui::pos2(0f32, 0f32),
             egui::pos2(size.x as f32, size.y as f32), // logical size
         ));
-
+        profiling::scope!("begin_frame");
         self.ctx.begin_frame(self.input.clone());
     }
 
     pub fn post_update(&mut self, proxy: &dyn EventSender) {
+        profiling::scope!("end_frame");
         let output = self.ctx.end_frame();
         if output.platform_output.cursor_icon != self.cursor {
             self.cursor = output.platform_output.cursor_icon;
@@ -161,7 +162,7 @@ impl EguiRenderer {
         self.input.hovered_files.clear();
 
         self.input.predicted_dt = 0f32;
-        self.has_udpate = true;
+        self.has_update = true;
 
         if self.ctx.is_pointer_over_area() {
             if !self.mouse_in_ui {
@@ -193,11 +194,11 @@ impl EguiRenderer {
     }
 
     pub fn pre_render(&mut self, gpu: Arc<WGPUResource>, scene: &Scene, view_size: Size) {
-        if !self.has_udpate {
+        if !self.has_update {
             return;
         }
 
-        self.has_udpate = false;
+        self.has_update = false;
 
         scene.remove_by_tag(self.ui_tag);
 

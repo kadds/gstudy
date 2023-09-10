@@ -451,6 +451,7 @@ impl WGPUBackend {
         height: u32,
         context: RContextRef,
     ) -> Result<WGPUBackend> {
+        profiling::scope!("create wgpu");
         let bits = {
             #[cfg(not(target_arch = "wasm32"))]
             {

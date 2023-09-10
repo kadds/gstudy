@@ -32,6 +32,7 @@ pub struct BasicMaterialHardwareRenderer {
 }
 
 impl RenderPassExecutor for BasicMaterialHardwareRenderer {
+    #[profiling::function]
     fn prepare<'a>(
         &'a mut self,
         context: RenderPassContext<'a>,
@@ -68,6 +69,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         Some(())
     }
 
+    #[profiling::function]
     fn queue<'b>(&'b mut self, context: RenderPassContext<'b>, device: &wgpu::Device) {
         let rs = take_rs::<BasicMaterialFace>(&context).unwrap();
 
@@ -81,6 +83,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         }
     }
 
+    #[profiling::function]
     fn render<'a>(&'a mut self, context: RenderPassContext<'a>, engine: &mut GraphRenderEngine) {
         let rs = take_rs::<BasicMaterialFace>(&context).unwrap();
         let c = rs.scene.get_container();
@@ -129,6 +132,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         }
     }
 
+    #[profiling::function]
     fn cleanup<'b>(&'b mut self, context: RenderPassContext<'b>) {
         let rs = take_rs::<BasicMaterialFace>(&context).unwrap();
         self.inner.mesh_buffer_collector.finish();

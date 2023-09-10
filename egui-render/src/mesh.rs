@@ -23,6 +23,7 @@ pub struct UITextures {
 }
 
 impl UITextures {
+    #[profiling::function]
     fn update_texture(
         &mut self,
         gpu: &WGPUResource,
@@ -92,6 +93,7 @@ impl UIMesh {
         Self { ctx }
     }
 
+    #[profiling::function]
     pub(crate) fn generate_mesh(
         &self,
         frame: EguiRenderFrame,
