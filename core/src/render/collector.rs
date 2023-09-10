@@ -275,7 +275,7 @@ pub struct MaterialGpuResource {
 
 fn create_materia_buffer(material: &Material, gpu: &WGPUResource) -> wgpu::Buffer {
     let mat = material.face();
-    let data = mat.material_data();
+    let data = mat.material_uniform();
     gpu.new_wvp_buffer_from(Some("basic material buffer"), data)
 }
 

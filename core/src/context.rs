@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+use std::{
+    hash::Hash,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use dashmap::DashMap;
@@ -23,6 +26,20 @@ pub enum ResourceTy {
 pub struct Resource {
     ty: ResourceTy,
     id: u64,
+}
+
+impl Hash for Resource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Eq for Resource {}
+
+impl PartialEq for Resource {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
 }
 
 impl Resource {

@@ -227,7 +227,8 @@ impl EguiRenderer {
             let mut object = RenderObject::new(
                 Box::new(StaticGeometry::new(Arc::new(mesh))),
                 material.clone(),
-            );
+            )
+            .unwrap();
             object.add_tag(self.ui_tag);
 
             scene.add_ui(object);

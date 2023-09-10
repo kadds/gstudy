@@ -1,6 +1,8 @@
 use core::{
     context::RContext,
-    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
+    material::{
+        basic::BasicMaterialFaceBuilder, InputResource, InputResourceBuilder, MaterialBuilder,
+    },
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
@@ -33,12 +35,12 @@ impl MainLogic {
 
         let geometry = StaticGeometry::new(Arc::new(mesh));
         let basic_material_builder =
-            BasicMaterialFaceBuilder::new().texture(MaterialMap::PreVertex);
+            BasicMaterialFaceBuilder::new().texture(InputResourceBuilder::only_pre_vertex());
         let material = MaterialBuilder::default()
             .face(basic_material_builder.build())
             .build(&scene.context());
 
-        let obj = RenderObject::new(Box::new(geometry), material);
+        let obj = RenderObject::new(Box::new(geometry), material).unwrap();
         scene.add(obj);
 
         let camera = Camera::new();

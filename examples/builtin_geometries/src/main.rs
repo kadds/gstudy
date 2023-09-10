@@ -1,6 +1,8 @@
 use core::{
     context::RContext,
-    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
+    material::{
+        basic::BasicMaterialFaceBuilder, InputResource, InputResourceBuilder, MaterialBuilder,
+    },
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
@@ -22,7 +24,7 @@ pub struct MainLogic {
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
         let basic_material_builder =
-            BasicMaterialFaceBuilder::new().texture(MaterialMap::PreVertex);
+            BasicMaterialFaceBuilder::new().texture(InputResourceBuilder::only_pre_vertex());
         let material = MaterialBuilder::default()
             .face(basic_material_builder.build())
             .primitive(wgpu::PrimitiveState {
@@ -42,7 +44,7 @@ impl MainLogic {
                     .build(),
             );
 
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 
@@ -58,7 +60,7 @@ impl MainLogic {
                     .build(),
             );
 
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 
@@ -75,7 +77,7 @@ impl MainLogic {
                     .build(),
             );
 
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 
@@ -91,7 +93,7 @@ impl MainLogic {
                     .build(),
             );
 
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 

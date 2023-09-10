@@ -2,7 +2,7 @@
 ///#include "camera.wgsl"
 ///#include "./light.wgsl"
 ///#include "./material.wgsl"
-///#if DIFFUSE_TEXTURE || NORMAL_TEXTURE || SPECULAR_TEXTURE || EMISSIVE_TEXTURE 
+///#if DIFFUSE_TEXTURE || NORMAL_TEXTURE || SPECULAR_TEXTURE
 ///#decl UV
 ///#endif
 
@@ -66,7 +66,7 @@ struct AddLightUniform {
 ///#endif
 
 ///#if DIFFUSE_TEXTURE
-@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_color: texture_2d<f32>;
+@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_diffuse: texture_2d<f32>;
 ///#endif
 
 ///#if NORMAL_TEXTURE
@@ -115,16 +115,40 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     var obj: ObjectInfo;
-///#if DIFFUSE_VERTEX
-    obj.color = input.diffuse;
-///#elseif DIFFUSE_CONSTANT
+///#if DIFFUSE_CONSTANT
+
     obj.color = material_uniform.diffuse;
+///#if DIFFUSE_VERTEX
+    obj.color *= input.diffuse;
+///#endif
+///#if DIFFUSE_TEXTURE
+    obj.color *= textureSample(texture_diffuse, sampler_tex, input.uv).xyz;
+///#endif
+
+///#else
+
+    obj.color = vec3<f32>(1.0, 1.0, 1.0);
+///#if DIFFUSE_VERTEX
+    obj.color *= input.diffuse;
+///#endif
+///#if DIFFUSE_TEXTURE
+    obj.color *= textureSample(texture_diffuse, sampler_tex, input.uv).xyz;
+///#endif
+///#if DIFFUSE_TEXTURE && DIFFUSE_VERTEX
 ///#else
     obj.color = vec3<f32>(0.0, 0.0, 0.0);
 ///#endif
 
+///#endif
+
+
 ///#if NORMAL_VERTEX
     obj.normal = transform_normal_worldspace(input.normal, object.inverse_model);
+///#elseif NORMAL_TEXTURE
+    obj.normal = transform_normal_worldspace(textureSample(texture_normal, sampler_tex, input.uv).xyz, 
+        object.inverse_model);
+///#else
+    obj.normal = vec3<f32>(0.0, 1.0, 0.0);
 ///#endif
 
     var color = vec3<f32>(0.0, 0.0, 0.0);
@@ -151,17 +175,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     obj.color = input.specular;
 ///#elseif SPECULAR_CONSTANT
     obj.color = material_uniform.specular;
+///#elseif SPECULAR_TEXTURE
+    obj.color = textureSample(texture_specular, sampler_tex, input.uv).xyz;
 ///#else
     obj.color = vec3<f32>(0.0, 0.0, 0.0);
 ///#endif
 
     color += specular(obj, light, camera_uniform.dir, material_uniform.shininess) * intensity;
-
-///#if EMISSIVE_VERTEX
-    color += input.emissive;
-///#elseif EMISSIVE_CONSTANT
-    color += material_uniform.emissive;
-///#endif
 
     var value = get_attenuation(distance, attenuation);
 ///#if POINT_LIGHT

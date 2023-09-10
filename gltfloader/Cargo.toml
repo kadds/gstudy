@@ -6,7 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-gltf = {version = "1.0", features = ["extras", "names"]}
+gltf = {version = "1.0", features = ["extras", "names", 
+    "KHR_lights_punctual", "KHR_texture_transform", "KHR_materials_pbrSpecularGlossiness", 
+    "KHR_materials_specular", "KHR_materials_volume", "KHR_materials_emissive_strength", 
+    "KHR_materials_variants", "KHR_materials_ior", "KHR_materials_unlit", "KHR_materials_transmission"]}
 core = {path = "../core"}
 nalgebra = "0.32.2"
 anyhow = "1.0.57"
@@ -17,4 +20,10 @@ num_cpus = "1.15"
 image = "0.24"
 app = {path = "../app"}
 memmap2 = "0.7.1"
+phong-render = {path="../phong-render", optional=true}
+
+
+[features]
+phong = ["dep:phong-render"]
+default=["phong"]
 

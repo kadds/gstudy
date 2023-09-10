@@ -8,10 +8,8 @@ struct MaterialUniform {
     specular: vec3<f32>,
     placement2: f32,
 ///#endif
-///#if EMISSIVE_CONSATNT
     emissive: vec3<f32>,
-    placement3: f32,
-///#endif
+    emissive_strength: f32,
 
     shininess: f32,
 ///#if ALPHA_TEST

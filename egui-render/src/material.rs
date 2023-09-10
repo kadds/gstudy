@@ -29,7 +29,7 @@ impl MaterialFace for EguiMaterialFace {
         false
     }
 
-    fn material_data(&self) -> &[u8] {
+    fn material_uniform(&self) -> &[u8] {
         &[]
     }
 }

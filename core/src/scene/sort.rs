@@ -110,7 +110,7 @@ impl Sorter for DistanceSorter {
                 .filter_map(|v| {
                     let o = self.storage.get(&v).unwrap();
                     let o = o.o();
-                    if !o.visiable() {
+                    if !o.visible() {
                         None
                     } else {
                         // if let Some(aabb) = o.geometry().boundary() {

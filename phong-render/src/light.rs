@@ -352,6 +352,27 @@ impl SceneLights {
         inner.base.clone()
     }
 
+    pub fn any_light(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        if let Some(d) = &inner.direct_light {
+            if let Light::Direct(d) = d.as_ref() {
+                return true;
+            }
+        }
+        for e in &inner.extra_lights {
+            match e.as_ref() {
+                Light::Spot(s) => {
+                    return true;
+                }
+                Light::Point(p) => {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     pub fn any_shadow(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         if let Some(d) = &inner.direct_light {

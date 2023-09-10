@@ -1,6 +1,6 @@
 use core::{
     context::RContext,
-    material::{MaterialBuilder, MaterialMap},
+    material::{InputResource, InputResourceBuilder, MaterialBuilder},
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
@@ -28,15 +28,31 @@ pub struct MainLogic {
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene, lights: &SceneLights) {
         let basic_material_builder = PhongMaterialFaceBuilder::new()
-            .diffuse(MaterialMap::PreVertex)
-            .normal(MaterialMap::PreVertex)
-            .specular(MaterialMap::Constant(Color::new(
+            .diffuse(InputResourceBuilder::only_pre_vertex())
+            .normal(InputResourceBuilder::only_pre_vertex())
+            .specular(InputResourceBuilder::only_constant(Color::new(
                 0.7f32, 0.7f32, 0.7f32, 1f32,
             )))
             .shininess(4f32);
 
         let material = MaterialBuilder::default()
             .face(basic_material_builder.build())
+            .build(&scene.context());
+
+        let basic_material_builder2 = PhongMaterialFaceBuilder::new()
+            .diffuse(InputResourceBuilder::only_pre_vertex())
+            .normal(InputResourceBuilder::only_pre_vertex())
+            .emissive(InputResourceBuilder::only_constant(Color::new(
+                0.2f32, 0.2f32, 0.1f32, 1f32,
+            )))
+            .shininess(32f32)
+            .specular(InputResourceBuilder::only_constant(Color::new(
+                0.7f32, 0.7f32, 0.7f32, 1f32,
+            )))
+            .shininess(4f32);
+
+        let material2 = MaterialBuilder::default()
+            .face(basic_material_builder2.build())
             .build(&scene.context());
 
         {
@@ -50,7 +66,7 @@ impl MainLogic {
                     .translate(Vec3f::new(0f32, 0.5001f32, 0f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 
@@ -66,7 +82,7 @@ impl MainLogic {
                     .scale(Vec3f::new(0.5f32, 0.5f32, 0.5f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 
@@ -82,7 +98,23 @@ impl MainLogic {
                     .translate(Vec3f::new(1.2f32, 0.501f32, -0.2f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            scene.add(obj);
+        }
+
+        {
+            let mesh = UVSphereBuilder::default()
+                .enable_normal()
+                .set_segments(32, 24)
+                .enable_color(Color::new(0.6f32, 0.7f32, 0.8f32, 1f32))
+                .build();
+
+            let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
+                TransformBuilder::new()
+                    .translate(Vec3f::new(-1.5f32, 0.501f32, -0.8f32))
+                    .build(),
+            );
+            let obj = RenderObject::new(Box::new(geometry), material2.clone()).unwrap();
             scene.add(obj);
         }
 
@@ -97,7 +129,7 @@ impl MainLogic {
                     .scale(Vec3f::new(20f32, 1f32, 20f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             scene.add(obj);
         }
 

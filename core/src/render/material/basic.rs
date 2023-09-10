@@ -251,19 +251,16 @@ impl MaterialBufferInstantiation for BasicMaterialBufferInstantiation {
             });
         }
 
-        match &mat.texture {
-            crate::material::MaterialMap::Texture(texture) => {
-                let sampler = mat.sampler.as_ref().unwrap();
-                entries.push(wgpu::BindGroupEntry {
-                    binding: entries.len() as u32,
-                    resource: wgpu::BindingResource::Sampler(sampler.sampler()),
-                });
-                entries.push(wgpu::BindGroupEntry {
-                    binding: entries.len() as u32,
-                    resource: wgpu::BindingResource::TextureView(texture.texture_view()),
-                });
-            }
-            _ => (),
+        if let Some(texture) = mat.texture.texture_ref() {
+            let sampler = mat.sampler.as_ref().unwrap();
+            entries.push(wgpu::BindGroupEntry {
+                binding: entries.len() as u32,
+                resource: wgpu::BindingResource::Sampler(sampler.sampler()),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: entries.len() as u32,
+                resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+            });
         }
 
         if entries.len() == 0 {

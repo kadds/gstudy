@@ -347,7 +347,7 @@ pub struct RenderObject {
     geometry: Box<dyn Geometry>,
     material: Arc<Material>,
     z_order: i8,
-    visiable: bool,
+    visible: bool,
     case_shadow: bool,
     recv_shadow: bool,
     name: String,
@@ -355,17 +355,24 @@ pub struct RenderObject {
 }
 
 impl RenderObject {
-    pub fn new(geometry: Box<dyn Geometry>, material: Arc<Material>) -> Self {
-        Self {
+    pub fn new(geometry: Box<dyn Geometry>, material: Arc<Material>) -> anyhow::Result<Self> {
+        let t = &geometry.mesh().properties;
+        if let Some(ins) = geometry.instance() {
+            let v = ins.data.lock().unwrap();
+            material.face().validate(t, Some(&v))?;
+        } else {
+            material.face().validate(t, None)?;
+        };
+        Ok(Self {
             geometry,
             material,
             z_order: 0,
             case_shadow: false,
             recv_shadow: false,
             name: String::default(),
-            visiable: true,
+            visible: true,
             tag: HashSet::default(),
-        }
+        })
     }
 
     pub fn set_cast_shadow(&mut self) {
@@ -428,11 +435,11 @@ impl RenderObject {
         self.z_order
     }
 
-    pub fn visiable(&self) -> bool {
-        self.visiable
+    pub fn visible(&self) -> bool {
+        self.visible
     }
 
-    pub fn set_visiable(&mut self, show: bool) {
-        self.visiable = show;
+    pub fn set_visible(&mut self, show: bool) {
+        self.visible = show;
     }
 }

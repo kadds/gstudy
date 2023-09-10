@@ -1,6 +1,8 @@
 use core::{
     context::RContext,
-    material::{basic::BasicMaterialFaceBuilder, MaterialBuilder, MaterialMap},
+    material::{
+        basic::BasicMaterialFaceBuilder, InputResource, InputResourceBuilder, MaterialBuilder,
+    },
     mesh::{
         builder::{
             InstancePropertiesBuilder, InstancePropertiesUpdater, InstancePropertyType,
@@ -38,7 +40,7 @@ const Z: u64 = 50;
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
         let basic_material_builder = BasicMaterialFaceBuilder::new()
-            .texture(MaterialMap::Instance)
+            .texture(InputResourceBuilder::only_instance())
             .instance();
 
         let material = MaterialBuilder::default()
@@ -90,7 +92,7 @@ impl MainLogic {
                 dynamic: true,
             });
 
-            let obj = RenderObject::new(Box::new(geometry), material.clone());
+            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
             self.object_id = Some(scene.add(obj));
         }
 

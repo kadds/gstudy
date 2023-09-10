@@ -1440,3 +1440,12 @@ pub struct BufferPosition {
 //         self.uniform.buffers()
 //     }
 // }
+
+pub fn uniform_alignment(uniform: &mut Vec<u8>) {
+    let alignment = 16;
+    let len = uniform.len();
+    let rest = len % alignment;
+    if rest != 0 {
+        uniform.resize(len + alignment - rest, 0);
+    }
+}

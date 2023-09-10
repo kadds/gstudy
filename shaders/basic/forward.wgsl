@@ -42,7 +42,7 @@ struct VertexOutput {
 ///#if MATERIAL
 struct MaterialUniform {
 ///#if CONST_COLOR
-    color: vec4<f32>,
+    color: vec3<f32>,
 ///#endif
 ///#if ALPHA_TEST
     alpha_test: f32,
@@ -81,7 +81,7 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 ///#endif
 
 ///#if CONST_COLOR
-    output.color = material_uniform.color;
+    output.color = vec4<f32>(material_uniform.color.xyz, 1.0);
 ///#elseif CONST_COLOR_INSTANCE
     output.color = input.instance_color;
 ///#else

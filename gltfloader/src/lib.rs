@@ -158,7 +158,7 @@ fn parse_sampler(original: &Sampler, gpu: &WGPUResource) -> ResourceRef {
 }
 
 #[derive(Debug, Default)]
-pub struct LoadResult {
+pub struct GltfSceneInfo {
     total_nodes: u64,
     total_meshes: u64,
     total_vertices: u64,
@@ -166,6 +166,8 @@ pub struct LoadResult {
     total_textures: u64,
     total_samplers: u64,
     aabb: BoundBox,
+    main_camera_position: Vec3f,
+    main_camera_direction: Vec3f,
 }
 
 pub struct GltfBufferView<'a> {
@@ -179,7 +181,7 @@ pub struct ParseContext<'a> {
     ctx: RContextRef,
     // opened_files: HashMap<Box<File>>,
     scene: Scene,
-    res: LoadResult,
+    info: GltfSceneInfo,
     material_loader: Box<RefCell<dyn MaterialLoader>>,
 }
 
@@ -187,7 +189,7 @@ fn parse_primitive_indices(
     p: &gltf::Primitive,
     mesh_builder: &mut MeshBuilder,
     buf_view: &GltfBufferView,
-    res: &mut LoadResult,
+    res: &mut GltfSceneInfo,
 ) -> anyhow::Result<()> {
     if let Some(indices) = p.indices() {
         match indices.dimensions() {
@@ -240,7 +242,7 @@ impl<'a> ParseContext<'a> {
         mesh: gltf::Mesh,
         transform: &Transform,
     ) -> anyhow::Result<BoundBox> {
-        self.res.total_meshes += 1;
+        self.info.total_meshes += 1;
 
         let mut bound_box = BoundBox::default();
         for p in mesh.primitives() {
@@ -253,14 +255,14 @@ impl<'a> ParseContext<'a> {
             let mut mesh_builder = MeshBuilder::default();
             let mut mesh_properties_builder = MeshPropertiesBuilder::default();
 
-            parse_primitive_indices(&p, &mut mesh_builder, buf_view, &mut self.res)?;
+            parse_primitive_indices(&p, &mut mesh_builder, buf_view, &mut self.info)?;
 
-            let material = self.material_loader.borrow().load_properties_vertices(
+            let material = self.material_loader.borrow_mut().load_properties_vertices(
                 &p,
                 &mut mesh_builder,
                 &mut mesh_properties_builder,
                 buf_view,
-                &mut self.res,
+                &mut self.info,
             )?;
 
             mesh_builder.set_properties(mesh_properties_builder.build());
@@ -268,7 +270,9 @@ impl<'a> ParseContext<'a> {
             let mut g = StaticGeometry::new(Arc::new(mesh_builder.build()?));
 
             g = g.with_transform(transform.clone());
-            let mut obj = RenderObject::new(Box::new(g), material.clone());
+            let mut obj = RenderObject::new(Box::new(g), material.clone()).unwrap();
+            obj.set_cast_shadow();
+            obj.set_recv_shadow();
             obj.set_name(mesh.name().unwrap_or_default());
 
             obj.add_tag(tag_id);
@@ -300,12 +304,17 @@ impl<'a> ParseContext<'a> {
 
         if let Some(mesh) = node.mesh() {
             let bb = self.parse_mesh(tag_id, buf, mesh, &transform_node)?;
-            self.res.aabb = &self.res.aabb + &bb;
+            self.info.aabb = &self.info.aabb + &bb;
         }
-        self.res.total_nodes += 1;
+        self.info.total_nodes += 1;
 
         for node in node.children() {
             self.parse_node(node, tag_id, buf, &transform_node)?;
+        }
+        if let Some(light) = node.light() {
+            self.material_loader
+                .borrow()
+                .load_light(&light, &self.scene)?;
         }
         Ok(())
     }
@@ -409,14 +418,14 @@ impl<'a> ParseContext<'a> {
 
         for texture in gltf.textures() {
             batch.execute(|| parse_texture(&mut texture_map, buf_view, &self.gpu, texture));
-            self.res.total_textures += 1;
+            self.info.total_textures += 1;
         }
 
         let mut samplers = vec![];
         for sampler in gltf.samplers() {
             let sampler = parse_sampler(&sampler, &self.gpu);
             samplers.push(sampler);
-            self.res.total_samplers += 1;
+            self.info.total_samplers += 1;
         }
 
         batch.wait()?;
@@ -451,7 +460,7 @@ impl<'a> ParseContext<'a> {
     fn load_cameras(&mut self, gltf: &gltf::Gltf) -> anyhow::Result<()> {
         let aspect = self.gpu.aspect();
 
-        let bound_box = &mut self.res.aabb;
+        let bound_box = &mut self.info.aabb;
 
         let center = bound_box.center();
         let size = bound_box.size();
@@ -512,6 +521,9 @@ impl<'a> ParseContext<'a> {
         };
 
         camera.look_at(from, center, Vec3f::new(0f32, 1f32, 0f32));
+        self.info.main_camera_position = from;
+        self.info.main_camera_direction = from - center;
+
         let camera = Arc::new(camera);
         log::info!(
             "bound box {:?} with camera {:?} distance {}",
@@ -529,11 +541,11 @@ impl<'a> ParseContext<'a> {
         ctx: RContextRef,
         gpu: Arc<WGPUResource>,
         loader: Box<RefCell<dyn MaterialLoader>>,
-    ) -> anyhow::Result<(Scene, LoadResult)> {
+    ) -> anyhow::Result<(Scene, GltfSceneInfo)> {
         let gltf = gltf::Gltf::open(path)?;
         let mut this = Self {
             scene: Scene::new(ctx.clone()),
-            res: LoadResult::default(),
+            info: GltfSceneInfo::default(),
             gpu,
             ctx,
             pool,
@@ -547,7 +559,11 @@ impl<'a> ParseContext<'a> {
         this.load_meshes(&gltf, &mut buf_view)?;
         this.load_cameras(&gltf)?;
 
-        Ok((this.scene, this.res))
+        this.material_loader
+            .borrow_mut()
+            .post_load(&this.scene, &this.info)?;
+
+        Ok((this.scene, this.info))
     }
 }
 
@@ -559,13 +575,20 @@ fn default_material_loader(
         "" | "basic" => {
             return Box::new(RefCell::new(BasicMaterialLoader::new(gpu)));
         }
+        "phong" => {
+            #[cfg(feature = "phong")]
+            {
+                use material_loader::phong_loader::PhongMaterialLoader;
+                return Box::new(RefCell::new(PhongMaterialLoader::new(gpu)));
+            }
+        }
         _ => {}
     };
 
     Box::new(RefCell::new(BasicMaterialLoader::new(gpu)))
 }
 
-pub struct LoadRes {
+pub struct LoadSceneResult {
     pub name: String,
     pub scene: Option<Arc<Scene>>,
     pub error_string: String,
@@ -573,7 +596,7 @@ pub struct LoadRes {
 
 fn loader_main(
     rx: mpsc::Receiver<(String, String, Arc<WGPUResource>)>,
-    tx: Arc<Mutex<VecDeque<LoadRes>>>,
+    tx: Arc<Mutex<VecDeque<LoadSceneResult>>>,
     ctx: RContextRef,
 ) {
     let pool = TaskPoolBuilder::new().build();
@@ -591,7 +614,7 @@ fn loader_main(
             Ok(val) => val,
             Err(err) => {
                 log::error!("{} in {}", err, name);
-                tx.lock().unwrap().push_back(LoadRes {
+                tx.lock().unwrap().push_back(LoadSceneResult {
                     name,
                     scene: None,
                     error_string: format!("{}", err),
@@ -601,7 +624,7 @@ fn loader_main(
         };
 
         log::info!("load model {} {:?}", name, result);
-        tx.lock().unwrap().push_back(LoadRes {
+        tx.lock().unwrap().push_back(LoadSceneResult {
             name,
             scene: Some(Arc::new(scene)),
             error_string: String::new(),
@@ -612,7 +635,7 @@ fn loader_main(
 pub struct Loader {
     thread: Option<std::thread::JoinHandle<()>>,
     tx: mpsc::Sender<(String, String, Arc<WGPUResource>)>,
-    result: Arc<Mutex<VecDeque<LoadRes>>>,
+    result: Arc<Mutex<VecDeque<LoadSceneResult>>>,
     gpu: Mutex<Option<Arc<WGPUResource>>>,
 }
 
@@ -642,7 +665,7 @@ impl Loader {
         ));
     }
 
-    fn take_result(&self) -> Vec<LoadRes> {
+    fn take_result(&self) -> Vec<LoadSceneResult> {
         let mut result = self.result.lock().unwrap();
         if result.is_empty() {
             return vec![];
@@ -707,6 +730,6 @@ impl AppEventProcessor for GltfPlugin {
 }
 
 pub enum Event {
-    Loaded(LoadRes),
+    Loaded(LoadSceneResult),
     Unknown,
 }

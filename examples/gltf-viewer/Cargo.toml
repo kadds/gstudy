@@ -16,6 +16,7 @@ egui = "0.22.0"
 rfd = "0.12"
 nalgebra = "0.32.2"
 log = "0.4"
+phong-render = {path="../../phong-render"}
 profiling = "1.0"
 
 [features]

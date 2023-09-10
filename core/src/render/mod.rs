@@ -226,7 +226,10 @@ impl ModuleRenderer for HardwareRenderer {
             let f = match self.material_renderer_factory.get(&mat_face_id) {
                 Some(v) => v,
                 None => {
-                    log::error!("material {:?} renderer factory not exist", mat_face_id);
+                    log::error!(
+                        "material {:?} renderer factory not exist, check your plugin list",
+                        mat_face_id
+                    );
                     continue;
                 }
             };

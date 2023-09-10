@@ -47,8 +47,9 @@ pub trait Bound {
     fn in_frustum(&self, frustum: &Frustum) -> bool;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum Boundary {
+    #[default]
     None,
     AABB(BoundBox),
     OBB,

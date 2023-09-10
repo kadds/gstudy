@@ -12,6 +12,7 @@ use std::{any::Any, cell::RefCell, sync::Arc};
 use app::{container::Container, App, AppEventProcessor};
 use egui_render::EguiPluginFactory;
 use gltfloader::{GltfPluginFactory, Loader};
+use phong_render::PhongPluginFactory;
 use rfd::{FileDialog, MessageDialog};
 use window::{
     HardwareRenderPluginFactory, MainWindowHandle, StatisticsResource, WindowPluginFactory,
@@ -386,6 +387,7 @@ fn do_main() {
     app.register_plugin(HardwareRenderPluginFactory);
     app.register_plugin(EguiPluginFactory {});
     app.register_plugin(GltfPluginFactory);
+    app.register_plugin(PhongPluginFactory {});
     app.add_event_processor(Box::new(MainLogic::default()));
     app.run();
 }

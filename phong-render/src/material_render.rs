@@ -450,27 +450,32 @@ impl MaterialBufferInstantiation for PhongMaterialBufferInstantiation {
                 resource: wgpu::BindingResource::Sampler(sampler.sampler()),
             })
         }
-        match &mat.diffuse {
-            core::material::MaterialMap::Texture(t) => entries.push(wgpu::BindGroupEntry {
+        if let Some(texture) = mat.diffuse.texture_ref() {
+            entries.push(wgpu::BindGroupEntry {
                 binding: entries.len() as u32,
-                resource: wgpu::BindingResource::TextureView(t.texture_view()),
-            }),
-            _ => (),
-        }
-        match &mat.specular {
-            core::material::MaterialMap::Texture(t) => entries.push(wgpu::BindGroupEntry {
-                binding: entries.len() as u32,
-                resource: wgpu::BindingResource::TextureView(t.texture_view()),
-            }),
-            _ => (),
+                resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+            });
         }
 
-        match &mat.emissive {
-            core::material::MaterialMap::Texture(t) => entries.push(wgpu::BindGroupEntry {
+        if let Some(texture) = mat.normal.texture_ref() {
+            entries.push(wgpu::BindGroupEntry {
                 binding: entries.len() as u32,
-                resource: wgpu::BindingResource::TextureView(t.texture_view()),
-            }),
-            _ => (),
+                resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+            });
+        }
+
+        if let Some(texture) = mat.specular.texture_ref() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: entries.len() as u32,
+                resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+            });
+        }
+
+        if let Some(texture) = mat.emissive.texture_ref() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: entries.len() as u32,
+                resource: wgpu::BindingResource::TextureView(texture.texture_view()),
+            });
         }
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

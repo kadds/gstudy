@@ -1,54 +1,27 @@
-use std::{fmt::Debug, hash::Hasher};
+use std::{fmt::Debug, hash::Hasher, io::Write};
 
 use crate::{
+    backends::wgpu_backend::uniform_alignment,
     context::ResourceRef,
-    types::{Color, Vec3f, Vec4f},
+    mesh::builder::{InstancePropertyType, MeshPropertyType, INSTANCE_TRANSFORM},
+    types::{Color, Vec2f, Vec3f, Vec4f},
     util::any_as_u8_slice,
 };
 
-use super::{MaterialFace, MaterialMap};
-
-#[repr(C)]
-#[derive(Default)]
-pub struct Parameter {}
-
-#[repr(C)]
-#[derive(Default)]
-pub struct ParameterWithAlpha {
-    pub alpha: f32,
-    pub _pad: Vec3f,
-}
-
-#[repr(C)]
-#[derive(Default)]
-pub struct ConstParameter {
-    pub color: Vec4f,
-}
-
-#[repr(C)]
-#[derive(Default)]
-pub struct ConstParameterWithAlpha {
-    pub color: Vec4f,
-    pub alpha: f32,
-    pub _pad: Vec3f,
-}
-
-enum BasicMaterialParameter {
-    Default(Parameter),
-    ConstParameter(ConstParameter),
-    ConstParameterWithAlpha(ConstParameterWithAlpha),
-    Alpha(ParameterWithAlpha),
-}
+use super::{validate_material_properties, InputResource, MaterialFace};
 
 pub struct BasicMaterialFace {
     pub(crate) variants: Vec<&'static str>,
     pub(crate) variants_name: String,
-    pub(crate) texture: MaterialMap<Color>,
+    pub(crate) texture: InputResource<Color>,
     pub(crate) sampler: Option<ResourceRef>,
     pub(crate) alpha_test: Option<f32>,
     pub(crate) instance: bool,
 
-    parameter: BasicMaterialParameter,
+    uniform: Vec<u8>,
+
+    properties: Vec<MeshPropertyType>,
+    instance_properties: Vec<InstancePropertyType>,
 }
 
 impl Debug for BasicMaterialFace {
@@ -82,22 +55,25 @@ impl MaterialFace for BasicMaterialFace {
         h.finish()
     }
 
-    fn material_data(&self) -> &[u8] {
-        match &self.parameter {
-            BasicMaterialParameter::Default(_) => &[],
-            BasicMaterialParameter::ConstParameter(p) => any_as_u8_slice(p),
-            BasicMaterialParameter::ConstParameterWithAlpha(p) => any_as_u8_slice(p),
-            BasicMaterialParameter::Alpha(p) => any_as_u8_slice(p),
-        }
+    fn material_uniform(&self) -> &[u8] {
+        &self.uniform
+    }
+
+    fn validate(
+        &self,
+        t: &crate::mesh::builder::PropertiesFrame<MeshPropertyType>,
+        i: Option<&crate::mesh::builder::PropertiesFrame<InstancePropertyType>>,
+    ) -> anyhow::Result<()> {
+        validate_material_properties(t, i, &self.properties, &self.instance_properties)
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct BasicMaterialFaceBuilder {
     alpha_test: Option<f32>,
     instance: bool,
     sampler: Option<ResourceRef>,
-    texture: MaterialMap<Color>,
+    texture: InputResource<Color>,
 }
 
 impl BasicMaterialFaceBuilder {
@@ -108,85 +84,83 @@ impl BasicMaterialFaceBuilder {
         }
     }
     pub fn instance(mut self) -> Self {
+        self.set_instance();
+        self
+    }
+
+    pub fn set_instance(&mut self) {
         self.instance = true;
+    }
+
+    pub fn texture(mut self, texture: InputResource<Color>) -> Self {
+        self.set_texture(texture);
         self
     }
-    pub fn texture(mut self, texture: MaterialMap<Color>) -> Self {
+
+    pub fn get_texture(&mut self) -> InputResource<Color> {
+        self.texture.clone()
+    }
+
+    pub fn set_texture(&mut self, texture: InputResource<Color>) {
         self.texture = texture;
-        self
     }
+
+    pub fn has_sampler(&self) -> bool {
+        self.sampler.is_some()
+    }
+
     pub fn sampler(mut self, sampler: ResourceRef) -> Self {
-        self.sampler = Some(sampler);
+        self.set_sampler(sampler);
         self
     }
-    pub fn alpha_test(&mut self, cut: f32) {
+
+    pub fn set_sampler(&mut self, sampler: ResourceRef) {
+        self.sampler = Some(sampler);
+    }
+
+    pub fn alpha_test(mut self, cut: f32) -> Self {
+        self.set_alpha_test(cut);
+        self
+    }
+
+    pub fn set_alpha_test(&mut self, cut: f32) {
         self.alpha_test = Some(cut);
     }
 
     pub fn build(self) -> BasicMaterialFace {
+        let mut properties = vec![];
+        let mut instance_properties = vec![];
+        let mut uniform = vec![];
+
+        if self.instance {
+            instance_properties.push(INSTANCE_TRANSFORM);
+        }
+
         let mut variants = vec![];
-        let parameter = match self.texture {
-            MaterialMap::None => {
-                if let Some(a) = self.alpha_test {
-                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
-                        alpha: a,
-                        ..Default::default()
-                    })
-                } else {
-                    BasicMaterialParameter::Default(Parameter {})
+        for res_ty in self.texture.iter() {
+            match res_ty {
+                super::InputResourceIterItem::Constant(c) => {
+                    variants.push("CONST_COLOR");
+                    uniform.write_all(any_as_u8_slice(&Vec3f::new(c.x, c.y, c.z)));
+                }
+                super::InputResourceIterItem::PreVertex => {
+                    properties.push(MeshPropertyType::new::<Color>("color"));
+                    variants.push("VERTEX_COLOR");
+                }
+                super::InputResourceIterItem::Texture(_) => {
+                    variants.push("TEXTURE");
+                    properties.push(MeshPropertyType::new::<Vec2f>("texture"));
+                }
+                super::InputResourceIterItem::Instance => {
+                    variants.push("INSTANCE");
+                    instance_properties.push(InstancePropertyType::new::<Color>("color"));
+                    variants.push("CONST_COLOR_INSTANCE");
                 }
             }
-            MaterialMap::Constant(c) => {
-                variants.push("CONST_COLOR");
-                if let Some(a) = self.alpha_test {
-                    BasicMaterialParameter::ConstParameterWithAlpha(ConstParameterWithAlpha {
-                        alpha: a,
-                        color: c,
-                        ..Default::default()
-                    })
-                } else {
-                    BasicMaterialParameter::ConstParameter(ConstParameter { color: c })
-                }
-            }
-            MaterialMap::PreVertex => {
-                variants.push("VERTEX_COLOR");
-
-                if let Some(a) = self.alpha_test {
-                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
-                        alpha: a,
-                        ..Default::default()
-                    })
-                } else {
-                    BasicMaterialParameter::Default(Parameter {})
-                }
-            }
-            MaterialMap::Texture(_) => {
-                variants.push("TEXTURE");
-
-                if let Some(a) = self.alpha_test {
-                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
-                        alpha: a,
-                        ..Default::default()
-                    })
-                } else {
-                    BasicMaterialParameter::Default(Parameter {})
-                }
-            }
-            MaterialMap::Instance => {
-                if !self.instance {
-                    panic!("instance required")
-                }
-                variants.push("CONST_COLOR_INSTANCE");
-                if let Some(a) = self.alpha_test {
-                    BasicMaterialParameter::Alpha(ParameterWithAlpha {
-                        alpha: a,
-                        ..Default::default()
-                    })
-                } else {
-                    BasicMaterialParameter::Default(Parameter {})
-                }
-            }
-        };
+        }
+        if let Some(cut) = self.alpha_test {
+            uniform.write_all(any_as_u8_slice(&cut));
+        }
 
         if self.alpha_test.is_some() {
             variants.push("ALPHA_TEST");
@@ -194,6 +168,7 @@ impl BasicMaterialFaceBuilder {
         if self.instance {
             variants.push("INSTANCE");
         }
+        uniform_alignment(&mut uniform);
 
         BasicMaterialFace {
             variants_name: tshader::variants_name(&variants[..]),
@@ -201,8 +176,10 @@ impl BasicMaterialFaceBuilder {
             texture: self.texture,
             sampler: self.sampler,
             alpha_test: self.alpha_test,
-            parameter,
+            uniform,
             instance: self.instance,
+            properties,
+            instance_properties,
         }
     }
 }
