@@ -26,7 +26,9 @@ pub struct MainLogic {
 }
 
 impl MainLogic {
-    fn on_startup(&mut self, scene: &core::scene::Scene, lights: &SceneLights) {
+    fn on_startup(&mut self, scene: &core::scene::Scene) {
+        let lights = SceneLights::default();
+        
         let basic_material_builder = PhongMaterialFaceBuilder::new()
             .diffuse(InputResourceBuilder::only_pre_vertex())
             .normal(InputResourceBuilder::only_pre_vertex())
@@ -190,6 +192,7 @@ impl MainLogic {
 
         lights.add_spot_light(spot_light);
 
+        scene.attach(Arc::new(lights));
         scene.set_rebuild_flag();
     }
 }
@@ -199,9 +202,8 @@ impl AppEventProcessor for MainLogic {
         if let Some(ev) = event.downcast_ref::<app::Event>() {
             match ev {
                 app::Event::Startup => {
-                    let lights = context.container.get::<SceneLights>().unwrap();
                     let scene = context.container.get::<Scene>().unwrap();
-                    self.on_startup(&scene, &lights);
+                    self.on_startup(&scene);
                 }
             }
         } else if let Some(ev) = event.downcast_ref::<core::event::Event>() {

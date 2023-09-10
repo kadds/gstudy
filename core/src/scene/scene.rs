@@ -239,6 +239,10 @@ impl Scene {
             let (_, value) = store.remove(&id).unwrap();
             self.add_with(value.object, value.layer);
         }
+        let mut t = self.attach_resources.lock().unwrap();
+        let mut r = scene.attach_resources.lock().unwrap();
+
+        std::mem::swap(&mut *t, &mut *r);
     }
 
     fn clear_inner(&self) {

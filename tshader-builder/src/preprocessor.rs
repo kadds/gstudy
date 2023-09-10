@@ -790,7 +790,12 @@ impl BinOp {
                     }
                 } else {
                     if let EvalVal::None = right {
-                        (*l).into()
+                        match self {
+                            BinOp::Equal => false.into(),
+                            BinOp::Or => (*l).into(),
+                            BinOp::And => false.into(),
+                            _ => return Err(op_is_not_support()),
+                        }
                     } else {
                         return Err(type_mismatch());
                     }

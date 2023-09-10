@@ -27,7 +27,7 @@ enum MaterialMapKey {
 struct PMaterialMap {
     b: MaterialBuilder,
     fb: PhongMaterialFaceBuilder,
-    settler: HashMap<InputResourceBits, Arc<Material>>,
+    settler: HashMap<(InputResourceBits, InputResourceBits), Arc<Material>>,
     default_sampler: ResourceRef,
 }
 
@@ -35,16 +35,21 @@ impl PMaterialMap {
     pub fn generate_material(
         &mut self,
         additional_input: &InputResource<Color>,
+        additional_normal_input: &InputResource<Vec3f>,
         context: &RContext,
     ) -> Arc<Material> {
         let mut input = self.fb.get_diffuse();
         input.merge_available(additional_input);
+
+        let mut input_normal = self.fb.get_normal();
+        input_normal.merge_available(additional_normal_input);
+
         self.settler
-            .entry(input.bits())
+            .entry((input.bits(), input_normal.bits()))
             .or_insert_with(|| {
-                let mut fb = self.fb.clone().diffuse(input.clone());
+                let mut fb = self.fb.clone().diffuse(input.clone()).normal(input_normal.clone());
                 let b = self.b.clone();
-                if input.is_texture() {
+                if input.is_texture() || input_normal.is_texture() {
                     if !fb.has_sampler() {
                         // add default sampler
                         fb.set_sampler(self.default_sampler.clone());
@@ -216,14 +221,14 @@ impl MaterialLoader for PhongMaterialLoader {
                 _ => (),
             }
         }
-        if has_uv {
-            mesh_properties_builder.add_property(uv_property);
+        if has_normal {
+            mesh_properties_builder.add_property(normal_property);
         }
         if has_color {
             mesh_properties_builder.add_property(color_property);
         }
-        if has_normal {
-            mesh_properties_builder.add_property(normal_property);
+        if has_uv {
+            mesh_properties_builder.add_property(uv_property);
         }
 
         for (semantic, accessor) in p.attributes() {
@@ -345,16 +350,20 @@ impl MaterialLoader for PhongMaterialLoader {
             MaterialMapKey::Default
         };
         let mut input = InputResourceBuilder::new();
+        let mut input_normal = InputResourceBuilder::new();
 
         if mesh_properties_builder.has_property(&color_property) {
             input.add_pre_vertex();
+        }
+        if mesh_properties_builder.has_property(&normal_property) {
+            input_normal.add_pre_vertex();
         }
 
         let material = self
             .map
             .get_mut(&key)
             .ok_or(anyhow::anyhow!("material not found {:?}", key))?
-            .generate_material(&input.build(), self.gpu.context());
+            .generate_material(&input.build(), &input_normal.build(), self.gpu.context());
 
         Ok(material.clone())
     }
@@ -420,6 +429,8 @@ impl MaterialLoader for PhongMaterialLoader {
 
             let direct_light = DirectLightBuilder::default()
                 .intensity(1.0f32)
+                .color(Color::new(0.8f32, 0.8f32, 0.8f32, 1f32))
+                .position(Vec3f::new(12f32, 10f32, 10f32))
                 .direction(Vec3f::new(-10f32, -10f32, -15f32).normalize())
                 .cast_shadow(ShadowConfig {
                     cast_shadow: true,
