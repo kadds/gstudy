@@ -17,6 +17,7 @@ pub struct ObjectBuffer {
     pub vertex_properties: Option<wgpu::Buffer>,
     pub instance_data: Option<wgpu::Buffer>,
     pub instance_count: u32,
+    pub instance_version: u64,
 }
 
 impl ObjectBuffer {
@@ -71,6 +72,7 @@ fn create_static_object_buffer(
     instance: Option<&InstanceProperties>,
     device: &wgpu::Device,
 ) -> ObjectBuffer {
+    profiling::scope!("static buffer", &format!("{}", id));
     let index = if let Some(index) = mesh.indices_view() {
         Some(
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -103,7 +105,6 @@ fn create_static_object_buffer(
 
     let (instance_data, count) = if let Some(ins) = &instance {
         let view = ins.data.lock().unwrap();
-
         (
             Some(
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -124,19 +125,108 @@ fn create_static_object_buffer(
         vertex_properties,
         instance_data,
         instance_count: count as u32,
+        instance_version: 0,
+    }
+}
+
+fn update_dynamic_object_buffer(
+    id: u64,
+    mesh: &Mesh,
+    instance: Option<&InstanceProperties>,
+    device: &wgpu::Device,
+    buf: &mut ObjectBuffer,
+) {
+    if let Some(view) = &instance {
+        let v = view.data.lock().unwrap();
+        if v.version != buf.instance_version {
+            buf.instance_version = v.version;
+            // copy buffer
+            let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{} instance buffer", id)),
+                contents: &v.view(),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
+            buf.instance_data = Some(instance_buffer);
+            buf.instance_count = v.count as u32;
+        }
+    }
+}
+
+fn create_dynamic_object_buffer(
+    id: u64,
+    mesh: &Mesh,
+    instance: Option<&InstanceProperties>,
+    device: &wgpu::Device,
+) -> ObjectBuffer {
+    profiling::scope!("dynamic buffer", &format!("{}", id));
+    let index = if let Some(index) = mesh.indices_view() {
+        Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{} index buffer", id)),
+                contents: index,
+                usage: wgpu::BufferUsages::INDEX,
+            }),
+        )
+    } else {
+        None
+    };
+
+    let vertex = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{} vertex buffer", id)),
+        contents: mesh.vertices_view().unwrap_or_default(),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    let vertex_properties = if !mesh.properties_view().is_empty() {
+        Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{} properties buffer", id)),
+                contents: mesh.properties_view(),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+        )
+    } else {
+        None
+    };
+
+    let (instance_data, count, version) = if let Some(ins) = &instance {
+        let view = ins.data.lock().unwrap();
+        (
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{} instance buffer", id)),
+                    contents: &view.view(),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            ),
+            view.count,
+            view.version,
+        )
+    } else {
+        (None, 1, 0)
+    };
+
+    ObjectBuffer {
+        index,
+        vertex,
+        vertex_properties,
+        instance_data,
+        instance_count: count as u32,
+        instance_version: version,
     }
 }
 
 pub struct MeshBufferCollector {
-    // static_object_buffers: FramedCache<u64, ObjectBuffer>,
+    static_object_buffers: FramedCache<u64, ObjectBuffer>,
     // small_static_object_buffers: StaticMeshMerger,
-    dynamic_object_buffers: HashMap<u64, ObjectBuffer>,
+    dynamic_object_buffers: FramedCache<u64, ObjectBuffer>,
 }
 
 impl MeshBufferCollector {
     pub fn new() -> Self {
         Self {
-            dynamic_object_buffers: HashMap::new(),
+            static_object_buffers: FramedCache::new(),
+            dynamic_object_buffers: FramedCache::new(),
         }
     }
 
@@ -149,23 +239,28 @@ impl MeshBufferCollector {
         let mesh = obj.geometry().mesh();
         let instance = obj.geometry().instance();
 
-        // if obj.geometry().is_static() {
-        //     self.inner.static_object_buffers.get_or(*id, |_| {
-        //         create_static_object_buffer(*id, &mesh, engine.device())
-        //     });
-        // } else {
-        self.dynamic_object_buffers
-            .entry(object_id)
-            .or_insert_with(|| create_static_object_buffer(object_id, &mesh, instance, device));
-        // }
+        if obj.geometry().info().is_static {
+            self.static_object_buffers.get_or(object_id, |_| {
+                create_static_object_buffer(object_id, &mesh, instance, device)
+            });
+        } else {
+            let buf = self.dynamic_object_buffers.get_mut_or(object_id, |_| {
+                create_dynamic_object_buffer(object_id, &mesh, instance, device)
+            });
+            update_dynamic_object_buffer(object_id, &mesh, instance, device, buf);
+        }
     }
 
     pub fn get(&self, _c: &SceneStorage, object_id: u64) -> Option<&ObjectBuffer> {
+        if let Some(v) = self.static_object_buffers.get(&object_id) {
+            return Some(v);
+        }
         self.dynamic_object_buffers.get(&object_id)
     }
 
     pub fn recall(&mut self) {
-        self.dynamic_object_buffers.clear();
+        self.static_object_buffers.recall();
+        self.dynamic_object_buffers.recall();
     }
 
     pub fn finish(&mut self) {}

@@ -146,6 +146,7 @@ pub enum TransformType {
 pub struct InstanceProperties {
     pub data: Mutex<PropertiesFrame<InstancePropertyType>>,
     pub transform_type: TransformType,
+    pub dynamic: bool,
 }
 #[derive(Debug)]
 pub struct StaticGeometry {
@@ -185,9 +186,16 @@ impl Geometry for StaticGeometry {
     }
 
     fn info(&self) -> GeometryInfo {
-        GeometryInfo {
-            is_static: true,
-            is_instance: false,
+        if let Some(ins) = &self.instance_data {
+            GeometryInfo {
+                is_static: !ins.dynamic,
+                is_instance: true,
+            }
+        } else {
+            GeometryInfo {
+                is_static: true,
+                is_instance: false,
+            }
         }
     }
 

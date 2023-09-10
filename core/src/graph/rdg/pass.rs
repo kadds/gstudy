@@ -271,7 +271,7 @@ impl DynPass for RenderPass {
             gpu: backend.gpu(),
             registry: registry,
         };
-        {
+        let copy_commands = {
             profiling::scope!("copy engine");
             let mut copy_engine = backend.dispatch_copy(&self.name);
             if c.prepare(context, &mut copy_engine).is_none() {
@@ -285,7 +285,8 @@ impl DynPass for RenderPass {
                 render_engine.begin(0);
                 return;
             }
-        }
+            copy_engine.take_command()
+        };
         {
             profiling::scope!("queue engine");
             c.queue(context, backend.gpu().device());
@@ -300,6 +301,7 @@ impl DynPass for RenderPass {
                 registry,
             );
             c.render(context, &mut render_engine);
+            render_engine.insert_command_buffers(0, copy_commands);
         }
         c.cleanup(context);
     }

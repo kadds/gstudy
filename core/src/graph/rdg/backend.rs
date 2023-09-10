@@ -148,6 +148,7 @@ impl GraphBackend {
         GraphRenderEngine {
             gpu: self.gpu.clone(),
             ws: vec![],
+            cb: vec![],
             render_target,
             render_target2,
         }
@@ -238,6 +239,7 @@ impl GraphBackend {
         GraphRenderEngine {
             gpu: self.gpu.clone(),
             ws: vec![],
+            cb: vec![],
             render_target,
             render_target2,
         }
@@ -275,6 +277,7 @@ impl GraphBackend {
 pub struct GraphRenderEngine {
     gpu: Arc<WGPUResource>,
     pub ws: Vec<Box<RefCell<wgpu::CommandEncoder>>>,
+    pub cb: Vec<wgpu::CommandBuffer>,
     pub render_target: WGPURenderTarget,
     pub render_target2: WGPURenderTarget,
 }
@@ -310,6 +313,10 @@ impl GraphRenderEngine {
             }
         }
     }
+
+    pub fn insert_command_buffers(&mut self, index: usize, command: wgpu::CommandBuffer) {
+        self.cb.insert(index, command);
+    }
 }
 
 impl Drop for GraphRenderEngine {
@@ -318,6 +325,8 @@ impl Drop for GraphRenderEngine {
         std::mem::swap(&mut tmp, &mut self.ws);
 
         let mut commands = vec![];
+        std::mem::swap(&mut self.cb, &mut commands);
+
         for encoder in tmp {
             let encoder = encoder.into_inner();
             commands.push(encoder.finish())
@@ -345,12 +354,17 @@ impl GraphCopyEngine {
     pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
         self.w.as_mut().unwrap()
     }
+    pub fn take_command(&mut self) -> wgpu::CommandBuffer {
+        self.w.take().unwrap().finish()
+    }
 }
 
 impl Drop for GraphCopyEngine {
     fn drop(&mut self) {
-        let command = self.w.take().unwrap().finish();
-        self.gpu.queue().submit([command]);
+        if let Some(w) = self.w.take() {
+            let command = w.finish();
+            self.gpu.queue().submit([command]);
+        }
     }
 }
 

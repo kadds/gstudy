@@ -25,6 +25,7 @@ pub struct Window {
     first_render: bool,
     frame: Option<WindowSurfaceFrame2>,
     has_resize_event: bool,
+    pub(crate) delay_frame_ms: u64,
 }
 
 impl Window {
@@ -48,6 +49,7 @@ impl Window {
             first_render: true,
             frame: None,
             has_resize_event: false,
+            delay_frame_ms: 0,
         }
     }
 
@@ -78,6 +80,7 @@ impl Window {
                     if self.frame.is_some() {
                         return;
                     }
+                    let wait_ts = instant::Instant::now();
                     let surface_frame = match self.gpu.clone().current_frame_texture2() {
                         Ok(v) => v,
                         Err(e) => {
@@ -85,6 +88,13 @@ impl Window {
                             return;
                         }
                     };
+                    let wait_end = instant::Instant::now();
+                    let wait_ms = (wait_end - wait_ts).as_millis() as u64;
+                    if wait_ms > 4 {
+                        log::warn!("get swapchain delay {}ms", wait_ms);
+                    }
+                    self.delay_frame_ms = wait_ms;
+
                     proxy.send_event(Box::new(core::event::Event::Render(
                         surface_frame.texture(),
                     )));

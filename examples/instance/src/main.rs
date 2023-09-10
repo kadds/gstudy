@@ -87,6 +87,7 @@ impl MainLogic {
             let geometry = StaticGeometry::new(mesh).with_instance(InstanceProperties {
                 data: Mutex::new(instance_builder.build()),
                 transform_type: TransformType::Mat4x4,
+                dynamic: true,
             });
 
             let obj = RenderObject::new(Box::new(geometry), material.clone());

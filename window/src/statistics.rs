@@ -42,6 +42,10 @@ impl Statistics {
         self.target_frame_secends = target_frame_seconds.map(Duration::from_secs_f32);
     }
 
+    pub fn set_delay_frame(&mut self, delay_ms: u64) {
+        self.last_timestamp += instant::Duration::from_millis(delay_ms);
+    }
+
     pub fn new_frame(&mut self) -> bool {
         let now = Instant::now();
         let delta = now - self.last_timestamp;

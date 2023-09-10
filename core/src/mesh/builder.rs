@@ -27,6 +27,7 @@ pub struct PropertiesFrame<P> {
     pub row_strip_size: u32,
     pub row_size: u32,
     pub count: u64,
+    pub version: u64,
 }
 
 impl<P> PropertiesFrame<P> {
@@ -44,6 +45,7 @@ impl<P> Default for PropertiesFrame<P> {
             row_strip_size: 0,
             row_size: 0,
             count: 0,
+            version: 0,
         }
     }
 }
@@ -194,6 +196,7 @@ where
             row_strip_size: self.row_strip_size,
             row_size: self.row_size,
             count: self.count,
+            version: 0,
         }
     }
 }
@@ -440,6 +443,7 @@ pub type InstancePropertiesUpdater<'a> = PropertiesUpdater<'a, InstancePropertyT
 
 pub struct PropertiesUpdater<'a, P> {
     p: &'a mut PropertiesFrame<P>,
+    update: bool,
 }
 
 impl<'a, P> PropertiesUpdater<'a, P>
@@ -447,7 +451,7 @@ where
     P: Property,
 {
     pub fn new(p: &'a mut PropertiesFrame<P>) -> Self {
-        Self { p }
+        Self { p, update: false }
     }
 
     pub fn set_property<T>(&mut self, property: P, index: u64, data: &[T]) {
@@ -474,6 +478,7 @@ where
             }
             cur_offset += row_strip;
         }
+        self.update = true;
     }
 
     pub fn get_property1<T: Copy>(&mut self, property: P, index: u64) -> &T {
@@ -524,5 +529,13 @@ where
             cur_offset += row_strip;
         }
         res
+    }
+}
+
+impl<'a, P> Drop for PropertiesUpdater<'a, P> {
+    fn drop(&mut self) {
+        if self.update {
+            self.p.version += 1;
+        }
     }
 }

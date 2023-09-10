@@ -229,6 +229,10 @@ impl Looper {
                 }
                 core::event::Event::PostRender => {
                     profiling::scope!("post render event");
+                    if let Some(w) = &self.main_window {
+                        let ms = w.borrow().delay_frame_ms;
+                        self.frame.lock().unwrap().set_delay_frame(ms);
+                    }
                     return self.process_inner(event);
                 }
                 _ => (),

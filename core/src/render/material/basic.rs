@@ -184,6 +184,7 @@ struct BasicMaterialBufferInstantiation {
 }
 
 impl MaterialBufferInstantiation for BasicMaterialBufferInstantiation {
+    #[profiling::function]
     fn create_pipeline(
         &self,
         material: &Material,
@@ -227,6 +228,7 @@ impl MaterialBufferInstantiation for BasicMaterialBufferInstantiation {
         )
     }
 
+    #[profiling::function]
     fn create_bind_group(
         &self,
         material: &Material,
