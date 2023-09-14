@@ -1,7 +1,12 @@
-use std::ops::Add;
+use std::{ops::Add, sync::Arc};
 
 use nalgebra::{SMatrix, SimdPartialOrd, Vector2, Vector3, Vector4};
 use ordered_float::OrderedFloat;
+
+use crate::{
+    debug::DebugMeshGenerator,
+    mesh::builder::{MeshBuilder, MeshPropertiesBuilder, MeshPropertyType},
+};
 
 pub type Mat3x3f = SMatrix<f32, 3, 3>;
 pub type Mat4x4f = SMatrix<f32, 4, 4>;
@@ -197,18 +202,55 @@ pub struct Frustum {
     // pub far_rt: Vec3f,
     // pub far_lb: Vec3f,
     // pub far_rb: Vec3f,
-    pub pos: [Vec3f; 8],
-    // pub near: Plane,
-    // pub far: Plane,
-    // pub left: Plane,
-    // pub right: Plane,
-    // pub top: Plane,
-    // pub bottom: Plane,
+
+    // pub position: Vec3f,
+    pub pos: [Vec3f; 12],
 }
 
 impl Frustum {
-    pub fn new(pos: [Vec3f; 8]) -> Self {
+    pub fn new(frustum: &[Vec3f; 8], position: Vec3f, to: Vec3f, up: Vec3f) -> Self {
         // let near =
-        Self { pos }
+        let mut pos: [_; 12] = [Vec3f::default(); 12];
+        (&mut pos[..8]).copy_from_slice(frustum);
+        pos[8] = position;
+        pos[9] = to;
+        pos[10] = position + up;
+        let right = (position - to).normalize().cross(&up);
+        pos[11] = position + right;
+
+        Self { pos: pos }
+    }
+}
+
+impl DebugMeshGenerator for Frustum {
+    fn generate(&self, color: Color) -> std::sync::Arc<crate::mesh::Mesh> {
+        let mut mesh_builder = MeshBuilder::default();
+        let mut properties_builder = MeshPropertiesBuilder::default();
+        let property = MeshPropertyType::new::<Color>("color");
+        properties_builder.add_property(property);
+
+        mesh_builder.add_position_vertices3(&self.pos[..]);
+        mesh_builder.add_indices32(&[0, 1, 1, 3, 2, 3, 0, 2]);
+        mesh_builder.add_indices32(&[4, 5, 5, 7, 6, 7, 4, 6]);
+        mesh_builder.add_indices32(&[0, 4, 1, 5, 3, 7, 2, 6]);
+        mesh_builder.add_indices32(&[8, 0, 8, 1, 8, 2, 8, 3]);
+        mesh_builder.add_indices32(&[8, 9, 8, 10, 8, 11]);
+
+        let pos_c = Color::new(1.0f32, 0.4f32, 0.5f32, 1.0f32);
+        let pos_to = Color::new(1.0f32, 1f32, 1.0f32, 1.0f32);
+        let pos_up = Color::new(0.3f32, 1f32, 0.3f32, 1.0f32);
+        let pos_right = Color::new(0.5f32, 0.4f32, 1f32, 1.0f32);
+
+        properties_builder.add_property_data(
+            property,
+            &[
+                color, color, color, color, color, color, color, color, pos_c, pos_to, pos_up,
+                pos_right,
+            ],
+        );
+
+        mesh_builder.set_properties(properties_builder.build());
+
+        Arc::new(mesh_builder.build().unwrap())
     }
 }

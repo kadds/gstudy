@@ -47,7 +47,11 @@ impl PMaterialMap {
         self.settler
             .entry((input.bits(), input_normal.bits()))
             .or_insert_with(|| {
-                let mut fb = self.fb.clone().diffuse(input.clone()).normal(input_normal.clone());
+                let mut fb = self
+                    .fb
+                    .clone()
+                    .diffuse(input.clone())
+                    .normal(input_normal.clone());
                 let b = self.b.clone();
                 if input.is_texture() || input_normal.is_texture() {
                     if !fb.has_sampler() {

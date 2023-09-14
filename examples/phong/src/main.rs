@@ -1,10 +1,11 @@
 use core::{
-    context::RContext,
-    material::{InputResource, InputResourceBuilder, MaterialBuilder},
+    context::{RContext, TagId},
+    debug::{new_debug_material, DebugMeshGenerator},
+    material::{InputResource, InputResourceBuilder, Material, MaterialBuilder},
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
-        Camera, RenderObject, Scene, TransformBuilder,
+        Camera, RenderObject, Scene, TransformBuilder, LAYER_NORMAL,
     },
     types::{Color, Size, Vec3f},
     util::angle2rad,
@@ -14,7 +15,9 @@ use std::{any::Any, cell::RefCell, sync::Arc};
 use app::{App, AppEventProcessor};
 use geometry::{mesh::CubeMeshBuilder, mesh::PlaneMeshBuilder, mesh::UVSphereBuilder};
 use phong_render::{
-    light::{DirectLightBuilder, PointLightBuilder, SceneLights, ShadowConfig, SpotLightBuilder},
+    light::{
+        DirectLightBuilder, PointLightBuilder, SceneLights, ShadowConfig, SpotLightBuilder, TLight,
+    },
     material::PhongMaterialFaceBuilder,
     PhongPluginFactory,
 };
@@ -23,12 +26,59 @@ use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 #[derive(Default)]
 pub struct MainLogic {
     ct: Option<Box<RefCell<dyn CameraController>>>,
+    debug_materia: Option<Arc<Material>>,
+    debug_tag: Option<TagId>,
 }
 
 impl MainLogic {
+    fn update(&mut self, delta: f32, scene: &core::scene::Scene) {
+        let lights = scene.get_resource::<SceneLights>().unwrap();
+        let mut meshes = vec![];
+
+        if lights.has_direct_light() {
+            let dlight = lights.direct_light().unwrap();
+            meshes.push(
+                dlight.light_cameras()[0]
+                    .frustum_worldspace()
+                    .generate(Color::new(0.8f32, 0.92f32, 0.84f32, 1.0f32)),
+            );
+        };
+
+        for light in &lights.extra_lights() {
+            // continue;;
+            let color = match light.as_ref() {
+                phong_render::light::Light::Spot(_) => Color::new(0.9f32, 0.84f32, 0.77f32, 1f32),
+                // phong_render::light::Light::Point(_) => Color::new(0.72f32, 0.84f32, 0.97f32, 1f32),
+                _ => {
+                    continue;
+                }
+            };
+
+            meshes.extend_from_slice(
+                &light
+                    .light_cameras()
+                    .iter()
+                    .map(|c| c.frustum_worldspace().generate(color))
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        scene.remove_by_tag(self.debug_tag.unwrap());
+
+        for mesh in meshes {
+            let geometry = StaticGeometry::new(mesh);
+            let obj =
+                RenderObject::new(Box::new(geometry), self.debug_materia.clone().unwrap()).unwrap();
+            scene.add_with_tag(obj, LAYER_NORMAL, self.debug_tag.unwrap());
+        }
+    }
+
     fn on_startup(&mut self, scene: &core::scene::Scene) {
+        self.debug_materia = Some(new_debug_material(&scene.context()));
+        self.debug_tag = Some(scene.context().new_tag("debug_mesh"));
+
         let lights = SceneLights::default();
-        
+
         let basic_material_builder = PhongMaterialFaceBuilder::new()
             .diffuse(InputResourceBuilder::only_pre_vertex())
             .normal(InputResourceBuilder::only_pre_vertex())
@@ -159,6 +209,7 @@ impl MainLogic {
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
                 pcf: true,
+                bias_factor: 0.5f32,
                 ..Default::default()
             })
             .build();
@@ -172,6 +223,8 @@ impl MainLogic {
             .intensity(0.8f32)
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
+                pcf: true,
+                bias_factor: 0.02f32,
                 ..Default::default()
             })
             .build();
@@ -179,13 +232,14 @@ impl MainLogic {
         lights.add_point_light(point_light);
 
         let spot_light = SpotLightBuilder::new()
-            .position(Vec3f::new(-5f32, 4f32, -5f32))
-            .direction(Vec3f::new(0.2f32, -0.4f32, 0.2f32))
+            .position(Vec3f::new(-4f32, 4f32, -4.1f32))
+            .direction(Vec3f::new(0.2f32, -0.3f32, 0.2f32))
             .cutoff(angle2rad(20f32), angle2rad(28f32))
             .color(Color::new(0.51f32, 0.44f32, 0.7f32, 1f32))
             .cast_shadow(ShadowConfig {
                 cast_shadow: true,
-                pcf: false,
+                pcf: true,
+                bias_factor: 0.02f32,
                 ..Default::default()
             })
             .build();
@@ -207,10 +261,17 @@ impl AppEventProcessor for MainLogic {
                 }
             }
         } else if let Some(ev) = event.downcast_ref::<core::event::Event>() {
-            if let core::event::Event::Input(input) = &ev {
-                if let Some(ct) = &mut self.ct {
-                    ct.borrow_mut().on_input(input);
+            match ev {
+                core::event::Event::Update(delta) => {
+                    let scene = context.container.get::<Scene>().unwrap();
+                    self.update(*delta as f32, &scene);
                 }
+                core::event::Event::Input(input) => {
+                    if let Some(ct) = &mut self.ct {
+                        ct.borrow_mut().on_input(input);
+                    }
+                }
+                _ => (),
             }
         }
     }

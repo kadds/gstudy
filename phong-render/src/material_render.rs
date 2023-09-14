@@ -199,16 +199,17 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
 
         if has_direct_light {
             variants_base.push("DIRECT_LIGHT");
+            let dlight = lights.direct_light().unwrap();
             scene_shared
                 .lights_uniforms
                 .push(LightUniformHolder::BaseLight((
                     lights.base_uniform(),
-                    lights.direct_light().clone(),
+                    dlight.clone(),
                 )));
-            if lights.direct_light().shadow_config().cast_shadow {
+            if dlight.shadow_config().cast_shadow {
                 variants_base.push("SHADOW");
             }
-            if lights.direct_light().shadow_config().pcf {
+            if dlight.shadow_config().pcf {
                 variants_base.push("SHADOW_PCF");
             }
         } else {
@@ -278,7 +279,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         let mut shadow_map_id = None;
         if has_direct_light {
             let res = self.add_shadow_pass_for_light(
-                lights.direct_light(),
+                lights.direct_light().unwrap(),
                 shared.clone(),
                 shadow_pipeline.clone(),
                 g,
@@ -293,7 +294,7 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             shared: shared.clone(),
             has_shadow_pass: shadow_pipeline.is_some()
                 && has_direct_light
-                && lights.direct_light().shadow_config().cast_shadow,
+                && lights.direct_light().unwrap().shadow_config().cast_shadow,
             shadow_map_sampler: shadow_sampler.clone(),
             shadow_map_binding: None,
             has_direct_light,

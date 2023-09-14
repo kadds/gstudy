@@ -4,7 +4,7 @@ name = "shadow"
 source = "shadow.wgsl"
 binding = ["pre_camera"]
 camera = "D3"
-shaders = ["vs"]
+shaders = ["vs", "fs"]
 variants = { excludes = [], exclusives = ["TEXTURE_COLOR|VERTEX_COLOR"], unit = []}
 
 

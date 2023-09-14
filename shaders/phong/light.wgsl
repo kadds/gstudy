@@ -32,12 +32,12 @@ fn transform_normal_worldspace(normal: vec3<f32>, world_inv: mat4x4<f32>) -> vec
 
 ///#if SHADOW_PCF
 fn recv_shadow_visibility(pos: vec3<f32>, normal: vec3<f32>, light_dir: vec3<f32>, 
-    sampler_tex: sampler_comparison, shadow_tex: texture_depth_2d, size: vec2<f32>) -> f32 {
+    sampler_tex: sampler_comparison, shadow_tex: texture_depth_2d, size: vec2<f32>, bias_factor: f32) -> f32 {
     let ov = 1.0 / size;
 
-    // let bias = max(0.01 * (1.0 - dot(normal, -light_dir)), 0.005);
+    let bias = max(0.01 * (1.0 - dot(normal, -light_dir)), 0.005) * bias_factor; 
     var visibility = 0.0;
-    let bias = 0.0;
+    // let bias = 0.0;
 
     for (var x = -1; x <= 1; x++) {
         for (var y = -1; y <= 1; y++) {
@@ -53,10 +53,10 @@ fn recv_shadow_visibility(pos: vec3<f32>, normal: vec3<f32>, light_dir: vec3<f32
 }
 ///#else
 fn recv_shadow_visibility(pos: vec3<f32>, normal: vec3<f32>, light_dir: vec3<f32>, 
-    sampler_tex: sampler_comparison, shadow_tex: texture_depth_2d, size: vec2<f32>) -> f32 {
+    sampler_tex: sampler_comparison, shadow_tex: texture_depth_2d, size: vec2<f32>, bias_factor: f32) -> f32 {
 
-    // let bias = max(0.05 * (1.0 - dot(normal, -light_dir)), 0.005);
-    let bias = 0.0;
+    let bias = max(0.05 * (1.0 - dot(normal, -light_dir)), 0.005) * bias_factor;
+    // let bias = 0.0;
 
     var visibility = textureSampleCompare(shadow_tex, sampler_tex, pos.xy, pos.z - bias);
 
@@ -83,7 +83,10 @@ struct DirectLight {
     size_y: f32,
     vp: mat4x4<f32>,
     attenuation: vec4<f32>,
-    intensity: vec4<f32>,
+    intensity: f32,
+    bias_factor: f32,
+    placement0: f32,
+    placement1: f32,
 }
 
 struct PointLight {
@@ -93,7 +96,10 @@ struct PointLight {
     size_y: f32,
     vp: mat4x4<f32>,
     attenuation: vec4<f32>,
-    intensity: vec4<f32>,
+    intensity: f32,
+    bias_factor: f32,
+    placement0: f32,
+    placement1: f32,
 }
 
 struct SpotLight {
@@ -103,10 +109,10 @@ struct SpotLight {
     position: vec3<f32>,
     size_y: f32,
     direction: vec3<f32>,
-    placement: f32,
+    bias_factor: f32,
     cutoff: f32,
     cutoff_outer: f32,
-    placement2: f32,
+    placement0: f32,
     intensity: f32,
     attenuation: vec4<f32>,
 }

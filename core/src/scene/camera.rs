@@ -26,7 +26,10 @@ impl Default for PerspectiveProject {
 
 impl PerspectiveProject {
     pub fn gen(&self) -> Mat4x4f {
-        Mat4x4f::new_perspective(self.aspect, self.fovy, self.near, self.far)
+        let mut res = Mat4x4f::new_perspective(self.aspect, self.fovy, self.near, self.far);
+        res.append_nonuniform_scaling_mut(&Vec3f::new(1f32, 1f32, 0.5f32));
+        res.append_translation_mut(&Vec3f::new(0f32, 0f32, 0.5f32));
+        res
     }
 }
 
@@ -49,14 +52,17 @@ impl Default for OrthographicProject {
 
 impl OrthographicProject {
     pub fn gen(&self) -> Mat4x4f {
-        Mat4x4f::new_orthographic(
+        let mut res = Mat4x4f::new_orthographic(
             self.rect.x,
             self.rect.z,
             self.rect.y,
             self.rect.w,
             self.near,
             self.far,
-        )
+        );
+        res.append_nonuniform_scaling_mut(&Vec3f::new(1f32, 1f32, 0.5f32));
+        res.append_translation_mut(&Vec3f::new(0f32, 0f32, 0.5f32));
+        res
     }
 }
 
@@ -146,50 +152,47 @@ impl Camera {
     }
 
     pub fn frustum_worldspace(&self) -> Frustum {
-        let inner = self.inner.lock().unwrap();
-        match &inner.project_var {
-            Project::Perspective(p) => {
-                let deg_y = p.fovy.tan();
-                let deg_x = deg_y * p.aspect;
-                let world = inner.view;
+        let vp = self.vp();
+        let rev = vp.try_inverse().unwrap();
+        let pos = self.from();
+        let to = self.to();
+        let up = self.up();
 
-                let f0 = world * Vec4f::new(-deg_x, -deg_y, 1f32, 1f32);
-                let f1 = world * Vec4f::new(-deg_x, deg_y, 1f32, 1f32);
-                let f2 = world * Vec4f::new(deg_x, -deg_y, 1f32, 1f32);
-                let f3 = world * Vec4f::new(deg_x, deg_y, 1f32, 1f32);
+        let nlt = Vec4f::new(-1f32, 1f32, 0f32, 1f32);
+        let nlb = Vec4f::new(-1f32, -1f32, 0f32, 1f32);
+        let nrt = Vec4f::new(1f32, 1f32, 0f32, 1f32);
+        let nrb = Vec4f::new(1f32, -1f32, 0f32, 1f32);
 
-                let pos = inner.from;
+        let flt = Vec4f::new(-1f32, 1f32, 1f32, 1f32);
+        let flb = Vec4f::new(-1f32, -1f32, 1f32, 1f32);
+        let frt = Vec4f::new(1f32, 1f32, 1f32, 1f32);
+        let frb = Vec4f::new(1f32, -1f32, 1f32, 1f32);
 
-                Frustum::new([
-                    pos + (p.near * f1).xyz(),
-                    pos + (p.near * f3).xyz(),
-                    pos + (p.near * f0).xyz(),
-                    pos + (p.near * f2).xyz(),
-                    pos + (p.far * f1).xyz(),
-                    pos + (p.far * f3).xyz(),
-                    pos + (p.far * f0).xyz(),
-                    pos + (p.far * f2).xyz(),
-                ])
-            }
-            Project::Orthographic(o) => {
-                let world = inner.view;
-                let pos = inner.from;
-                let f0 = world * Vec4f::new(-o.rect.x, -o.rect.y, 1f32, 1f32);
-                let f1 = world * Vec4f::new(-o.rect.x, o.rect.y, 1f32, 1f32);
-                let f2 = world * Vec4f::new(o.rect.x, -o.rect.y, 1f32, 1f32);
-                let f3 = world * Vec4f::new(o.rect.x, o.rect.y, 1f32, 1f32);
-                Frustum::new([
-                    pos + (o.near * f1).xyz(),
-                    pos + (o.near * f3).xyz(),
-                    pos + (o.near * f0).xyz(),
-                    pos + (o.near * f2).xyz(),
-                    pos + (o.far * f1).xyz(),
-                    pos + (o.far * f3).xyz(),
-                    pos + (o.far * f0).xyz(),
-                    pos + (o.far * f2).xyz(),
-                ])
-            }
-        }
+        let nlt = rev * nlt;
+        let nrt = rev * nrt;
+        let nlb = rev * nlb;
+        let nrb = rev * nrb;
+
+        let flt = rev * flt;
+        let frt = rev * frt;
+        let flb = rev * flb;
+        let frb = rev * frb;
+
+        return Frustum::new(
+            &[
+                nlt.xyz() / nlt.w,
+                nrt.xyz() / nrt.w,
+                nlb.xyz() / nlb.w,
+                nrb.xyz() / nrb.w,
+                flt.xyz() / flt.w,
+                frt.xyz() / frt.w,
+                flb.xyz() / flb.w,
+                frb.xyz() / frb.w,
+            ],
+            pos,
+            to,
+            up,
+        );
     }
 
     pub fn uniform_3d(&self) -> Vec<u8> {
@@ -201,6 +204,26 @@ impl Camera {
             direction: Vec4f::new(dir.x, dir.y, dir.z, 0.0f32),
         };
         data.write_all(any_as_u8_slice(&uniform));
+        data
+    }
+
+    pub fn uniform_shadow_3d(&self) -> Vec<u8> {
+        let mut data = vec![];
+        let vp = self.vp();
+        let dir = (self.to() - self.from()).normalize();
+        let uniform = Uniform3d {
+            mat: vp,
+            direction: Vec4f::new(dir.x, dir.y, dir.z, 0.0f32),
+        };
+        data.write_all(any_as_u8_slice(&uniform));
+        data.write_all(any_as_u8_slice(&self.near()));
+        data.write_all(any_as_u8_slice(&self.far()));
+        if self.is_perspective() {
+            data.write_all(any_as_u8_slice(&1.0f32));
+        } else {
+            data.write_all(any_as_u8_slice(&-1.0f32));
+        }
+        data.write_all(any_as_u8_slice(&0.0f32));
         data
     }
 

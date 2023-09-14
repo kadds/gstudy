@@ -69,6 +69,7 @@ pub struct PhongMaterialFaceBuilder {
     emissive: InputResource<Color>,
     emissive_strength: f32,
     shininess: f32,
+    recv_shadow: bool,
 
     sampler: Option<ResourceRef>,
     alpha_test: Option<f32>,
@@ -83,6 +84,7 @@ impl PhongMaterialFaceBuilder {
             emissive: InputResource::default(),
             emissive_strength: 1.0f32,
             shininess: 8f32,
+            recv_shadow: false,
             alpha_test: None,
             sampler: None,
         }
@@ -160,6 +162,14 @@ impl PhongMaterialFaceBuilder {
     }
     pub fn has_sampler(&self) -> bool {
         self.sampler.is_some()
+    }
+
+    pub fn recv_shadow(mut self) -> Self {
+        self.set_recv_shadow();
+        self
+    }
+    pub fn set_recv_shadow(&mut self) {
+        self.recv_shadow = true;
     }
 
     pub fn build(self) -> PhongMaterialFace {

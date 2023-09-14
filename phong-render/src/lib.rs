@@ -53,7 +53,6 @@ impl Plugin for PhongPlugin {
 
 impl AppEventProcessor for PhongPlugin {
     fn on_event(&mut self, context: &app::AppEventContext, event: &dyn std::any::Any) {
-        if let Some(ev) = event.downcast_ref::<core::event::Event>() {
-        }
+        if let Some(ev) = event.downcast_ref::<core::event::Event>() {}
     }
 }

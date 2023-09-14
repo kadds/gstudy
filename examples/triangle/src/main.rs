@@ -54,7 +54,7 @@ impl MainLogic {
         scene.add(obj);
 
         let camera = Camera::new();
-        camera.make_orthographic(Vec4f::new(-1f32, 1f32, 1f32, -1f32), 0.01f32, 1.01f32);
+        camera.make_orthographic(Vec4f::new(-1f32, 1f32, 1f32, -1f32), 0.1f32, 2.0f32);
 
         camera.look_at(
             Vec3f::new(0f32, 0f32, 1f32),

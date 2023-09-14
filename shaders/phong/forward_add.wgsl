@@ -99,11 +99,14 @@ fn vs_main(input: VertexInput) -> VertexOutput{
 ///#endif
 ///#if POINT_LIGHT
     let pos_camera = light_uniform.point.vp * (object.model * vec4<f32>(input.position, 1.0));
+    let pos_camera_norm = pos_camera.xyz / pos_camera.w;
+    // let z = (pos_camera_norm.z - light_uniform.point.near) / (light_uniform.point.far - light_uniform.point.near);
 ///#elseif SPOT_LIGHT
     let pos_camera = light_uniform.spot.vp * (object.model * vec4<f32>(input.position, 1.0));
+    let pos_camera_norm = pos_camera.xyz / pos_camera.w;
+    // let z = (pos_camera_norm.z - light_uniform.spot.near) / (light_uniform.spot.far - light_uniform.spot.near);
 ///#endif
 ///#if SHADOW
-    let pos_camera_norm = pos_camera.xyz / pos_camera.w;
     let p = pos_camera_norm.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     output.shadow_position = vec3<f32>(p.x, p.y, pos_camera_norm.z);
 ///#endif
@@ -160,7 +163,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     let distance = length(input.raw_position - light_uniform.point.position);
     light.dir = normalize(input.raw_position - light_uniform.point.position);
     light.color = light_uniform.point.color;
-    intensity = light_uniform.point.intensity.x;
+    intensity = light_uniform.point.intensity;
     attenuation = light_uniform.point.attenuation;
 ///#elseif SPOT_LIGHT
     let distance = length(input.raw_position - light_uniform.spot.position);
@@ -188,6 +191,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
 ///#if SHADOW
     let size = vec2<f32>(light_uniform.point.size_x, light_uniform.point.size_y);
 ///#endif
+    let bias_factor = light_uniform.point.bias_factor;
 
 ///#elseif SPOT_LIGHT
 
@@ -202,13 +206,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
             value = 1.0;
         }
     }
+    let bias_factor = light_uniform.spot.bias_factor;
 
 ///#if SHADOW
     if value > 0.0 {
         let size = vec2<f32>(light_uniform.spot.size_x, light_uniform.spot.size_y);
         let shadow = recv_shadow_visibility(input.shadow_position, 
             obj.normal, light.dir,
-            shadow_sampler, shadow_map, size);
+            shadow_sampler, shadow_map, size, bias_factor);
         value *= shadow;
     }
 ///#endif

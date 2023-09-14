@@ -165,7 +165,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     var color = vec3<f32>(0.0, 0.0, 0.0);
 
 ///#if DIRECT_LIGHT
-    let intensity = light_uniform.direct.intensity.x;
+    let intensity = light_uniform.direct.intensity;
     var light: LightInfo;
     light.dir = light_uniform.direct.direction;
     light.color = light_uniform.direct.color;
@@ -196,7 +196,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32>{
     let size = vec2<f32>(light_uniform.direct.size_x, light_uniform.direct.size_y);
     let shadow = recv_shadow_visibility(input.shadow_position, 
         obj.normal, light.dir,
-        shadow_sampler, shadow_map, size);
+        shadow_sampler, shadow_map, size, light_uniform.direct.bias_factor);
     color = color * shadow + ambient_color;
 ///#else
     color = color + ambient_color;
