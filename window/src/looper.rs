@@ -274,7 +274,8 @@ impl Looper {
             WEvent::MainEventsCleared => {
                 #[cfg(windows)]
                 {
-                    self.window.request_redraw();
+                    let w = self.main_window.as_mut().unwrap().borrow_mut();
+                    w.inner.request_redraw();
                 }
             }
             WEvent::RedrawEventsCleared => {
