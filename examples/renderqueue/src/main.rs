@@ -1,25 +1,19 @@
 use core::{
     context::RContext,
-    material::{
-        basic::BasicMaterialFaceBuilder, InputResourceBuilder, MaterialBuilder,
-    },
+    material::{basic::BasicMaterialFaceBuilder, InputResourceBuilder, MaterialBuilder},
     mesh::StaticGeometry,
-    scene::{
-        controller::{orbit::OrbitCameraController, CameraController},
-        Camera, RenderObject, Scene, TransformBuilder,
-    },
+    scene::{Camera, RenderObject, Scene, TransformBuilder, LAYER_NORMAL},
     types::{Color, Size, Vec3f},
 };
-use std::{any::Any, cell::RefCell, sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use app::{App, AppEventProcessor};
+use egui_render::EguiPluginFactory;
 use geometry::mesh::*;
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 
 #[derive(Default)]
-pub struct MainLogic {
-    ct: Option<Box<RefCell<dyn CameraController>>>,
-}
+pub struct MainLogic {}
 
 impl MainLogic {
     fn on_startup(&mut self, scene: &core::scene::Scene) {
@@ -61,7 +55,7 @@ impl MainLogic {
             );
 
             let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
-            scene.add(obj);
+            scene.add_with(obj, LAYER_NORMAL + 1);
         }
 
         {
@@ -78,23 +72,7 @@ impl MainLogic {
             );
 
             let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
-            scene.add(obj);
-        }
-
-        {
-            let mesh = CircleMeshBuilder::default()
-                .enable_color(Color::new(0.9f32, 0.7f32, 0.7f32, 1f32))
-                .set_segments(48)
-                .build();
-
-            let geometry = StaticGeometry::new(Arc::new(mesh)).with_transform(
-                TransformBuilder::new()
-                    .translate(Vec3f::new(-2f32, 0.1f32, 0.4f32))
-                    .build(),
-            );
-
-            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
-            scene.add(obj);
+            scene.add_with(obj, LAYER_NORMAL + 2);
         }
 
         let camera = Camera::new();
@@ -107,10 +85,6 @@ impl MainLogic {
         );
 
         let camera = Arc::new(camera);
-
-        self.ct = Some(Box::new(RefCell::new(OrbitCameraController::new(
-            camera.clone(),
-        ))));
         scene.set_main_camera(camera);
     }
 }
@@ -125,10 +99,11 @@ impl AppEventProcessor for MainLogic {
                 }
             }
         } else if let Some(ev) = event.downcast_ref::<core::event::Event>() {
-            if let core::event::Event::Input(input) = &ev {
-                if let Some(ct) = &mut self.ct {
-                    ct.borrow_mut().on_input(input);
-                }
+            if let core::event::Event::Update(_) = &ev {
+                let ctx = context.container.get::<egui::Context>().unwrap();
+                egui::Window::new("Test")
+                    .resizable(true)
+                    .show(&ctx, |ui| ctx.settings_ui(ui));
             }
         }
     }
@@ -140,10 +115,11 @@ fn main() {
 
     let mut app = App::new(context);
     app.register_plugin(WindowPluginFactory::new(
-        "Builtin geometries",
+        "render queue",
         Size::new(900, 720),
     ));
     app.register_plugin(HardwareRenderPluginFactory);
+    app.register_plugin(EguiPluginFactory {});
     app.add_event_processor(Box::new(MainLogic::default()));
     app.run();
 }

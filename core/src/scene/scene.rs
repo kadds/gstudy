@@ -1,4 +1,3 @@
-use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 
 use crate::{
@@ -346,7 +345,7 @@ pub trait ObjectDrop: std::fmt::Debug {
     fn drop(&self, id: u64);
 }
 
-#[derive(Debug, Component)]
+#[derive(Debug)]
 pub struct RenderObject {
     geometry: Box<dyn Geometry>,
     material: Arc<Material>,

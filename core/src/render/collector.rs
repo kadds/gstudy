@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use wgpu::util::DeviceExt;
 
 use crate::{

@@ -10,7 +10,7 @@ core = {path = "../../core"}
 window = {path = "../../window"}
 env_logger = "0.10"
 egui-render = {path = "../../egui-render"}
-egui = "0.22.0"
+egui = "0.23.0"
 app = {path = "../../app"}
 log = "0.4"
 profiling = "1.0"

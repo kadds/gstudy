@@ -3,7 +3,7 @@ members = ["./core", "./app", "./tshader", "./tshader-builder"
     , "./gltfloader", "./window", "./geometry", "./phong-render"
     , "./egui-render", "examples/triangle", "examples/egui", "examples/gltf-viewer"
     , "examples/empty", "examples/cube", "examples/phong", "examples/builtin_geometries"
-    , "examples/instance"]
+    , "examples/instance", "examples/renderqueue"]
 resolver = "2"
 
 # Enable a small amount of optimization in debug mode

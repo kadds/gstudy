@@ -1,5 +1,5 @@
 [package]
-name = "gltf-viewer"
+name = "renderqueue"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,16 +8,9 @@ edition = "2021"
 [dependencies]
 core = {path = "../../core"}
 window = {path = "../../window"}
-gltfloader = {path = "../../gltfloader"}
 app = {path = "../../app"}
 env_logger = "0.10"
+wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+geometry = {path="../../geometry"}
 egui-render = {path = "../../egui-render"}
 egui = "0.23.0"
-rfd = "0.12"
-nalgebra = "0.32.2"
-log = "0.4"
-phong-render = {path="../../phong-render"}
-profiling = "1.0"
-
-[features]
-profile-with-tracy = ["profiling/profile-with-tracy"]
