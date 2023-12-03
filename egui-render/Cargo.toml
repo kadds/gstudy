@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 egui = "0.23.0"
-wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
 winit = { version = "0.28", default-features = false, features = ["x11", "wayland"]}
 core = {path = "../core"}
 log = "0.4"

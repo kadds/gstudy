@@ -10,7 +10,7 @@ core = {path = "../../core"}
 window = {path = "../../window"}
 app = {path = "../../app"}
 env_logger = "0.10"
-wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
 geometry = {path="../../geometry"}
 egui-render = {path = "../../egui-render"}
 egui = "0.23.0"

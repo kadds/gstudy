@@ -13,7 +13,7 @@ gltf = {version = "1.0", features = ["extras", "names",
 core = {path = "../core"}
 nalgebra = "0.32.2"
 anyhow = "1.0.57"
-wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
 log = "0.4"
 urlencoding = "2.1"
 num_cpus = "1.15"

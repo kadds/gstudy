@@ -8,11 +8,11 @@ edition = "2021"
 [dependencies]
 winit = { version = "0.28", default-features = false, features = ["x11", "wayland"]}
 core = {path = "../core"}
-wgpu = { version = "0.17" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
 anyhow = "1.0.57"
 log = "0.4"
 webbrowser = "0.8"
 instant = "0.1.12"
 app = {path = "../app"}
-raw-window-handle = "0.5.2"
+raw-window-handle = "0.5"
 profiling = "1.0"

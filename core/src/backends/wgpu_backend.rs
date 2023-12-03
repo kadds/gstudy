@@ -467,6 +467,8 @@ impl WGPUBackend {
         let instance = Instance::new(wgpu::InstanceDescriptor {
             backends: bits,
             dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+            flags: InstanceFlags::from_build_config(),
+            gles_minor_version: Gles3MinorVersion::Automatic,
         });
         let surface = unsafe { instance.create_surface(surface) }.unwrap();
         let adapter_fut = instance.request_adapter(&RequestAdapterOptions {
@@ -683,6 +685,8 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
                 label: Some(label),
                 color_attachments: &[],
                 depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
             },
             depth_attachment: None,
         }
@@ -739,6 +743,11 @@ impl WGPURenderTarget {
 
     fn map_ops(color: Option<ResourceOps>) -> Operations<wgpu::Color> {
         if let Some(color) = color {
+            let store = if color.store {
+                StoreOp::Store
+            } else {
+                StoreOp::Discard
+            };
             Operations {
                 load: color.load.map_or(LoadOp::Load, |c| {
                     let c = c.color().unwrap();
@@ -749,12 +758,12 @@ impl WGPURenderTarget {
                         a: c.w as f64,
                     })
                 }),
-                store: color.store,
+                store,
             }
         } else {
             Operations {
                 load: LoadOp::Load,
-                store: false,
+                store: StoreOp::Discard,
             }
         }
     }
@@ -767,21 +776,31 @@ impl WGPURenderTarget {
     ) {
         let inner = self.get();
         let ops = if let Some(clear) = clear {
+            let store = if clear.store {
+                StoreOp::Store
+            } else {
+                StoreOp::Discard
+            };
             Some(Operations {
                 load: clear.load.map_or(wgpu::LoadOp::Load, |v| {
                     wgpu::LoadOp::Clear(v.depth().unwrap())
                 }),
-                store: clear.store,
+                store,
             })
         } else {
             None
         };
         let ops_stencil = if let Some(clear_stencil) = clear_stencil {
+            let store = if clear_stencil.store {
+                StoreOp::Store
+            } else {
+                StoreOp::Discard
+            };
             Some(Operations {
                 load: clear_stencil.load.map_or(wgpu::LoadOp::Load, |v| {
                     wgpu::LoadOp::Clear(v.stencil().unwrap())
                 }),
-                store: clear_stencil.store,
+                store,
             })
         } else {
             None

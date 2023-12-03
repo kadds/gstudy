@@ -237,6 +237,7 @@ impl ShaderTech {
                 location,
                 interpolation: _,
                 sampling: _,
+                second_blend_source: _,
             } => {
                 let format = Self::to_vertex_format(ty)?;
                 if let naga::TypeInner::Vector {

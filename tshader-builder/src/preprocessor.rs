@@ -297,7 +297,7 @@ impl<'a> PreprocessorContext<'a> {
             Expr::Ident(i) => Ok(self.var_map.get(*i).cloned().unwrap_or(EvalVal::None)),
             Expr::Call(c) => {
                 let ident_name = match c.ident.as_ref() {
-                    Expr::Ident(ident) => (*ident).clone(),
+                    Expr::Ident(ident) => *ident,
                     _ => return Err(anyhow::anyhow!("fail parse function call expr")),
                 };
 
