@@ -9,6 +9,7 @@ use std::{any::Any, sync::Arc};
 
 use app::{App, AppEventProcessor};
 use egui_render::EguiPluginFactory;
+use egui_render::egui;
 use geometry::mesh::*;
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 

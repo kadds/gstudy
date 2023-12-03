@@ -35,6 +35,8 @@ pub mod material_render;
 pub mod render;
 mod util;
 
+pub use egui;
+
 pub struct EguiRenderer {
     ui_textures: Option<UITextures>,
     ui_mesh: UIMesh,
@@ -109,11 +111,11 @@ impl EguiRenderer {
 
     pub fn pre_update(&mut self, dt: f32, size: Size) {
         self.input.predicted_dt += dt;
-        self.input.pixels_per_point = Some(self.ppi);
         self.input.screen_rect = Some(egui::Rect::from_min_max(
             egui::pos2(0f32, 0f32),
             egui::pos2(size.x as f32, size.y as f32), // logical size
         ));
+        self.ctx.set_pixels_per_point(self.ppi);
         profiling::scope!("begin_frame");
         self.ctx.begin_frame(self.input.clone());
     }

@@ -14,6 +14,7 @@ use egui_render::EguiPluginFactory;
 use gltfloader::{GltfPluginFactory, Loader};
 use phong_render::PhongPluginFactory;
 use rfd::{FileDialog, MessageDialog};
+use egui_render::egui;
 use window::{
     HardwareRenderPluginFactory, MainWindowHandle, StatisticsResource, WindowPluginFactory,
 };

@@ -117,7 +117,7 @@ impl UIMesh {
             }
         }
 
-        let meshes = ctx.tessellate(frame.shapes);
+        let meshes = ctx.tessellate(frame.shapes, ctx.pixels_per_point());
         let mut ret = vec![];
         for mesh in meshes {
             let mut clip = if mesh.clip_rect.is_finite() {

@@ -12,7 +12,6 @@ gltfloader = {path = "../../gltfloader"}
 app = {path = "../../app"}
 env_logger = "0.10"
 egui-render = {path = "../../egui-render"}
-egui = "0.23.0"
 rfd = "0.12"
 nalgebra = "0.32.2"
 log = "0.4"

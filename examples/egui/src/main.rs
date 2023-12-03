@@ -3,6 +3,7 @@ use std::any::Any;
 
 use app::{App, AppEventProcessor};
 use egui_render::EguiPluginFactory;
+use egui_render::egui;
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 
 pub struct MainLogic {}
