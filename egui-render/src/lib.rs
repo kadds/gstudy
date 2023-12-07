@@ -105,6 +105,13 @@ impl EguiRenderer {
                     log::info!("load font {} ready", name);
                 }
             }
+            let empty = egui::FontDefinitions::default();
+            fd.font_data.extend(empty.font_data.into_iter());
+            for (k, v) in empty.families {
+                let e = fd.families.entry(k).or_default();
+                e.extend(v.into_iter());
+            }
+
             self.ctx.set_fonts(fd);
         }
     }
