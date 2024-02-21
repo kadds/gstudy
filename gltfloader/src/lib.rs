@@ -8,6 +8,7 @@ mod taskpool;
 
 use core::backends::wgpu_backend::WGPUResource;
 use core::mesh::builder::{MeshBuilder, MeshPropertiesBuilder};
+use core::wgpu;
 use std::any::Any;
 
 use core::context::{RContext, RContextRef, ResourceRef, TagId};

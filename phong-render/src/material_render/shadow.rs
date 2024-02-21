@@ -3,10 +3,9 @@ use core::{
     render::{material::take_rs, PipelinePassResource},
     types::Vec2f,
     util::any_as_u8_slice,
+    wgpu::{self, util::DeviceExt},
 };
 use std::sync::{Arc, Mutex};
-
-use wgpu::util::DeviceExt;
 
 use crate::{
     light::{Light, TLight},

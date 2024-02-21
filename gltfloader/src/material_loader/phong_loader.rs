@@ -6,6 +6,7 @@ use core::{
     render::default_blender,
     types::{Color, Vec2f, Vec3f, Vec4f},
     util::any_as_x_slice_array,
+    wgpu,
 };
 use std::{collections::HashMap, sync::Arc};
 

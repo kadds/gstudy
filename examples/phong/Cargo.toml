@@ -11,7 +11,7 @@ window = {path = "../../window"}
 app = {path = "../../app"}
 phong-render = {path="../../phong-render"}
 geometry = {path="../../geometry"}
-env_logger = "0.10"
+env_logger = "0.11"
 profiling = "1.0"
 
 [features]

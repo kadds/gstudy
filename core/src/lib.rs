@@ -11,3 +11,5 @@ pub mod render;
 pub mod scene;
 pub mod types;
 pub mod util;
+
+pub use wgpu;

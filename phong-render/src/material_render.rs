@@ -13,6 +13,7 @@ use core::{
         RenderDescriptorObject, ResolvePipelineConfig,
     },
     types::Vec3u,
+    wgpu,
 };
 use std::sync::{Arc, Mutex};
 

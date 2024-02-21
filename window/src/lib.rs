@@ -19,13 +19,13 @@ use app::container::{Container, LockResource};
 use app::plugin::{LooperPlugin, Plugin, PluginFactory};
 use app::AppEventProcessor;
 pub use looper::Looper;
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use raw_window_handle::{HasWindowHandle, WindowHandle};
 use statistics::Statistics;
 pub use winit;
 mod util;
 
 pub type DEvent = Box<dyn Any + Send>;
-pub type WEvent<'a> = winit::event::Event<'a, DEvent>;
+pub type WEvent = winit::event::Event<DEvent>;
 pub type CEvent = core::event::Event;
 
 struct HardwareRenderPlugin {
@@ -240,12 +240,12 @@ impl PluginFactory for WindowPluginFactory {
 }
 
 pub struct RawWindow {
-    pub handle: RawWindowHandle,
+    pub handle: raw_window_handle::RawWindowHandle,
 }
 
-unsafe impl HasRawWindowHandle for RawWindow {
-    fn raw_window_handle(&self) -> RawWindowHandle {
-        self.handle
+impl raw_window_handle::HasWindowHandle for RawWindow {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, raw_window_handle::HandleError> {
+        unsafe { Ok(WindowHandle::borrow_raw(self.handle)) }
     }
 }
 

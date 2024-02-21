@@ -10,7 +10,8 @@ use std::{
 };
 
 use instant::Duration;
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use log::{error, warn};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
     window::WindowBuilder,
@@ -59,21 +60,25 @@ pub struct LoopEventRegistry {
 }
 
 impl LoopEventRegistry {
-    fn run_event_processor(&mut self, event: &dyn Any, s: &LooperEventSource) -> ControlFlow {
+    fn run_event_processor(
+        &mut self,
+        event: &dyn Any,
+        s: &LooperEventSource,
+    ) -> Option<ControlFlow> {
         for process in &self.processors {
             match process.borrow_mut().on_event(s, event) {
                 ProcessEventResult::Received => {
                     continue;
                 }
                 ProcessEventResult::Consumed => {
-                    return ControlFlow::Wait;
+                    return Some(ControlFlow::Wait);
                 }
                 ProcessEventResult::ExitLoop => {
-                    return ControlFlow::Exit;
+                    return None;
                 }
             }
         }
-        ControlFlow::Wait
+        Some(ControlFlow::Wait)
     }
 }
 
@@ -85,7 +90,7 @@ impl EventRegistry for LoopEventRegistry {
 
 impl Looper {
     pub fn new() -> Self {
-        let event_loop = EventLoopBuilder::with_user_event().build();
+        let event_loop = EventLoopBuilder::with_user_event().build().unwrap();
         let event_proxy = event_loop.create_proxy();
         Self {
             event_loop: RefCell::new(Some(event_loop)),
@@ -120,7 +125,7 @@ impl Looper {
     pub fn handle(&self) -> Option<RawWindowHandle> {
         self.main_window
             .as_ref()
-            .map(|v| v.borrow().inner.raw_window_handle())
+            .map(|v| v.borrow().inner.window_handle().unwrap().as_raw())
     }
 
     pub fn create_window(&mut self, b: WindowBuilder, context: RContextRef) -> Arc<WGPUResource> {
@@ -167,15 +172,17 @@ impl Looper {
         let event_loop = self.event_loop.take().unwrap();
         let this = self as *mut Self;
 
-        event_loop.run(move |ev, w, c| {
+        let err = event_loop.run(move |ev, w| {
             let s = unsafe { this.as_mut().unwrap() };
             let event_proxy = s.event_proxy.clone();
-            let control = s.on_event(ev, w, &event_proxy);
-            *c = control;
-        })
+            s.on_event(ev, w, &event_proxy);
+        });
+        if let Err(err) = err {
+            error!("{}", err)
+        }
     }
 
-    fn process_inner(&mut self, event: &dyn Any) -> ControlFlow {
+    fn process_inner(&mut self, event: &dyn Any) -> Option<ControlFlow> {
         let mut w = self.main_window.as_mut().unwrap().borrow_mut();
         w.on_event(
             &LooperEventSource {
@@ -192,7 +199,7 @@ impl Looper {
         )
     }
 
-    fn process(&mut self, event: &dyn Any) -> ControlFlow {
+    fn process(&mut self, event: &dyn Any) -> Option<ControlFlow> {
         if let Some(c) = event.downcast_ref::<CEvent>() {
             match c {
                 core::event::Event::PreUpdate(delta) => {
@@ -239,7 +246,7 @@ impl Looper {
             }
         } else if let Some(c) = event.downcast_ref::<Event>() {
             if let Event::Exit = c {
-                return ControlFlow::Exit;
+                return None;
             }
             if self.auto_exit {
                 if let Event::CloseRequested = c {
@@ -254,16 +261,33 @@ impl Looper {
     fn on_event(
         &mut self,
         original_event: WEvent,
-        _target: &EventLoopWindowTarget<DEvent>,
+        target: &EventLoopWindowTarget<DEvent>,
         event_proxy: &EventLoopProxy<DEvent>,
-    ) -> ControlFlow {
-        let mut ret = ControlFlow::Wait;
+    ) {
+        let mut ret = Some(ControlFlow::Wait);
 
         match &original_event {
             WEvent::WindowEvent {
-                event: _,
+                event,
                 window_id: _,
             } => {
+                match event {
+                    winit::event::WindowEvent::RedrawRequested => {
+                        let (_, d, ok) = self.frame.lock().unwrap().next_frame();
+                        if ok && !self.has_render_event {
+                            if self.is_first_update {
+                                self.is_first_update = false;
+                                let _ = event_proxy.send_event(Box::new(CEvent::FirstSync));
+                            } else {
+                                let to_event: Box<dyn Any + Send> =
+                                    Box::new(CEvent::PreUpdate(d.as_secs_f64()));
+                                let _ = event_proxy.send_event(to_event);
+                                ret = Some(ControlFlow::Poll);
+                            }
+                        }
+                    }
+                    _ => (),
+                }
                 let mut w = self.main_window.as_mut().unwrap().borrow_mut();
                 let ev = w.on_translate_event(original_event, event_proxy);
                 if let Some(ev) = ev {
@@ -271,25 +295,11 @@ impl Looper {
                     ret = self.process(ev.as_ref())
                 }
             }
-            WEvent::MainEventsCleared => {
+            WEvent::AboutToWait => {
                 #[cfg(windows)]
                 {
                     let w = self.main_window.as_mut().unwrap().borrow_mut();
                     w.inner.request_redraw();
-                }
-            }
-            WEvent::RedrawEventsCleared => {
-                let (_, d, ok) = self.frame.lock().unwrap().next_frame();
-                if ok && !self.has_render_event {
-                    if self.is_first_update {
-                        self.is_first_update = false;
-                        let _ = event_proxy.send_event(Box::new(CEvent::FirstSync));
-                    } else {
-                        let to_event: Box<dyn Any + Send> =
-                            Box::new(CEvent::PreUpdate(d.as_secs_f64()));
-                        let _ = event_proxy.send_event(to_event);
-                        ret = ControlFlow::Poll;
-                    }
                 }
             }
             WEvent::UserEvent(event) => {
@@ -305,17 +315,10 @@ impl Looper {
             }
             _ => {}
         };
-
-        match ret {
-            ControlFlow::Wait => {
-                let (ins, _, _) = self.frame.lock().unwrap().next_frame();
-                ret = ControlFlow::WaitUntil(ins);
-            }
-            ControlFlow::ExitWithCode(_) => {
-                log::warn!("app exit");
-            }
-            _ => {}
+        if let Some(ret) = ret {
+            target.set_control_flow(ret);
+        } else {
+            target.exit();
         }
-        ret
     }
 }

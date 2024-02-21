@@ -9,5 +9,5 @@ edition = "2021"
 core = {path = "../../core"}
 window = {path = "../../window"}
 app = {path = "../../app"}
-env_logger = "0.10"
+env_logger = "0.11"
 

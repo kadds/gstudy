@@ -27,7 +27,7 @@ struct WGPUResourceInner {
 
 #[derive(Debug)]
 struct WGPUInstance {
-    surface: Surface,
+    surface: Surface<'static>,
     inner: Mutex<WGPUResourceInner>,
     #[allow(unused)]
     instance: Instance,
@@ -118,6 +118,7 @@ impl WGPUResource {
             present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
+            desired_maximum_frame_latency: 2,
         }
     }
     pub fn device(&self) -> &Device {
@@ -222,6 +223,7 @@ impl WGPUResource {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             },
+            wgpu::util::TextureDataOrder::LayerMajor,
             data,
         );
 
@@ -418,8 +420,8 @@ fn request_optional_feature(
     let fut = adapter.request_device(
         &DeviceDescriptor {
             label: Some("wgpu device"),
-            features: req_features,
-            limits: adapter.limits(),
+            required_features: req_features,
+            required_limits: adapter.limits(),
         },
         None,
     );
@@ -443,9 +445,7 @@ pub struct WGPUEventProcessor {
 }
 
 impl WGPUBackend {
-    pub fn new<
-        S: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
-    >(
+    pub fn new<S: raw_window_handle::HasDisplayHandle + raw_window_handle::HasWindowHandle>(
         surface: &S,
         width: u32,
         height: u32,
@@ -470,7 +470,13 @@ impl WGPUBackend {
             flags: InstanceFlags::from_build_config(),
             gles_minor_version: Gles3MinorVersion::Automatic,
         });
-        let surface = unsafe { instance.create_surface(surface) }.unwrap();
+        let surface = unsafe {
+            std::mem::transmute(
+                instance
+                    .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(surface).unwrap())
+                    .unwrap(),
+            )
+        };
         let adapter_fut = instance.request_adapter(&RequestAdapterOptions {
             power_preference: PowerPreference::HighPerformance,
             force_fallback_adapter: false,
@@ -561,6 +567,7 @@ impl WGPUBackend {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
+            wgpu::util::TextureDataOrder::LayerMajor,
             any_as_u8_slice_array(&texture_data),
         );
 

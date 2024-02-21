@@ -182,9 +182,9 @@ impl ShaderTech {
 
     fn to_vertex_format(ty: &naga::Type) -> anyhow::Result<wgpu::VertexFormat> {
         let res = match &ty.inner {
-            naga::TypeInner::Scalar { kind, width } => Self::to_vertex_format2(kind, *width)?,
-            naga::TypeInner::Vector { size, kind, width } => {
-                match Self::to_vertex_format2(kind, *width)? {
+            naga::TypeInner::Scalar(s) => Self::to_vertex_format2(&s.kind, s.width)?,
+            naga::TypeInner::Vector { size, scalar } => {
+                match Self::to_vertex_format2(&scalar.kind, scalar.width)? {
                     wgpu::VertexFormat::Float32 => match size {
                         naga::VectorSize::Bi => wgpu::VertexFormat::Float32x2,
                         naga::VectorSize::Tri => wgpu::VertexFormat::Float32x3,
@@ -240,12 +240,7 @@ impl ShaderTech {
                 second_blend_source: _,
             } => {
                 let format = Self::to_vertex_format(ty)?;
-                if let naga::TypeInner::Vector {
-                    size,
-                    kind: _,
-                    width: _,
-                } = ty.inner
-                {
+                if let naga::TypeInner::Vector { size, scalar: _ } = ty.inner {
                     if location == 0
                         && (size == naga::VectorSize::Quad || size == naga::VectorSize::Tri)
                     {

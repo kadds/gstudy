@@ -167,6 +167,7 @@ impl Window {
                 winit::event::StartCause::Init => {
                     let scale = self.inner.scale_factor();
                     log::info!("init window scale {}", scale);
+                    self.inner.set_visible(true);
                     return Some(Box::new(Event::ScaleFactorChanged(scale)));
                 }
                 _ => {}
@@ -186,7 +187,7 @@ fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
         WindowEvent::CloseRequested => return Some(Box::new(Event::CloseRequested)),
         WindowEvent::Focused(f) => return Some(Box::new(Event::Focused(f))),
         ev => CEvent::Input(match ev {
-            WindowEvent::ReceivedCharacter(c) => InputEvent::ReceivedCharacter(c),
+            // WindowEvent::ReceivedCharacter(c) => InputEvent::ReceivedCharacter(c),
             WindowEvent::Ime(ime) => match ime {
                 winit::event::Ime::Commit(s) => InputEvent::ReceivedString(s),
                 _ => {
@@ -195,24 +196,23 @@ fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
             },
             WindowEvent::KeyboardInput {
                 device_id: _,
-                input,
+                event,
                 is_synthetic: _,
             } => InputEvent::KeyboardInput(core::event::KeyboardInput {
-                state: util::match_state(input.state),
-                vk: util::match_vk(input.virtual_keycode),
+                state: util::match_state(event.state),
+                vk: util::match_vk(event.physical_key),
             }),
             WindowEvent::ModifiersChanged(state) => {
                 InputEvent::ModifiersChanged(core::event::ModifiersState {
-                    ctrl: state.ctrl(),
-                    win: state.logo(),
-                    alt: state.alt(),
-                    shift: state.shift(),
+                    ctrl: state.state().control_key(),
+                    win: state.state().super_key(),
+                    alt: state.state().alt_key(),
+                    shift: state.state().shift_key(),
                 })
             }
             WindowEvent::CursorMoved {
                 device_id: _,
                 position,
-                modifiers: _,
             } => {
                 let logical: LogicalPosition<u32> = position.to_logical(w.scale_factor());
                 InputEvent::CursorMoved {
@@ -226,7 +226,6 @@ fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
                 device_id: _,
                 delta,
                 phase: _,
-                modifiers: _,
             } => InputEvent::MouseWheel {
                 delta: match delta {
                     winit::event::MouseScrollDelta::LineDelta(x, y) => {
@@ -241,7 +240,6 @@ fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
                 device_id: _,
                 state,
                 button,
-                modifiers: _,
             } => {
                 if let Some(button) = util::match_button(button) {
                     InputEvent::MouseInput {
@@ -260,7 +258,7 @@ fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
             }
             WindowEvent::ScaleFactorChanged {
                 scale_factor,
-                new_inner_size: _,
+                inner_size_writer: _,
             } => {
                 log::info!("scale factor changed {}", scale_factor);
                 return Some(Box::new(Event::ScaleFactorChanged(scale_factor)));

@@ -10,11 +10,11 @@ use core::{
 use std::{any::Any, cell::RefCell, sync::Arc};
 
 use app::{container::Container, App, AppEventProcessor};
+use egui_render::egui;
 use egui_render::EguiPluginFactory;
 use gltfloader::{GltfPluginFactory, Loader};
 use phong_render::PhongPluginFactory;
 use rfd::{FileDialog, MessageDialog};
-use egui_render::egui;
 use window::{
     HardwareRenderPluginFactory, MainWindowHandle, StatisticsResource, WindowPluginFactory,
 };

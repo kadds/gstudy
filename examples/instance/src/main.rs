@@ -16,6 +16,7 @@ use core::{
     },
     types::{Mat4x4f, Quaternion, Size, Vec3f, Vec4f},
     util::rad2angle,
+    wgpu,
 };
 use std::{
     any::Any,

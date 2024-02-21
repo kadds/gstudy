@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 core = {path = "../../core"}
 window = {path = "../../window"}
-env_logger = "0.10"
+env_logger = "0.11"
 egui-render = {path = "../../egui-render"}
 app = {path = "../../app"}
 log = "0.4"

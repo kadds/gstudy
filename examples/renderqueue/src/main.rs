@@ -4,12 +4,13 @@ use core::{
     mesh::StaticGeometry,
     scene::{Camera, RenderObject, Scene, TransformBuilder, LAYER_NORMAL},
     types::{Color, Size, Vec3f},
+    wgpu,
 };
 use std::{any::Any, sync::Arc};
 
 use app::{App, AppEventProcessor};
-use egui_render::EguiPluginFactory;
 use egui_render::egui;
+use egui_render::EguiPluginFactory;
 use geometry::mesh::*;
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 

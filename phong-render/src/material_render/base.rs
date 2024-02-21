@@ -1,6 +1,6 @@
 use core::{
     backends::wgpu_backend::WGPUResource, graph::rdg::pass::RenderPassExecutor,
-    render::material::take_rs, types::Mat4x4f, util::any_as_u8_slice_array,
+    render::material::take_rs, types::Mat4x4f, util::any_as_u8_slice_array, wgpu,
 };
 use std::{
     io::Write,

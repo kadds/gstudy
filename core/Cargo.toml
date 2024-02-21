@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.19.1" , default-features = false, features = ["webgl"]}
 log = "0.4"
 lazy_static = "1.4"
 anyhow = "1.0.57"
@@ -21,7 +21,7 @@ bitflags = "2.3"
 murmur3 = "0.5"
 smallvec = "1.10"
 dashmap = "5.5"
-raw-window-handle = "0.5.0"
+raw-window-handle = "0.6.0"
 petgraph = "0.6.2"
 tshader = {path="../tshader"}
 bytes = "1.0"

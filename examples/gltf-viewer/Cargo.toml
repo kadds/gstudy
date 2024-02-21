@@ -10,9 +10,9 @@ core = {path = "../../core"}
 window = {path = "../../window"}
 gltfloader = {path = "../../gltfloader"}
 app = {path = "../../app"}
-env_logger = "0.10"
+env_logger = "0.11"
 egui-render = {path = "../../egui-render"}
-rfd = "0.12"
+rfd = "0.14"
 nalgebra = "0.32.2"
 log = "0.4"
 phong-render = {path="../../phong-render"}

@@ -275,6 +275,7 @@ impl EguiRenderer {
                                 modifiers,
                                 key,
                                 repeat: false,
+                                physical_key: None,
                             });
                         }
                     }

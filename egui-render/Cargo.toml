@@ -6,9 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egui = "0.24"
-wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
-winit = { version = "0.28", default-features = false, features = ["x11", "wayland"]}
+egui = "0.26"
+winit = { version = "0.29", default-features = false, features = ["x11", "wayland"]}
 core = {path = "../core"}
 log = "0.4"
 anyhow = "1.0.57"

@@ -15,6 +15,7 @@ use core::{
         ResolvePipelineConfig,
     },
     types::Rectu,
+    wgpu,
 };
 
 use tshader::LoadTechConfig;

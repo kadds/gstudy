@@ -9,6 +9,5 @@ edition = "2021"
 core = {path = "../../core"}
 window = {path = "../../window"}
 app = {path = "../../app"}
-env_logger = "0.10"
-wgpu = { version = "0.18" , default-features = false, features = ["webgl", "wgsl"]}
+env_logger = "0.11"
 geometry = {path="../../geometry"}

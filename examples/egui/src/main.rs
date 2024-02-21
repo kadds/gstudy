@@ -2,8 +2,8 @@ use core::{context::RContext, types::Size};
 use std::any::Any;
 
 use app::{App, AppEventProcessor};
-use egui_render::EguiPluginFactory;
 use egui_render::egui;
+use egui_render::EguiPluginFactory;
 use window::{HardwareRenderPluginFactory, WindowPluginFactory};
 
 pub struct MainLogic {}

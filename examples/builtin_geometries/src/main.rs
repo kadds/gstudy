@@ -1,14 +1,13 @@
 use core::{
     context::RContext,
-    material::{
-        basic::BasicMaterialFaceBuilder, InputResourceBuilder, MaterialBuilder,
-    },
+    material::{basic::BasicMaterialFaceBuilder, InputResourceBuilder, MaterialBuilder},
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
         Camera, RenderObject, Scene, TransformBuilder,
     },
     types::{Color, Size, Vec3f},
+    wgpu,
 };
 use std::{any::Any, cell::RefCell, sync::Arc};
 
