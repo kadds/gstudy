@@ -602,7 +602,13 @@ fn loader_main(
 ) {
     let pool = TaskPoolBuilder::new().build();
     loop {
-        let (name, loader, gpu) = rx.recv().unwrap();
+        let (name, loader, gpu) = match rx.recv() {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("{}", e);
+                break;
+            },
+        };
         if name.is_empty() {
             break;
         }

@@ -5,7 +5,7 @@ type VK = core::event::VirtualKeyCode;
 type WI = winit::window::CursorIcon;
 
 #[allow(unused)]
-type WK = winit::event::VirtualKeyCode;
+type WK = core::event::VirtualKeyCode;
 #[allow(unused)]
 
 pub fn match_winit_cursor(c: EI) -> Option<WI> {
@@ -14,7 +14,7 @@ pub fn match_winit_cursor(c: EI) -> Option<WI> {
         EI::None => return None,
         EI::ContextMenu => WI::ContextMenu,
         EI::Help => WI::Help,
-        EI::PointingHand => WI::Hand,
+        EI::PointingHand => WI::Pointer,
         EI::Progress => WI::Progress,
         EI::Wait => WI::Wait,
         EI::Cell => WI::Cell,
@@ -54,23 +54,21 @@ pub type FontFamily = egui::FontFamily;
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_font(
     fd: &mut egui::FontDefinitions,
-    source: &mut impl font_kit::source::Source,
+    cache: &rust_fontconfig::FcFontCache,
     name: &str,
     family: FontFamily,
 ) -> anyhow::Result<()> {
-    let font = source.select_best_match(
-        &[font_kit::family_name::FamilyName::Title(name.to_string())],
-        &font_kit::properties::Properties::new(),
-    )?;
-    let data = font.load()?;
+    use rust_fontconfig::{FcFontCache, FcPattern};
+    let font = cache.query(&FcPattern{
+        name: Some(name.to_string()),
+        ..Default::default()
+    }).ok_or(anyhow::anyhow!("fail to load font"))?;
+
+    let data = std::fs::read(&font.path)?;
 
     fd.font_data.insert(
         name.to_string(),
-        egui::FontData::from_owned(
-            data.copy_font_data()
-                .ok_or(anyhow::Error::msg("load font data fail"))?
-                .to_vec(),
-        ),
+        egui::FontData::from_owned(data),
     );
     fd.families
         .entry(family)

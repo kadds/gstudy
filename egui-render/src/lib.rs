@@ -25,6 +25,7 @@ use app::{
 use egui::FontFamily;
 use material::{EguiMaterialFace, EguiMaterialFaceBuilder};
 use mesh::{UIMesh, UITextures};
+use rust_fontconfig::FcFontCache;
 use util::load_font;
 use window::WindowSize;
 
@@ -32,7 +33,6 @@ use crate::material_render::EguiMaterialRendererFactory;
 
 pub mod material;
 pub mod material_render;
-pub mod render;
 mod util;
 
 pub use egui;
@@ -85,7 +85,7 @@ impl EguiRenderer {
     pub fn set_default_fonts(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut s = font_kit::source::SystemSource::new();
+            let cache = FcFontCache::build();
 
             let fonts = vec![
                 ("Microsoft YaHei UI", FontFamily::Proportional),
@@ -99,7 +99,7 @@ impl EguiRenderer {
             let mut fd = egui::FontDefinitions::empty();
 
             for (name, family) in fonts.into_iter() {
-                if let Err(e) = load_font(&mut fd, &mut s, name, family) {
+                if let Err(e) = load_font(&mut fd, &cache, name, family) {
                     log::warn!("load font {} fail {}", name, e);
                 } else {
                     log::info!("load font {} ready", name);
@@ -149,10 +149,10 @@ impl EguiRenderer {
         if let Some(url) = output.platform_output.open_url {
             proxy.send_event(Box::new(window::Event::OpenUrl(url.url)));
         }
-        if let Some(pos) = output.platform_output.text_cursor_pos {
+        if let Some(pos) = output.platform_output.ime {
             proxy.send_event(Box::new(window::Event::UpdateImePosition((
-                pos.x as u32,
-                pos.y as u32,
+                pos.cursor_rect.left() as u32,
+                pos.cursor_rect.top() as u32,
             ))));
         }
 

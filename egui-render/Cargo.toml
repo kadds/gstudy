@@ -20,4 +20,4 @@ profiling = "1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = "3.2"
-font-kit = "0.12.0"
+rust-fontconfig = "0.1.7"

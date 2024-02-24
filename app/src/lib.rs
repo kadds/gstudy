@@ -66,7 +66,7 @@ impl App {
 
             plugins.push(ins);
             log::info!(
-                "plugin \"{}\" load verison \"{}\" done",
+                "plugin \"{}\" load version \"{}\" done",
                 info.name,
                 info.version
             );
@@ -138,6 +138,8 @@ impl App {
                 container: self.container.clone(),
             })),
         );
+
+        log::info!("app exit");
     }
 }
 
