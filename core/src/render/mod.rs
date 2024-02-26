@@ -1,12 +1,12 @@
 use indexmap::IndexMap;
-use std::{any::TypeId, collections::HashMap, fmt::Debug, sync::Arc};
+use std::{any::TypeId, collections::{BTreeMap, HashMap}, fmt::Debug, sync::Arc};
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
     graph::rdg::{backend::GraphBackend, RenderGraph, RenderGraphBuilder},
     material::{basic::BasicMaterialFace, Material},
     render::material::{RenderSourceIndirectObjects, RenderSourceLayer, SetupResource},
-    scene::{layer_str, Scene, LAYER_UI},
+    scene::{layer_str, LayerId, Scene, LAYER_UI},
     types::{Mat4x4f, Vec4f},
     util::any_as_u8_slice,
 };
@@ -199,7 +199,7 @@ impl ModuleRenderer for HardwareRenderer {
         let container = scene.get_container();
 
         // face map
-        let mut material_map: IndexMap<TypeId, Vec<Arc<Material>>> = IndexMap::new();
+        let mut material_map: IndexMap<TypeId, BTreeMap<LayerId, Vec<Arc<Material>>>> = IndexMap::new();
 
         for (layer, sorter) in scene.layers() {
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
@@ -217,8 +217,17 @@ impl ModuleRenderer for HardwareRenderer {
                 let mat_face_id = obj.material().face_id();
                 material_map
                     .entry(mat_face_id)
-                    .and_modify(|v| v.push(obj.material_arc()))
-                    .or_insert_with(|| vec![obj.material_arc()]);
+                    .and_modify(|v| {
+                        v.entry(layer).and_modify(|r| r.push(obj.material_arc()))
+                        .or_insert_with(|| {
+                            vec![obj.material_arc()]
+                        });
+                    })
+                    .or_insert_with(|| {
+                        let mut m = BTreeMap::new();
+                        m.insert(layer, vec![obj.material_arc()]);
+                        m
+                });
             }
         }
 
@@ -278,6 +287,7 @@ impl ModuleRenderer for HardwareRenderer {
                         gpu: gpu.clone(),
                         scene: scene.clone(),
                         list: vec![],
+                        layer_map_index: HashMap::new(),
                     });
 
                 if let Some(rsl) = rs.list.last_mut() {
@@ -296,6 +306,7 @@ impl ModuleRenderer for HardwareRenderer {
                             last_mat.count += 1;
                             rsl.objects.push(*obj_id);
                         }
+                        rs.layer_map_index.insert(layer, rs.list.len() - 1);
                         continue;
                     }
                 }
@@ -310,7 +321,8 @@ impl ModuleRenderer for HardwareRenderer {
                     }],
                     main_camera: main_camera.clone(),
                     layer,
-                })
+                });
+                rs.layer_map_index.insert(layer, rs.list.len() - 1);
             }
         }
         log::debug!("{:?}", render_source_map);
@@ -346,7 +358,7 @@ impl Pipeline {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PipelinePassResource {
     pub pass: Vec<Arc<Pipeline>>,
 }

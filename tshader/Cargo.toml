@@ -15,6 +15,6 @@ wgpu-types = "0.19"
 num_enum = "0.7"
 dashmap = "5.4.0"
 tshader-builder = {path="../tshader-builder"}
-wgpu = { version = "0.19" , default-features = false, features = ["webgl", "wgsl"]}
+wgpu = { version = "0.19" }
 log = "0.4"
 profiling = "1.0"

@@ -8,7 +8,7 @@ use core::{
         collector::{
             MaterialBufferInstantCollector, MaterialBufferInstantiation, MeshBufferCollector,
         },
-        material::{take_rs, MaterialRendererFactory},
+        material::{take_rs, MaterialRendererFactory, RenderMaterialBuilderMap},
         resolve_pipeline, resolve_pipeline3, ColorTargetBuilder, PipelinePassResource,
         RenderDescriptorObject, ResolvePipelineConfig,
     },
@@ -127,7 +127,7 @@ impl PhongMaterialRendererFactory {
 impl MaterialRendererFactory for PhongMaterialRendererFactory {
     fn setup(
         &self,
-        _materials: &[std::sync::Arc<core::material::Material>],
+        materials_map: &RenderMaterialBuilderMap,
         gpu: &core::backends::wgpu_backend::WGPUResource,
         g: &mut core::graph::rdg::RenderGraphBuilder,
         setup_resource: &core::render::material::SetupResource,

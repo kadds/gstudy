@@ -1,10 +1,10 @@
-use std::{any::TypeId, collections::HashMap, fmt::Debug, sync::Arc};
+use std::{any::TypeId, collections::{BTreeMap, HashMap}, fmt::Debug, sync::Arc};
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
     graph::rdg::{pass::RenderPassContext, RenderGraphBuilder},
     material::{Material, MaterialFace, MaterialId},
-    scene::Scene,
+    scene::{LayerId, Scene},
 };
 
 use super::GlobalUniform;
@@ -54,6 +54,13 @@ pub struct RenderSource {
     pub gpu: Arc<WGPUResource>,
     pub scene: Arc<Scene>,
     pub list: Vec<RenderSourceLayer>,
+    pub layer_map_index: HashMap<LayerId, usize>,
+}
+
+impl RenderSource {
+    pub fn layer(&self, layer: LayerId) -> &RenderSourceLayer {
+        &self.list[self.layer_map_index.get(&layer).cloned().unwrap()]
+    }
 }
 
 impl Debug for RenderSource {
@@ -76,10 +83,12 @@ pub struct SetupResource<'a> {
     pub msaa: u32,
 }
 
+pub type RenderMaterialBuilderMap = BTreeMap<LayerId, Vec<Arc<Material>>>;
+
 pub trait MaterialRendererFactory {
     fn setup(
         &self,
-        materials: &[Arc<Material>],
+        materials_map: &RenderMaterialBuilderMap,
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,

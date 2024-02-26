@@ -103,9 +103,9 @@ impl AppEventProcessor for MainLogic {
         } else if let Some(ev) = event.downcast_ref::<core::event::Event>() {
             if let core::event::Event::Update(_) = &ev {
                 let ctx = context.container.get::<egui::Context>().unwrap();
-                egui::Window::new("Test")
-                    .resizable(true)
-                    .show(&ctx, |ui| ctx.settings_ui(ui));
+                // egui::Window::new("Test")
+                //     .resizable(true)
+                //     .show(&ctx, |ui| ctx.settings_ui(ui));
             }
         }
     }
