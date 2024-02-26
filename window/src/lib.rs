@@ -47,7 +47,6 @@ impl HardwareRenderPlugin {
     fn update(&mut self, _delta: f32) {
         if self.first_update {
             self.first_update = false;
-            log::info!("App startup");
         }
     }
 

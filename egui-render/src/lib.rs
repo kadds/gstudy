@@ -86,9 +86,10 @@ impl EguiRenderer {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let cache = FcFontCache::build();
+            log::debug!("all fonts {:?}", cache.list());
 
             let fonts = vec![
-                ("Microsoft YaHei UI", FontFamily::Proportional),
+                ("Microsoft YaHei", FontFamily::Proportional),
                 ("Segoe UI", FontFamily::Proportional),
                 ("Consolas", FontFamily::Monospace),
                 ("PingFang SC", FontFamily::Proportional),

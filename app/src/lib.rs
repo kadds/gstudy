@@ -52,6 +52,7 @@ impl App {
     }
 
     pub fn run(&self) {
+        log::info!("App startup");
         self.container.register_arc(self.context.clone());
         self.container.register(Scene::new(self.context.clone()));
 
@@ -139,7 +140,7 @@ impl App {
             })),
         );
 
-        log::info!("app exit");
+        log::info!("App exit");
     }
 }
 

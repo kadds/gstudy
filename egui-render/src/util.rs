@@ -58,11 +58,11 @@ pub fn load_font(
     name: &str,
     family: FontFamily,
 ) -> anyhow::Result<()> {
-    use rust_fontconfig::{FcFontCache, FcPattern};
+    use rust_fontconfig::FcPattern;
     let font = cache.query(&FcPattern{
         name: Some(name.to_string()),
         ..Default::default()
-    }).ok_or(anyhow::anyhow!("fail to load font"))?;
+    }).ok_or(anyhow::anyhow!("query empty"))?;
 
     let data = std::fs::read(&font.path)?;
 

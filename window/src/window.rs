@@ -12,7 +12,7 @@ use std::{any::Any, sync::Arc};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::WindowEvent,
-    event_loop::EventLoopProxy,
+    event_loop::EventLoopProxy, keyboard::Key,
 };
 
 use crate::{util, CEvent, DEvent, Event, Theme, WEvent};
@@ -141,7 +141,7 @@ impl Window {
     pub fn on_translate_event(
         &mut self,
         original_event: WEvent,
-        _proxy: &EventLoopProxy<DEvent>,
+        proxy: &EventLoopProxy<DEvent>,
     ) -> Option<DEvent> {
         match original_event {
             WEvent::WindowEvent {
@@ -154,7 +154,7 @@ impl Window {
                     self.has_resize_event = true;
                 }
 
-                let ev = map_event(&self.inner, event);
+                let ev = map_event(&self.inner, event, proxy);
                 return ev;
             }
             WEvent::NewEvents(cause) => match cause {
@@ -178,7 +178,11 @@ impl Window {
     }
 }
 
-fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
+fn map_event(
+    w: &winit::window::Window,
+    event: WindowEvent,
+    proxy: &EventLoopProxy<DEvent>,
+) -> Option<DEvent> {
     Some(Box::new(match event {
         WindowEvent::Resized(_) => {
             return None;
@@ -198,10 +202,19 @@ fn map_event(w: &winit::window::Window, event: WindowEvent) -> Option<DEvent> {
                 device_id: _,
                 event,
                 is_synthetic: _,
-            } => InputEvent::KeyboardInput(core::event::KeyboardInput {
-                state: util::match_state(event.state),
-                vk: util::match_vk(event.physical_key),
-            }),
+            } => {
+                if let Key::Character(c) = event.logical_key {
+                    if event.state.is_pressed() {
+                        _ = proxy.send_event(Box::new(CEvent::Input(InputEvent::ReceivedString(c.to_string()))));
+                    }
+                }
+                let vk = util::match_vk(event.physical_key);
+
+                InputEvent::KeyboardInput(core::event::KeyboardInput {
+                    state: util::match_state(event.state),
+                    vk,
+                })
+            }
             WindowEvent::ModifiersChanged(state) => {
                 InputEvent::ModifiersChanged(core::event::ModifiersState {
                     ctrl: state.state().control_key(),
