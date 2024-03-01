@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use indexmap::{IndexMap, IndexSet};
 
@@ -19,7 +19,7 @@ pub trait Property: Eq + PartialEq + Hash + Clone + Copy + std::fmt::Debug {
     fn size_alignment(&self) -> (u32, u32);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PropertiesFrame<P> {
     pub properties: IndexSet<P>,
     pub data: Vec<u8>,
@@ -259,6 +259,7 @@ where
 
 pub struct MeshBuilder {
     mesh: Mesh,
+    shrink_indices: bool,
 }
 
 impl Default for MeshBuilder {
@@ -271,6 +272,7 @@ impl Default for MeshBuilder {
                 vertex_count: 0,
                 properties: PropertiesFrame::default(),
             },
+            shrink_indices: false,
         }
     }
 }
@@ -288,6 +290,20 @@ impl MeshBuilder {
             Indices::U32(d) => d.extend_from_slice(indices),
             _ => panic!("different index type"),
         }
+    }
+
+    pub fn add_indices16(&mut self, indices: &[u16]) {
+        match &mut self.mesh.indices {
+            Indices::Unknown => {
+                self.mesh.indices = Indices::U16(indices.iter().cloned().collect());
+            }
+            Indices::U16(d) => d.extend_from_slice(indices),
+            _ => panic!("different index type"),
+        }
+    }
+
+    pub fn shrink_indices(&mut self) {
+        self.shrink_indices = true;
     }
 
     pub fn add_indices_none(&mut self) {
@@ -349,11 +365,20 @@ impl MeshBuilder {
         }
 
         // check index count
-        match self.mesh.indices {
+        let mut new_indices: Vec<u16> = vec![];
+        match &self.mesh.indices {
             Indices::Unknown => {
                 anyhow::bail!("set indices first");
             }
-            _ => (),
+            Indices::U32(v) => {
+                if self.shrink_indices && self.mesh.vertex_count <= 65535 {
+                    new_indices.reserve(self.mesh.vertex_count as usize);
+                    for i in v {
+                        new_indices.push(*i as u16);
+                    }
+                }
+            }
+            _ => {}
         }
 
         Ok(self.mesh)
@@ -538,4 +563,15 @@ impl<'a, P> Drop for PropertiesUpdater<'a, P> {
             self.p.version += 1;
         }
     }
+}
+
+pub fn empty_mesh() -> Mesh {
+    MeshBuilder::default().build().unwrap()
+}
+
+pub fn empty_mesh_ptr() -> Arc<Mesh> {
+    let mut b = MeshBuilder::default();
+    b.add_position_vertices_none();
+    b.add_indices_none();
+    Arc::new(b.build().unwrap())
 }

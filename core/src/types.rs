@@ -223,7 +223,7 @@ impl Frustum {
 }
 
 impl DebugMeshGenerator for Frustum {
-    fn generate(&self, color: Color) -> std::sync::Arc<crate::mesh::Mesh> {
+    fn generate(&self, color: Color) -> crate::mesh::Mesh {
         let mut mesh_builder = MeshBuilder::default();
         let mut properties_builder = MeshPropertiesBuilder::default();
         let property = MeshPropertyType::new::<Color>("color");
@@ -251,6 +251,6 @@ impl DebugMeshGenerator for Frustum {
 
         mesh_builder.set_properties(properties_builder.build());
 
-        Arc::new(mesh_builder.build().unwrap())
+        mesh_builder.build().unwrap()
     }
 }

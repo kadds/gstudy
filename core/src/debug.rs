@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub trait DebugMeshGenerator {
-    fn generate(&self, color: Color) -> Arc<Mesh>;
+    fn generate(&self, color: Color) -> Mesh;
 }
 
 pub fn new_debug_material(context: &RContext) -> Arc<Material> {

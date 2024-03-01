@@ -3,17 +3,22 @@ use std::sync::{Arc, Mutex};
 use tshader::{LoadTechConfig, ShaderTech};
 
 use crate::{
-    backends::wgpu_backend::WGPUResource, graph::rdg::{
+    backends::wgpu_backend::WGPUResource,
+    graph::rdg::{
         backend::{GraphCopyEngine, GraphRenderEngine},
         pass::*,
         RenderPassBuilder,
-    }, material::{basic::*, Material}, render::{
+    },
+    material::{basic::*, Material},
+    render::{
         collector::{
             MaterialBufferInstantCollector, MaterialBufferInstantiation, MeshBufferCollector,
         },
         resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
         ResolvePipelineConfig,
-    }, scene::LayerId, util::any_as_u8_slice
+    },
+    scene::LayerId,
+    util::any_as_u8_slice,
 };
 
 use super::{take_rs, MaterialRendererFactory, RenderMaterialBuilderMap, SetupResource};
@@ -150,7 +155,7 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
                 name: "basic_forward".into(),
             })
             .unwrap();
-        
+
         for (layer, _) in materials_map {
             let r = Arc::new(Mutex::new(BasicMaterialHardwareRenderer {
                 inner: BasicMaterialHardwareRendererInner {

@@ -202,6 +202,7 @@ where
             .and_modify(|v| *v += 1)
             .or_insert(1);
         if *v == 1 {
+            log::info!("add new material trigger {} {}", object, obj.name());
             self.new_material = true;
         }
     }

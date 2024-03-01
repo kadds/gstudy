@@ -505,6 +505,7 @@ impl WGPUBackend {
                 }
             }
         };
+        log::info!("adapter {:?}", adapter.get_info());
         let limits = wgpu::Limits {
             max_push_constant_size: 128,
             ..Default::default()

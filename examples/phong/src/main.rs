@@ -2,10 +2,10 @@ use core::{
     context::{RContext, TagId},
     debug::{new_debug_material, DebugMeshGenerator},
     material::{InputResource, InputResourceBuilder, Material, MaterialBuilder},
-    mesh::StaticGeometry,
+    mesh::{DynamicGeometry, StaticGeometry},
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},
-        Camera, RenderObject, Scene, TransformBuilder, LAYER_NORMAL,
+        Camera, ObjectId, RenderObject, Scene, TransformBuilder, LAYER_NORMAL,
     },
     types::{Color, Size, Vec3f},
     util::angle2rad,
@@ -28,6 +28,7 @@ pub struct MainLogic {
     ct: Option<Box<RefCell<dyn CameraController>>>,
     debug_materia: Option<Arc<Material>>,
     debug_tag: Option<TagId>,
+    id: ObjectId,
 }
 
 impl MainLogic {
@@ -45,7 +46,6 @@ impl MainLogic {
         };
 
         for light in &lights.extra_lights() {
-            // continue;;
             let color = match light.as_ref() {
                 phong_render::light::Light::Spot(_) => Color::new(0.9f32, 0.84f32, 0.77f32, 1f32),
                 // phong_render::light::Light::Point(_) => Color::new(0.72f32, 0.84f32, 0.97f32, 1f32),
@@ -62,15 +62,11 @@ impl MainLogic {
                     .collect::<Vec<_>>(),
             );
         }
+        let core_mesh = core::mesh::merge::MeshMerger::merge_all(meshes.into_iter()).unwrap();
 
-        scene.remove_by_tag(self.debug_tag.unwrap());
-
-        for mesh in meshes {
-            let geometry = StaticGeometry::new(mesh);
-            let obj =
-                RenderObject::new(Box::new(geometry), self.debug_materia.clone().unwrap()).unwrap();
-            scene.add_with_tag(obj, LAYER_NORMAL, self.debug_tag.unwrap());
-        }
+        let container = scene.get_container();
+        let obj = container.get(&self.id).unwrap();
+        obj.object.geometry().update_mesh(Arc::new(core_mesh));
     }
 
     fn on_startup(&mut self, scene: &core::scene::Scene) {
@@ -118,7 +114,8 @@ impl MainLogic {
                     .translate(Vec3f::new(0f32, 0.5001f32, 0f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            let mut obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            obj.set_name("cube0");
             scene.add(obj);
         }
 
@@ -134,7 +131,8 @@ impl MainLogic {
                     .scale(Vec3f::new(0.5f32, 0.5f32, 0.5f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            let mut obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            obj.set_name("cube");
             scene.add(obj);
         }
 
@@ -150,7 +148,8 @@ impl MainLogic {
                     .translate(Vec3f::new(1.2f32, 0.501f32, -0.2f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            let mut obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            obj.set_name("sphere");
             scene.add(obj);
         }
 
@@ -166,7 +165,8 @@ impl MainLogic {
                     .translate(Vec3f::new(-1.5f32, 0.501f32, -0.8f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material2.clone()).unwrap();
+            let mut obj = RenderObject::new(Box::new(geometry), material2.clone()).unwrap();
+            obj.set_name("sphere1");
             scene.add(obj);
         }
 
@@ -181,7 +181,8 @@ impl MainLogic {
                     .scale(Vec3f::new(20f32, 1f32, 20f32))
                     .build(),
             );
-            let obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            let mut obj = RenderObject::new(Box::new(geometry), material.clone()).unwrap();
+            obj.set_name("plane");
             scene.add(obj);
         }
 
@@ -248,6 +249,17 @@ impl MainLogic {
 
         scene.attach(Arc::new(lights));
         scene.set_rebuild_flag();
+
+        self.id = scene.add_with_tag(
+            RenderObject::new(
+                Box::new(DynamicGeometry::new_empty()),
+                self.debug_materia.clone().unwrap(),
+            )
+            .unwrap(),
+            LAYER_NORMAL,
+            self.debug_tag.unwrap(),
+        );
+        log::info!("startup {}", self.id);
     }
 }
 

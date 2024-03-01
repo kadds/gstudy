@@ -607,7 +607,7 @@ fn loader_main(
             Err(e) => {
                 log::warn!("{}", e);
                 break;
-            },
+            }
         };
         if name.is_empty() {
             break;

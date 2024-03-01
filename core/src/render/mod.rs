@@ -1,5 +1,10 @@
 use indexmap::IndexMap;
-use std::{any::TypeId, collections::{BTreeMap, HashMap}, fmt::Debug, sync::Arc};
+use std::{
+    any::TypeId,
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
@@ -199,7 +204,8 @@ impl ModuleRenderer for HardwareRenderer {
         let container = scene.get_container();
 
         // face map
-        let mut material_map: IndexMap<TypeId, BTreeMap<LayerId, Vec<Arc<Material>>>> = IndexMap::new();
+        let mut material_map: IndexMap<TypeId, BTreeMap<LayerId, Vec<Arc<Material>>>> =
+            IndexMap::new();
 
         for (layer, sorter) in scene.layers() {
             let sort_objects = sorter.lock().unwrap().sort_and_cull();
@@ -218,16 +224,15 @@ impl ModuleRenderer for HardwareRenderer {
                 material_map
                     .entry(mat_face_id)
                     .and_modify(|v| {
-                        v.entry(layer).and_modify(|r| r.push(obj.material_arc()))
-                        .or_insert_with(|| {
-                            vec![obj.material_arc()]
-                        });
+                        v.entry(layer)
+                            .and_modify(|r| r.push(obj.material_arc()))
+                            .or_insert_with(|| vec![obj.material_arc()]);
                     })
                     .or_insert_with(|| {
                         let mut m = BTreeMap::new();
                         m.insert(layer, vec![obj.material_arc()]);
                         m
-                });
+                    });
             }
         }
 

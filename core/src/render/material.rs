@@ -1,4 +1,9 @@
-use std::{any::TypeId, collections::{BTreeMap, HashMap}, fmt::Debug, sync::Arc};
+use std::{
+    any::TypeId,
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use crate::{
     backends::wgpu_backend::WGPUResource,

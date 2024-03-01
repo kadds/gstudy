@@ -1,6 +1,6 @@
 use core::{
     backends::wgpu_backend::WGPUResource, graph::rdg::pass::RenderPassExecutor,
-    render::material::take_rs, types::Mat4x4f, util::any_as_u8_slice_array, wgpu,
+    render::material::take_rs, scene::LayerId, types::Mat4x4f, util::any_as_u8_slice_array, wgpu,
 };
 use std::{
     io::Write,
@@ -54,7 +54,9 @@ pub struct PhongMaterialBaseRenderer {
     pub shadow_map_binding: Option<wgpu::BindGroup>,
     pub shadow_map_sampler: Arc<wgpu::Sampler>,
     pub shadow_map_id: Option<u32>,
+    pub layer: LayerId,
 }
+
 impl RenderPassExecutor for PhongMaterialBaseRenderer {
     #[profiling::function]
     fn prepare<'b>(
@@ -85,13 +87,13 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         let rs = take_rs::<PhongMaterialFace>(&context).unwrap();
         let mut shared = self.shared.lock().unwrap();
 
-        for layer in &rs.list {
-            for indirect in &layer.material {
-                let material = indirect.material.as_ref();
-                shared
-                    .material_buffer_collector
-                    .add_bind_group(material, device);
-            }
+        let layer = rs.layer(self.layer);
+
+        for indirect in &layer.material {
+            let material = indirect.material.as_ref();
+            shared
+                .material_buffer_collector
+                .add_bind_group(material, device);
         }
 
         if self.has_direct_light {
@@ -99,13 +101,11 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
                 // create shadow map bind_group
                 let mut layout = None;
 
-                for layer in &rs.list {
-                    for indirect in &layer.material {
-                        let material = indirect.material.as_ref();
-                        let pipeline = shared.material_buffer_collector.get(material);
-                        layout = Some(pipeline.0.get_bind_group_layout(3));
-                        break;
-                    }
+                for indirect in &layer.material {
+                    let material = indirect.material.as_ref();
+                    let pipeline = shared.material_buffer_collector.get(material);
+                    layout = Some(pipeline.0.get_bind_group_layout(3));
+                    break;
                 }
                 let shadow_map = context.registry.get(*res_id);
 
@@ -138,50 +138,48 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
         let rs = take_rs::<PhongMaterialFace>(&context).unwrap();
         let c = rs.scene.get_container();
         let shared = self.shared.lock().unwrap();
+        let layer = rs.layer(self.layer);
 
-        for layer in &rs.list {
-            let mut pass = engine.begin(layer.layer);
+        let mut pass = engine.begin(layer.layer);
 
-            for indirect in &layer.material {
-                let objects = layer.objects(indirect);
-                let material = indirect.material.as_ref();
+        for indirect in &layer.material {
+            let objects = layer.objects(indirect);
+            let material = indirect.material.as_ref();
 
-                let (pipeline, material_bind_groups) =
-                    shared.material_buffer_collector.get(material);
+            let (pipeline, material_bind_groups) = shared.material_buffer_collector.get(material);
 
-                pass.set_pipeline(pipeline.render());
+            pass.set_pipeline(pipeline.render());
 
-                pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
-                pass.set_bind_group(2, material_bind_groups[0].as_ref().unwrap(), &[]); // material bind group
-                pass.set_bind_group(1, material_bind_groups[1].as_ref().unwrap(), &[]); // light bind group
+            pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
+            pass.set_bind_group(2, material_bind_groups[0].as_ref().unwrap(), &[]); // material bind group
+            pass.set_bind_group(1, material_bind_groups[1].as_ref().unwrap(), &[]); // light bind group
 
-                if let Some(s) = self.shadow_map_binding.as_ref() {
-                    pass.set_bind_group(3, s, &[]); // shadow bind group
-                }
+            if let Some(s) = self.shadow_map_binding.as_ref() {
+                pass.set_bind_group(3, s, &[]); // shadow bind group
+            }
 
-                // object bind_group
-                for id in objects {
-                    let obj = match c.get(id) {
-                        Some(v) => v,
-                        None => continue,
-                    };
-                    let obj = obj.o();
-                    pass.push_debug_group(&format!("object {}", obj.name()));
-                    let mesh = obj.geometry().mesh();
-                    let object_uniform = obj.geometry().transform();
+            // object bind_group
+            for id in objects {
+                let obj = match c.get(id) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let obj = obj.o();
+                pass.push_debug_group(&format!("object {}", obj.name()));
+                let mesh = obj.geometry().mesh();
+                let object_uniform = obj.geometry().transform();
 
-                    let constant = get_object_constant(object_uniform.mat());
-                    pass.set_push_constants(
-                        wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        0,
-                        &constant,
-                    );
+                let constant = get_object_constant(object_uniform.mat());
+                pass.set_push_constants(
+                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    0,
+                    &constant,
+                );
 
-                    let b = shared.mesh_buffer_collector.get(&c, *id).unwrap();
-                    b.draw(&mesh, &mut pass);
+                let b = shared.mesh_buffer_collector.get(&c, *id).unwrap();
+                b.draw(&mesh, &mut pass);
 
-                    pass.pop_debug_group();
-                }
+                pass.pop_debug_group();
             }
         }
     }
@@ -196,6 +194,7 @@ pub struct PhongMaterialAddRenderer {
     pub shadow_map_sampler: Arc<wgpu::Sampler>,
     pub shadow_map_id: Option<u32>,
     pub has_shadow_pass: bool,
+    pub layer: LayerId,
 }
 
 impl RenderPassExecutor for PhongMaterialAddRenderer {
@@ -222,19 +221,18 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
     ) {
         let rs = take_rs::<PhongMaterialFace>(&context).unwrap();
         let shared = self.shared.lock().unwrap();
+        let layer = rs.layer(self.layer);
 
         if let Some(res_id) = &self.shadow_map_id {
             let mut layout = None;
 
-            for layer in &rs.list {
-                for indirect in &layer.material {
-                    let material = indirect.material.as_ref();
-                    let pipeline = shared
-                        .material_buffer_collector
-                        .get_pass(material, self.index + 1);
-                    layout = Some(pipeline.0.get_bind_group_layout(3));
-                    break;
-                }
+            for indirect in &layer.material {
+                let material = indirect.material.as_ref();
+                let pipeline = shared
+                    .material_buffer_collector
+                    .get_pass(material, self.index + 1);
+                layout = Some(pipeline.0.get_bind_group_layout(3));
+                break;
             }
             let shadow_map = context.registry.get(*res_id);
             let mut entries = vec![];
@@ -266,52 +264,52 @@ impl RenderPassExecutor for PhongMaterialAddRenderer {
         let c = rs.scene.get_container();
         let shared = self.shared.lock().unwrap();
 
-        for layer in &rs.list {
-            let mut pass = engine.begin(layer.layer);
+        let layer = rs.layer(self.layer);
 
-            for indirect in &layer.material {
-                let objects = layer.objects(indirect);
-                let material = indirect.material.as_ref();
+        let mut pass = engine.begin(layer.layer);
 
-                let (pipeline, material_bind_groups) = shared
-                    .material_buffer_collector
-                    .get_pass(material, self.index + 1);
+        for indirect in &layer.material {
+            let objects = layer.objects(indirect);
+            let material = indirect.material.as_ref();
 
-                pass.set_pipeline(pipeline.render());
-                pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
-                pass.set_bind_group(2, material_bind_groups[0].as_ref().unwrap(), &[]); // light bind group
-                pass.set_bind_group(
-                    1,
-                    material_bind_groups[self.index + 2].as_ref().unwrap(),
-                    &[],
-                ); // material bind group
+            let (pipeline, material_bind_groups) = shared
+                .material_buffer_collector
+                .get_pass(material, self.index + 1);
 
-                if let Some(s) = self.shadow_map_binding.as_ref() {
-                    pass.set_bind_group(3, s, &[]); // shadow bind group
-                }
+            pass.set_pipeline(pipeline.render());
+            pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
+            pass.set_bind_group(2, material_bind_groups[0].as_ref().unwrap(), &[]); // light bind group
+            pass.set_bind_group(
+                1,
+                material_bind_groups[self.index + 2].as_ref().unwrap(),
+                &[],
+            ); // material bind group
 
-                // object bind_group
-                for id in objects {
-                    let obj = match c.get(id) {
-                        Some(v) => v,
-                        None => continue,
-                    };
-                    let obj = obj.o();
-                    pass.push_debug_group(&format!("object {}", obj.name()));
-                    let mesh = obj.geometry().mesh();
-                    let object_uniform = obj.geometry().transform();
-                    let constant = get_object_constant(object_uniform.mat());
-                    pass.set_push_constants(
-                        wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        0,
-                        &constant,
-                    );
+            if let Some(s) = self.shadow_map_binding.as_ref() {
+                pass.set_bind_group(3, s, &[]); // shadow bind group
+            }
 
-                    let b = shared.mesh_buffer_collector.get(&c, *id).unwrap();
-                    b.draw(&mesh, &mut pass);
+            // object bind_group
+            for id in objects {
+                let obj = match c.get(id) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let obj = obj.o();
+                pass.push_debug_group(&format!("object {}", obj.name()));
+                let mesh = obj.geometry().mesh();
+                let object_uniform = obj.geometry().transform();
+                let constant = get_object_constant(object_uniform.mat());
+                pass.set_push_constants(
+                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    0,
+                    &constant,
+                );
 
-                    pass.pop_debug_group();
-                }
+                let b = shared.mesh_buffer_collector.get(&c, *id).unwrap();
+                b.draw(&mesh, &mut pass);
+
+                pass.pop_debug_group();
             }
         }
     }

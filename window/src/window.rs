@@ -12,7 +12,8 @@ use std::{any::Any, sync::Arc};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::WindowEvent,
-    event_loop::EventLoopProxy, keyboard::Key,
+    event_loop::EventLoopProxy,
+    keyboard::Key,
 };
 
 use crate::{util, CEvent, DEvent, Event, Theme, WEvent};
@@ -188,8 +189,18 @@ fn map_event(
             return None;
         }
         // WindowEvent::Moved(pos) => Event::Moved(Size::new(pos.x as u32, pos.y as u32)),
-        WindowEvent::CloseRequested => return Some(Box::new(Event::CloseRequested)),
-        WindowEvent::Focused(f) => return Some(Box::new(Event::Focused(f))),
+        WindowEvent::CloseRequested => {
+            log::info!("close request");
+            return Some(Box::new(Event::CloseRequested));
+        }
+        WindowEvent::Focused(f) => {
+            if f {
+                log::info!("gain focus");
+            } else {
+                log::info!("lose focus");
+            }
+            return Some(Box::new(Event::Focused(f)));
+        }
         ev => CEvent::Input(match ev {
             // WindowEvent::ReceivedCharacter(c) => InputEvent::ReceivedCharacter(c),
             WindowEvent::Ime(ime) => match ime {
@@ -205,7 +216,9 @@ fn map_event(
             } => {
                 if let Key::Character(c) = event.logical_key {
                     if event.state.is_pressed() {
-                        _ = proxy.send_event(Box::new(CEvent::Input(InputEvent::ReceivedString(c.to_string()))));
+                        _ = proxy.send_event(Box::new(CEvent::Input(InputEvent::ReceivedString(
+                            c.to_string(),
+                        ))));
                     }
                 }
                 let vk = util::match_vk(event.physical_key);

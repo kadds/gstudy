@@ -59,8 +59,10 @@ impl HardwareRenderPlugin {
         let scene = container.get::<Scene>().unwrap();
         if scene.material_change() {
             self.rdg = None;
+            log::info!("rebuild scene because material changed");
         }
         if scene.has_rebuild_flag() {
+            log::info!("rebuild scene because flag enabled");
             self.rdg = None;
         }
 

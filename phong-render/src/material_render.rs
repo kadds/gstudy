@@ -274,62 +274,67 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         };
         let shared = Arc::new(Mutex::new(shared));
 
-        let mut base_pass = RenderPassBuilder::new("phong forward base pass");
-        base_pass.default_color_depth_render_target();
+        for (layer, _) in materials_map {
+            let mut base_pass = RenderPassBuilder::new("phong forward base pass");
+            base_pass.default_color_depth_render_target();
 
-        let mut shadow_map_id = None;
-        if has_direct_light {
-            let res = self.add_shadow_pass_for_light(
-                lights.direct_light().unwrap(),
-                shared.clone(),
-                shadow_pipeline.clone(),
-                g,
-            );
-            if let Some(res) = res {
-                base_pass.read_texture(res);
-                shadow_map_id = Some(res)
-            }
-        }
-
-        base_pass.async_execute(Arc::new(Mutex::new(base::PhongMaterialBaseRenderer {
-            shared: shared.clone(),
-            has_shadow_pass: shadow_pipeline.is_some()
-                && has_direct_light
-                && lights.direct_light().unwrap().shadow_config().cast_shadow,
-            shadow_map_sampler: shadow_sampler.clone(),
-            shadow_map_binding: None,
-            has_direct_light,
-            shadow_map_id,
-        })));
-        g.add_render_pass(base_pass);
-        shadow_map_id = None;
-
-        for (index, light) in lights.extra_lights().iter().enumerate() {
-            let mut add_pass = RenderPassBuilder::new(format!("phong forward add pass {}", index));
-            let res = self.add_shadow_pass_for_light(
-                light.clone(),
-                shared.clone(),
-                shadow_pipeline.clone(),
-                g,
-            );
-            if let Some(res) = res {
-                add_pass.read_texture(res);
-                shadow_map_id = Some(res)
+            let mut shadow_map_id = None;
+            if has_direct_light {
+                let res = self.add_shadow_pass_for_light(
+                    lights.direct_light().unwrap(),
+                    shared.clone(),
+                    shadow_pipeline.clone(),
+                    g,
+                );
+                if let Some(res) = res {
+                    base_pass.read_texture(res);
+                    shadow_map_id = Some(res)
+                }
             }
 
-            // add pass
-            add_pass.default_color_depth_render_target();
-
-            add_pass.async_execute(Arc::new(Mutex::new(base::PhongMaterialAddRenderer {
+            base_pass.async_execute(Arc::new(Mutex::new(base::PhongMaterialBaseRenderer {
                 shared: shared.clone(),
-                index,
-                shadow_map_binding: None,
+                has_shadow_pass: shadow_pipeline.is_some()
+                    && has_direct_light
+                    && lights.direct_light().unwrap().shadow_config().cast_shadow,
                 shadow_map_sampler: shadow_sampler.clone(),
+                shadow_map_binding: None,
+                has_direct_light,
                 shadow_map_id,
-                has_shadow_pass: light.shadow_config().cast_shadow,
+                layer: *layer,
             })));
+            g.add_render_pass(base_pass);
+            shadow_map_id = None;
 
-            g.add_render_pass(add_pass);
+            for (index, light) in lights.extra_lights().iter().enumerate() {
+                let mut add_pass =
+                    RenderPassBuilder::new(format!("phong forward add pass {}", index));
+                let res = self.add_shadow_pass_for_light(
+                    light.clone(),
+                    shared.clone(),
+                    shadow_pipeline.clone(),
+                    g,
+                );
+                if let Some(res) = res {
+                    add_pass.read_texture(res);
+                    shadow_map_id = Some(res)
+                }
+
+                // add pass
+                add_pass.default_color_depth_render_target();
+
+                add_pass.async_execute(Arc::new(Mutex::new(base::PhongMaterialAddRenderer {
+                    shared: shared.clone(),
+                    index,
+                    shadow_map_binding: None,
+                    shadow_map_sampler: shadow_sampler.clone(),
+                    shadow_map_id,
+                    has_shadow_pass: light.shadow_config().cast_shadow,
+                    layer: *layer,
+                })));
+
+                g.add_render_pass(add_pass);
+            }
         }
     }
 }

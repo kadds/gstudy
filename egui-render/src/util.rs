@@ -59,17 +59,17 @@ pub fn load_font(
     family: FontFamily,
 ) -> anyhow::Result<()> {
     use rust_fontconfig::FcPattern;
-    let font = cache.query(&FcPattern{
-        name: Some(name.to_string()),
-        ..Default::default()
-    }).ok_or(anyhow::anyhow!("query empty"))?;
+    let font = cache
+        .query(&FcPattern {
+            name: Some(name.to_string()),
+            ..Default::default()
+        })
+        .ok_or(anyhow::anyhow!("query empty"))?;
 
     let data = std::fs::read(&font.path)?;
 
-    fd.font_data.insert(
-        name.to_string(),
-        egui::FontData::from_owned(data),
-    );
+    fd.font_data
+        .insert(name.to_string(), egui::FontData::from_owned(data));
     fd.families
         .entry(family)
         .and_modify(|v| v.insert(0, name.to_string()))

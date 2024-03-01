@@ -5,14 +5,15 @@ use std::{
 };
 
 use self::{
-    builder::{InstancePropertyType, MeshPropertyType, PropertiesFrame},
+    builder::{empty_mesh_ptr, InstancePropertyType, MeshPropertyType, PropertiesFrame},
     intersect::{IntersectResult, Ray},
 };
 
 pub mod builder;
 pub mod intersect;
+pub mod merge;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) enum Indices {
     #[default]
     Unknown,
@@ -21,7 +22,7 @@ pub(crate) enum Indices {
     U16(Vec<u16>),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) enum PositionVertices {
     #[default]
     Unknown,
@@ -31,6 +32,7 @@ pub(crate) enum PositionVertices {
     F4(Vec<Vec4f>),
 }
 
+#[derive(Clone)]
 pub struct Mesh {
     pub(crate) position_vertices: PositionVertices,
     pub(crate) indices: Indices,
@@ -128,6 +130,8 @@ pub struct GeometryInfo {
 
 pub trait Geometry: Send + Sync + Debug {
     fn mesh(&self) -> Arc<Mesh>;
+    fn update_mesh(&self, mesh: Arc<Mesh>);
+
     fn intersect(&self, ray: Ray) -> IntersectResult;
     fn info(&self) -> GeometryInfo;
     fn instance(&self) -> Option<&InstanceProperties>;
@@ -210,97 +214,15 @@ impl Geometry for StaticGeometry {
     fn instance(&self) -> Option<&InstanceProperties> {
         self.instance_data.as_ref()
     }
+
+    fn update_mesh(&self, mesh: Arc<Mesh>) {
+        panic!("update mesh");
+    }
 }
 
 pub trait GeometryMeshGenerator: Send + Sync + Debug {
     fn build_mesh(&self) -> Option<Mesh>;
 }
-
-// #[derive(Debug)]
-// pub struct BasicGeometry<G>
-// where
-//     G: GeometryMeshGenerator,
-// {
-//     inner: Mutex<DirtyMesh>,
-//     transform: Transform,
-//     is_static: bool,
-//     g: G,
-// }
-
-// impl<G> BasicGeometry<G>
-// where
-//     G: GeometryMeshGenerator,
-// {
-//     pub fn new(g: G) -> Self {
-//         Self {
-//             inner: Mutex::new(DirtyMesh::default()),
-//             transform: Transform::default(),
-//             is_static: false,
-//             g,
-//         }
-//     }
-
-//     pub fn mark_dirty(&mut self) {
-//         self.inner.lock().unwrap().dirty_flag = true;
-//     }
-
-//     pub fn build_transform(mut self, transform: Transform) -> Self {
-//         self.transform = transform;
-//         self.inner.lock().unwrap().dirty_flag = true;
-//         self
-//     }
-
-//     pub fn with_static(mut self, is_static: bool) -> Self {
-//         self.is_static = is_static;
-//         self
-//     }
-// }
-
-// impl<G> Geometry for BasicGeometry<G>
-// where
-//     G: GeometryMeshGenerator,
-// {
-//     fn mesh(&self) -> Arc<Mesh> {
-//         let mut inner = self.inner.lock().unwrap();
-//         if inner.dirty_flag {
-//             let mut mesh = match self.g.build_mesh() {
-//                 Some(v) => v,
-//                 None => {
-//                     return inner.mesh.as_ref().unwrap().clone();
-//                 }
-//             };
-//             mesh.apply(&self.transform);
-//             let aabb = mesh.aabb();
-
-//             inner.mesh = Some(Arc::new(mesh));
-//             inner.dirty_flag = false;
-//             inner.aabb = aabb;
-//         }
-//         inner.mesh.as_ref().unwrap().clone()
-//     }
-
-//     fn intersect(&self, ray: Ray) -> IntersectResult {
-//         todo!()
-//     }
-
-//     fn info(&self) -> GeometryInfo {
-//         GeometryInfo { is_static: self.is_static, is_instance: false }
-//     }
-
-//     fn transform(&self) -> &Transform {
-//         &self.transform
-//     }
-
-//     // fn mesh_version(&self) -> u64 {
-//     //     let inner = self.inner.lock().unwrap();
-//     //     inner.version
-//     // }
-
-//     fn aabb(&self) -> Option<BoundBox> {
-//         let mut inner = self.inner.lock().unwrap();
-//         inner.aabb.clone()
-//     }
-// }
 
 #[derive(Debug)]
 struct DirtyMesh {
@@ -318,5 +240,84 @@ impl Default for DirtyMesh {
             mesh: Default::default(),
             aabb: None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct DynamicGeometry {
+    mesh: Mutex<Arc<Mesh>>,
+
+    transform: Transform,
+    boundary: Boundary,
+    instance_data: Option<InstanceProperties>,
+}
+
+impl DynamicGeometry {
+    pub fn new(mesh: Arc<Mesh>) -> Self {
+        let boundary = mesh.boundary();
+        Self {
+            mesh: Mutex::new(mesh),
+            transform: Transform::default(),
+            boundary,
+            instance_data: None,
+        }
+    }
+
+    pub fn new_empty() -> Self {
+        Self {
+            mesh: Mutex::new(empty_mesh_ptr()),
+            transform: Transform::default(),
+            boundary: Boundary::None,
+            instance_data: None,
+        }
+    }
+
+    pub fn with_transform(mut self, transform: Transform) -> Self {
+        self.transform = transform;
+        self
+    }
+    pub fn with_instance(mut self, instance: InstanceProperties) -> Self {
+        self.instance_data = Some(instance);
+        self
+    }
+}
+
+impl Geometry for DynamicGeometry {
+    fn mesh(&self) -> Arc<Mesh> {
+        self.mesh.lock().unwrap().clone()
+    }
+
+    fn intersect(&self, _ray: Ray) -> IntersectResult {
+        todo!()
+    }
+
+    fn info(&self) -> GeometryInfo {
+        if let Some(ins) = &self.instance_data {
+            GeometryInfo {
+                is_static: false,
+                is_instance: true,
+            }
+        } else {
+            GeometryInfo {
+                is_static: false,
+                is_instance: false,
+            }
+        }
+    }
+
+    fn transform(&self) -> &Transform {
+        &self.transform
+    }
+
+    fn boundary(&self) -> &Boundary {
+        &self.boundary
+    }
+
+    fn instance(&self) -> Option<&InstanceProperties> {
+        self.instance_data.as_ref()
+    }
+
+    fn update_mesh(&self, mesh: Arc<Mesh>) {
+        *self.mesh.lock().unwrap() = mesh;
     }
 }
