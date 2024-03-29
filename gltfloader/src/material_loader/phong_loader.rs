@@ -116,7 +116,7 @@ impl MaterialLoader for PhongMaterialLoader {
 
         let mut face_builder = PhongMaterialFaceBuilder::default();
         let mut sampler = None;
-        let mut any_texture = false;
+        let any_texture = false;
 
         let texture = material.pbr_metallic_roughness().base_color_texture();
         let mut input_resource = InputResourceBuilder::new();

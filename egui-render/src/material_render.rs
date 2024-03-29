@@ -7,7 +7,7 @@ use std::{
 use core::{
     backends::wgpu_backend::{ClearValue, GpuInputMainBuffers, ResourceOps, WGPUResource},
     graph::rdg::{backend::GraphCopyEngine, pass::*, RenderGraphBuilder, RenderPassBuilder},
-    material::{Material, MaterialId},
+    material::MaterialId,
     render::{
         common::FramedCache,
         material::{take_rs, MaterialRendererFactory, RenderMaterialBuilderMap, SetupResource},

@@ -275,7 +275,8 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         let shared = Arc::new(Mutex::new(shared));
 
         for (layer, _) in materials_map {
-            let mut base_pass = RenderPassBuilder::new("phong forward base pass");
+            let mut base_pass =
+                RenderPassBuilder::new(format!("phong forward base pass layer {}", layer));
             base_pass.default_color_depth_render_target();
 
             let mut shadow_map_id = None;
@@ -307,8 +308,10 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
             shadow_map_id = None;
 
             for (index, light) in lights.extra_lights().iter().enumerate() {
-                let mut add_pass =
-                    RenderPassBuilder::new(format!("phong forward add pass {}", index));
+                let mut add_pass = RenderPassBuilder::new(format!(
+                    "phong forward add pass {} layer {}",
+                    index, layer
+                ));
                 let res = self.add_shadow_pass_for_light(
                     light.clone(),
                     shared.clone(),

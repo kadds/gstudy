@@ -178,7 +178,7 @@ impl Camera {
         let flb = rev * flb;
         let frb = rev * frb;
 
-        return Frustum::new(
+        Frustum::new(
             &[
                 nlt.xyz() / nlt.w,
                 nrt.xyz() / nrt.w,
@@ -192,7 +192,7 @@ impl Camera {
             pos,
             to,
             up,
-        );
+        )
     }
 
     pub fn uniform_3d(&self) -> Vec<u8> {
@@ -203,7 +203,7 @@ impl Camera {
             mat: vp,
             direction: Vec4f::new(dir.x, dir.y, dir.z, 0.0f32),
         };
-        data.write_all(any_as_u8_slice(&uniform));
+        let _ = data.write_all(any_as_u8_slice(&uniform));
         data
     }
 
@@ -215,15 +215,15 @@ impl Camera {
             mat: vp,
             direction: Vec4f::new(dir.x, dir.y, dir.z, 0.0f32),
         };
-        data.write_all(any_as_u8_slice(&uniform));
-        data.write_all(any_as_u8_slice(&self.near()));
-        data.write_all(any_as_u8_slice(&self.far()));
+        let _ = data.write_all(any_as_u8_slice(&uniform));
+        let _ = data.write_all(any_as_u8_slice(&self.near()));
+        let _ = data.write_all(any_as_u8_slice(&self.far()));
         if self.is_perspective() {
-            data.write_all(any_as_u8_slice(&1.0f32));
+            let _ = data.write_all(any_as_u8_slice(&1.0f32));
         } else {
-            data.write_all(any_as_u8_slice(&-1.0f32));
+            let _ = data.write_all(any_as_u8_slice(&-1.0f32));
         }
-        data.write_all(any_as_u8_slice(&0.0f32));
+        let _ = data.write_all(any_as_u8_slice(&0.0f32));
         data
     }
 

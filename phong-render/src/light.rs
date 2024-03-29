@@ -307,6 +307,7 @@ struct SceneLightsInner {
     direct_light: Option<Arc<Light>>,
     extra_lights: Vec<Arc<Light>>,
     base: Arc<Mutex<BaseLightUniform>>,
+    adaptive: bool,
 }
 
 impl Default for SceneLightsInner {
@@ -317,6 +318,7 @@ impl Default for SceneLightsInner {
             base: Arc::new(Mutex::new(BaseLightUniform {
                 ambient: Vec4f::new(0.2f32, 0.2f32, 0.2f32, 1.0f32),
             })),
+            adaptive: false,
         }
     }
 }
