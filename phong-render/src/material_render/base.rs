@@ -1,13 +1,13 @@
 use core::{
     backends::wgpu_backend::WGPUResource, graph::rdg::pass::RenderPassExecutor,
-    render::material::take_rs, scene::LayerId, types::Mat4x4f, util::any_as_u8_slice_array, wgpu,
+    render::{material::take_rs, pso::BindGroupType}, scene::LayerId, types::Mat4x4f, util::any_as_u8_slice_array, wgpu,
 };
 use std::{
     io::Write,
     sync::{Arc, Mutex},
 };
 
-use crate::{light::TLight, material::PhongMaterialFace};
+use crate::{light::{SceneLights, TLight}, material::PhongMaterialFace};
 
 use super::{copy_vertex_data, LightUniformHolder, PhongMaterialSharedData};
 
@@ -15,14 +15,14 @@ fn copy_light_uniform(light: &LightUniformHolder, buffer: &wgpu::Buffer, gpu: &W
     let mut data = vec![];
     match &light {
         super::LightUniformHolder::Base(base) => {
-            data.write_all(base.lock().unwrap().as_bytes());
+            let _ = data.write_all(base.lock().unwrap().as_bytes());
         }
         super::LightUniformHolder::Light(light) => {
             data = light.light_uniform();
         }
         super::LightUniformHolder::BaseLight((base, light)) => {
-            data.write_all(base.lock().unwrap().as_bytes());
-            data.write_all(&light.light_uniform());
+            let _= data.write_all(base.lock().unwrap().as_bytes());
+            let _ = data.write_all(&light.light_uniform());
         }
     }
     gpu.queue().write_buffer(buffer, 0, &data);
@@ -30,7 +30,7 @@ fn copy_light_uniform(light: &LightUniformHolder, buffer: &wgpu::Buffer, gpu: &W
 
 fn get_object_constant(to_world: &Mat4x4f) -> Vec<u8> {
     let mut constant = vec![];
-    constant.write_all(any_as_u8_slice_array(to_world.as_slice()));
+    let _ = constant.write_all(any_as_u8_slice_array(to_world.as_slice()));
     let to_world3 = to_world.fixed_view::<3, 3>(0, 0);
 
     if let Some(inv) = to_world3.try_inverse() {
@@ -39,10 +39,10 @@ fn get_object_constant(to_world: &Mat4x4f) -> Vec<u8> {
             p.m11, p.m12, p.m13, 0f32, p.m21, p.m22, p.m23, 0f32, p.m31, p.m32, p.m33, 0f32, 0f32,
             0f32, 0f32, 0f32,
         );
-        constant.write_all(any_as_u8_slice_array(p.as_slice()));
+        let _ = constant.write_all(any_as_u8_slice_array(p.as_slice()));
     } else {
         log::warn!("inverse object fail");
-        constant.write_all(any_as_u8_slice_array(Mat4x4f::identity().as_slice()));
+        let _ = constant.write_all(any_as_u8_slice_array(Mat4x4f::identity().as_slice()));
     }
     constant
 }
@@ -55,6 +55,7 @@ pub struct PhongMaterialBaseRenderer {
     pub shadow_map_sampler: Arc<wgpu::Sampler>,
     pub shadow_map_id: Option<u32>,
     pub layer: LayerId,
+    pub lights: Arc<SceneLights>,
 }
 
 impl RenderPassExecutor for PhongMaterialBaseRenderer {
@@ -91,20 +92,26 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
 
         for indirect in &layer.material {
             let material = indirect.material.as_ref();
+            let pso = shared.material_shader_collector.get(&material, 0);
             shared
-                .material_buffer_collector
-                .add_bind_group(material, device);
+                .shader_bind_group_collection
+                .setup(device, material, material.id().id(), pso);
         }
 
         if self.has_direct_light {
             if let Some(res_id) = &self.shadow_map_id {
+                let lights = self.lights;
+                shared
+                    .shader_bind_group_collection
+                    .setup(device, lights, material.id().id(), pso);
+
                 // create shadow map bind_group
                 let mut layout = None;
 
                 for indirect in &layer.material {
                     let material = indirect.material.as_ref();
-                    let pipeline = shared.material_buffer_collector.get(material);
-                    layout = Some(pipeline.0.get_bind_group_layout(3));
+                    let pso = shared.material_shader_collector.get(material, 0);
+                    layout = Some(pso.get_bind_group_layout(3));
                     break;
                 }
                 let shadow_map = context.registry.get(*res_id);
@@ -146,16 +153,15 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
             let objects = layer.objects(indirect);
             let material = indirect.material.as_ref();
 
-            let (pipeline, material_bind_groups) = shared.material_buffer_collector.get(material);
+            let pso = shared.material_shader_collector.get(material, 0);
 
-            pass.set_pipeline(pipeline.render());
-
+            pass.set_pipeline(pso.render());
             pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
-            pass.set_bind_group(2, material_bind_groups[0].as_ref().unwrap(), &[]); // material bind group
-            pass.set_bind_group(1, material_bind_groups[1].as_ref().unwrap(), &[]); // light bind group
+            shared.shader_bind_group_collection.bind(&mut pass, BindGroupType::Material, material, &pso);
+            shared.shader_bind_group_collection.bind(&mut pass, BindGroupType::Light, light, &pso);
 
             if let Some(s) = self.shadow_map_binding.as_ref() {
-                pass.set_bind_group(3, s, &[]); // shadow bind group
+                // shared.shader_bind_group_collection.bind(&mut pass, BindGroupType::ShadowUniform, shadow, &pso);
             }
 
             // object bind_group
@@ -195,6 +201,7 @@ pub struct PhongMaterialAddRenderer {
     pub shadow_map_id: Option<u32>,
     pub has_shadow_pass: bool,
     pub layer: LayerId,
+    pub lights: Arc<SceneLights>,
 }
 
 impl RenderPassExecutor for PhongMaterialAddRenderer {

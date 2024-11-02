@@ -2,7 +2,7 @@ use dashmap::DashMap;
 
 use crate::{
     context::{RContextRef, TagId},
-    material::Material,
+    material::MaterialArc,
     mesh::Geometry,
     types::{Size, Vec3f, Vec4f},
 };
@@ -341,14 +341,10 @@ impl Scene {
     }
 }
 
-pub trait ObjectDrop: std::fmt::Debug {
-    fn drop(&self, id: u64);
-}
-
 #[derive(Debug)]
 pub struct RenderObject {
     geometry: Box<dyn Geometry>,
-    material: Arc<Material>,
+    material: MaterialArc,
     z_order: i8,
     visible: bool,
     case_shadow: bool,
@@ -358,7 +354,7 @@ pub struct RenderObject {
 }
 
 impl RenderObject {
-    pub fn new(geometry: Box<dyn Geometry>, material: Arc<Material>) -> anyhow::Result<Self> {
+    pub fn new(geometry: Box<dyn Geometry>, material: MaterialArc) -> anyhow::Result<Self> {
         let t = &geometry.mesh().properties;
         if let Some(ins) = geometry.instance() {
             let v = ins.data.lock().unwrap();
@@ -414,11 +410,11 @@ impl RenderObject {
         self.tag.contains(&tag)
     }
 
-    pub fn material(&self) -> &Material {
-        self.material.as_ref()
-    }
+    // pub fn material(&self) -> &Material {
+    //     self.material.as_ref()
+    // }
 
-    pub fn material_arc(&self) -> Arc<Material> {
+    pub fn material_arc(&self) -> MaterialArc {
         self.material.clone()
     }
 

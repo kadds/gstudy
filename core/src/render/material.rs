@@ -1,21 +1,22 @@
 use std::{
-    any::TypeId,
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-    sync::Arc,
+    any::TypeId, collections::{BTreeMap, HashMap}, fmt::Debug, sync::Arc
 };
+
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
     graph::rdg::{pass::RenderPassContext, RenderGraphBuilder},
-    material::{Material, MaterialFace, MaterialId},
+    material::{MaterialArc, MaterialFace, MaterialId},
     scene::{LayerId, Scene},
 };
 
-use super::GlobalUniform;
+use super::{
+    tech::ShaderTechCollection,
+    GlobalUniform,
+};
 
 pub struct RenderSourceIndirectObjects {
-    pub material: Arc<Material>,
+    pub material: MaterialArc,
     pub mat_id: MaterialId,
     pub offset: usize,
     pub count: usize,
@@ -83,17 +84,25 @@ pub struct RenderMaterialContext {
 pub struct SetupResource<'a> {
     pub ui_camera: Arc<GlobalUniform>,
     pub main_camera: Arc<GlobalUniform>,
-    pub shader_loader: &'a tshader::Loader,
+    pub shader_tech_collection: Arc<ShaderTechCollection>,
     pub scene: &'a Scene,
     pub msaa: u32,
 }
 
-pub type RenderMaterialBuilderMap = BTreeMap<LayerId, Vec<Arc<Material>>>;
+pub struct RenderMaterialPsoBuilder {
+    pub map: BTreeMap<LayerId, Vec<MaterialArc>>,
+}
+
+impl RenderMaterialPsoBuilder {
+    pub fn new(map: BTreeMap<LayerId, Vec<MaterialArc>>) -> Self {
+        Self { map }
+    }
+}
 
 pub trait MaterialRendererFactory {
     fn setup(
         &self,
-        materials_map: &RenderMaterialBuilderMap,
+        material_builder: &RenderMaterialPsoBuilder,
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
@@ -101,10 +110,6 @@ pub trait MaterialRendererFactory {
 }
 
 pub mod basic;
-
-pub struct HardwareMaterialShaderResource {
-    pub pass: smallvec::SmallVec<[Arc<wgpu::RenderPipeline>; 1]>,
-}
 
 pub fn take_rs<'a, T: MaterialFace>(
     context: &'a RenderPassContext<'a>,

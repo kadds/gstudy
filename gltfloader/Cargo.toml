@@ -11,12 +11,12 @@ gltf = {version = "1.0", features = ["extras", "names",
     "KHR_materials_specular", "KHR_materials_volume", "KHR_materials_emissive_strength", 
     "KHR_materials_variants", "KHR_materials_ior", "KHR_materials_unlit", "KHR_materials_transmission"]}
 core = {path = "../core"}
-nalgebra = "0.32.2"
+nalgebra = "0.33.0"
 anyhow = "1.0.57"
 log = "0.4"
 urlencoding = "2.1"
 num_cpus = "1.15"
-image = "0.24"
+image = "0.25"
 app = {path = "../app"}
 memmap2 = "0.9"
 phong-render = {path="../phong-render", optional=true}

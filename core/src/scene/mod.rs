@@ -8,3 +8,6 @@ pub use transform::Transform;
 pub use transform::TransformBuilder;
 pub mod controller;
 pub mod sort;
+pub mod renderable;
+pub mod manager;
+pub mod container;

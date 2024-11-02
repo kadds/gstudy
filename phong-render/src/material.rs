@@ -1,63 +1,55 @@
 use core::{
-    backends::wgpu_backend::uniform_alignment,
-    context::ResourceRef,
-    material::{InputResource, InputResourceIterItem, MaterialFace},
-    types::{Color, Vec3f, Vec4f},
-    util::any_as_u8_slice,
+    backends::wgpu_backend::uniform_alignment, context::ResourceRef, material::{bind::{BindingResourceMap, BindingResourceProvider, ShaderBindingResource}, input::{InputResource, InputResourceIterItem}, MaterialFace}, render::pso::BindGroupType, types::{Color, Vec3f, Vec4f}, util::any_as_u8_slice
 };
-use std::{hash::Hasher, io::Write};
+use std::{hash::Hasher, io::Write, panic::panic_any};
 
-// #[repr(C)]
-// struct PhongMaterialData {
-//     diffuse,
-// }
+use tshader::{VariantFlags, VariantFlagsBuilder};
 
 #[derive(Debug)]
 pub struct PhongMaterialFace {
-    pub diffuse: InputResource<Color>,
-    pub specular: InputResource<Color>,
-    pub normal: InputResource<Vec3f>,
-    pub emissive: InputResource<Color>,
-    pub sampler: Option<ResourceRef>,
+    pub variants_base: VariantFlags,
+    pub variants_add: VariantFlags,
 
-    pub shininess: f32,
-
-    pub variants: Vec<&'static str>,
-    pub variants_add: Vec<&'static str>,
-    pub variants_name: String,
-    pub uniform: Vec<u8>,
+    resource: BindingResourceMap,
 }
 
 impl MaterialFace for PhongMaterialFace {
     fn sort_key(&self) -> u64 {
         let mut hasher = fxhash::FxHasher64::default();
-        hasher.write(self.variants_name.as_bytes());
+        hasher.write(self.variants_base.key().as_bytes());
 
         let sid = hasher.finish();
-
-        let tid = self.diffuse.sort_key();
-        let tid2 = self.specular.sort_key();
-        let tid3 = self.normal.sort_key();
         let mut hasher2 = fxhash::FxHasher64::default();
-        hasher2.write_u64(tid);
-        hasher2.write_u64(tid2);
-        hasher2.write_u64(tid3);
+        if let ShaderBindingResource::Resource(res) = self.resource.query_resource("diffuse_texture") {
+            hasher2.write_u64(res.id());
+        }
+        if let ShaderBindingResource::Resource(res) = self.resource.query_resource("specular_texture") {
+            hasher2.write_u64(res.id());
+        }
+        if let ShaderBindingResource::Resource(res) = self.resource.query_resource("emissive_texture") {
+            hasher2.write_u64(res.id());
+        }
 
         (sid & 0xFFFF_FFFF) | (hasher2.finish() >> 32)
     }
+ 
+    fn name(&self) -> &str {
+        "phong"
+    }
+     
+    fn variants(&self) -> &tshader::VariantFlags {
+        &self.variants_base
+    } 
+ 
+}
 
-    fn hash_key(&self) -> u64 {
-        let mut h = fxhash::FxHasher::default();
-        h.write(self.variants_name.as_bytes());
-        h.finish()
+impl BindingResourceProvider for PhongMaterialFace {
+    fn query_resource(&self,key: &str) -> ShaderBindingResource {
+        self.resource.query_resource(key)
     }
 
-    fn material_uniform(&self) -> &[u8] {
-        &self.uniform
-    }
-
-    fn has_alpha_test(&self) -> bool {
-        false
+    fn bind_group(&self) -> BindGroupType {
+        self.resource.bind_group()
     }
 }
 
@@ -173,24 +165,25 @@ impl PhongMaterialFaceBuilder {
     }
 
     pub fn build(self) -> PhongMaterialFace {
-        let mut variants = vec![];
-        let mut variants_add = vec![];
-        let mut uniform = vec![];
+        let mut variants_base = VariantFlagsBuilder::default();
+        let mut variants_add = VariantFlagsBuilder::default();
+        let resource = BindingResourceMap::new(BindGroupType::Material);
 
         for ty in self.diffuse.iter() {
             match ty {
                 InputResourceIterItem::Constant(c) => {
-                    variants.push("DIFFUSE_CONSTANT");
-                    variants_add.push("DIFFUSE_CONSTANT");
-                    uniform.write_all(any_as_u8_slice(&Vec4f::new(c.x, c.y, c.z, 0f32)));
+                    variants_base.add_flag("DIFFUSE_CONSTANT");
+                    variants_add.add_flag("DIFFUSE_CONSTANT");
+                    resource.upsert("diffuse_color", c);
                 }
                 InputResourceIterItem::PreVertex => {
-                    variants.push("DIFFUSE_VERTEX");
-                    variants_add.push("DIFFUSE_VERTEX");
+                    variants_base.add_flag("DIFFUSE_VERTEX");
+                    variants_add.add_flag("DIFFUSE_VERTEX");
                 }
-                InputResourceIterItem::Texture(_) => {
-                    variants.push("DIFFUSE_TEXTURE");
-                    variants_add.push("DIFFUSE_TEXTURE");
+                InputResourceIterItem::Texture(t) => {
+                    variants_base.add_flag("DIFFUSE_TEXTURE");
+                    variants_add.add_flag("DIFFUSE_TEXTURE");
+                    resource.upsert("diffuse_texture", t);
                 }
                 InputResourceIterItem::Instance => {
                     panic!("diffuse instance is not supported");
@@ -201,17 +194,18 @@ impl PhongMaterialFaceBuilder {
         for ty in self.specular.iter() {
             match ty {
                 InputResourceIterItem::Constant(c) => {
-                    variants.push("SPECULAR_CONSTANT");
-                    variants_add.push("SPECULAR_CONSTANT");
-                    uniform.write_all(any_as_u8_slice(&Vec4f::new(c.x, c.y, c.z, 0f32)));
+                    variants_base.add_flag("SPECULAR_CONSTANT");
+                    variants_add.add_flag("SPECULAR_CONSTANT");
+                    resource.upsert("specular_color", c);
                 }
                 InputResourceIterItem::PreVertex => {
-                    variants.push("SPECULAR_VERTEX");
-                    variants_add.push("SPECULAR_VERTEX");
+                    variants_base.add_flag("SPECULAR_VERTEX");
+                    variants_add.add_flag("SPECULAR_VERTEX");
                 }
-                InputResourceIterItem::Texture(_) => {
-                    variants.push("SPECULAR_TEXTURE");
-                    variants_add.push("SPECULAR_TEXTURE");
+                InputResourceIterItem::Texture(t) => {
+                    variants_base.add_flag("SPECULAR_TEXTURE");
+                    variants_add.add_flag("SPECULAR_TEXTURE");
+                    resource.upsert("specular_texture", t);
                 }
                 InputResourceIterItem::Instance => {
                     panic!("specular instance is not supported");
@@ -221,16 +215,17 @@ impl PhongMaterialFaceBuilder {
 
         for ty in self.normal.iter() {
             match ty {
-                InputResourceIterItem::Constant(c) => {
+                InputResourceIterItem::Constant(_) => {
                     panic!("normal constant is not supported");
                 }
                 InputResourceIterItem::PreVertex => {
-                    variants.push("NORMAL_VERTEX");
-                    variants_add.push("NORMAL_VERTEX");
+                    variants_base.add_flag("NORMAL_VERTEX");
+                    variants_add.add_flag("NORMAL_VERTEX");
                 }
-                InputResourceIterItem::Texture(_) => {
-                    variants.push("NORMAL_TEXTURE");
-                    variants_add.push("NORMAL_TEXTURE");
+                InputResourceIterItem::Texture(t) => {
+                    variants_base.add_flag("NORMAL_TEXTURE");
+                    variants_add.add_flag("NORMAL_TEXTURE");
+                    resource.upsert("normal_texture", t);
                 }
                 InputResourceIterItem::Instance => {
                     panic!("normal instance is not supported");
@@ -238,24 +233,19 @@ impl PhongMaterialFaceBuilder {
             }
         }
 
-        uniform.write_all(any_as_u8_slice(&Vec4f::default()));
         for ty in self.emissive.iter() {
             match ty {
                 InputResourceIterItem::Constant(c) => {
-                    variants.push("EMISSIVE_CONSTANT");
-                    uniform.truncate(uniform.len() - std::mem::size_of::<Vec4f>());
-                    uniform.write_all(any_as_u8_slice(&Vec4f::new(
-                        c.x,
-                        c.y,
-                        c.z,
-                        self.emissive_strength,
-                    )));
+                    variants_base.add_flag("EMISSIVE_CONSTANT");
+                    resource.upsert("emissive_color", c);
+                    resource.upsert("emissive_strength", self.emissive_strength);
                 }
                 InputResourceIterItem::PreVertex => {
-                    variants.push("EMISSIVE_VERTEX");
+                    variants_base.add_flag("EMISSIVE_VERTEX");
                 }
-                InputResourceIterItem::Texture(_) => {
-                    variants.push("EMISSIVE_TEXTURE");
+                InputResourceIterItem::Texture(t) => {
+                    variants_base.add_flag("EMISSIVE_TEXTURE");
+                    resource.upsert("emissive_texture", t);
                 }
                 InputResourceIterItem::Instance => {
                     panic!("emissive instance is not supported");
@@ -263,21 +253,14 @@ impl PhongMaterialFaceBuilder {
             }
         }
 
-        uniform.write_all(any_as_u8_slice(&self.shininess));
-        uniform_alignment(&mut uniform);
+        resource.upsert("shininess", self.shininess);
+        resource.upsert("sampler", self.sampler.unwrap());
 
         PhongMaterialFace {
-            diffuse: self.diffuse,
-            specular: self.specular,
-            normal: self.normal,
-            shininess: self.shininess,
-            emissive: self.emissive,
-            uniform,
+            resource,
 
-            variants_name: tshader::variants_name(&variants[..]),
-            variants,
-            variants_add,
-            sampler: self.sampler,
+            variants_base: variants_base.build(),
+            variants_add: variants_add.build(),
         }
     }
 }

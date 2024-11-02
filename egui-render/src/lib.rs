@@ -230,7 +230,7 @@ impl EguiRenderer {
             let material = ui_materials.entry(texture_id).or_insert_with(|| {
                 let t = ui_textures.get(texture_id);
                 MaterialBuilder::default()
-                    .face(EguiMaterialFaceBuilder::default().with_texture(t).build())
+                    .face(EguiMaterialFaceBuilder::default().with_sampler(gpu.default_sampler()).with_texture(t).build())
                     .build(&scene.context())
             });
 
@@ -329,7 +329,13 @@ impl EguiRenderer {
                     InputEvent::MouseWheel { delta } => {
                         self.input
                             .events
-                            .push(egui::Event::Scroll(egui::vec2(delta.x, delta.y)));
+                            .push(egui::Event::MouseWheel
+                                {
+                                    unit: egui::MouseWheelUnit::Point,
+                                    delta: egui::vec2(delta.x, delta.y),
+                                    modifiers: egui::Modifiers::default(), 
+                                }
+                        );
                     }
                     InputEvent::MouseInput { state, button } => {
                         let button = match button {

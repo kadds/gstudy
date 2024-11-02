@@ -1,10 +1,9 @@
-use itertools::Itertools;
-use std::{collections::HashSet, path::PathBuf, str::FromStr};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, str::FromStr};
 
 use serde_derive::Deserialize;
 use strum::{Display, EnumIter, EnumString};
 
-use crate::preprocessor::{Preprocessor, PreprocessorConfig};
+use crate::preprocessor::{Preprocessor, PreprocessorConfig, Variable};
 
 #[derive(Debug, Deserialize)]
 pub struct Tech {
@@ -27,6 +26,7 @@ pub struct Variants {
 
 #[derive(Debug, Deserialize)]
 pub struct Pass {
+    pub name: String,
     pub index: i32,
     pub source: String,
     pub binding: Vec<String>,
@@ -39,12 +39,6 @@ pub struct Pass {
 pub struct Config {
     pub tech: Tech,
     pub pass: Vec<Pass>,
-}
-
-pub fn variants_name<S: Into<Vec<V>>, V: Into<String>>(variants: S) -> String {
-    let variants: Vec<_> = variants.into();
-    // variants.sort_by_key(|v| *v as u8);
-    variants.into_iter().map(|v| v.into()).join("+")
 }
 
 #[derive(Debug, Clone, Copy, Display, EnumIter, EnumString, PartialEq, Eq, Hash)]
@@ -60,8 +54,11 @@ pub enum Shader {
 }
 
 pub struct PassShaderSourceDescriptor {
+    pub name: String,
     pub source: String,
-    pub include_shaders: Vec<Shader>,
+    pub entries: Vec<Shader>,
+    pub struct_variables: HashMap<String, HashMap<String, Variable>>,
+    pub global_variables: HashMap<String, HashMap<String, Variable>>,
 }
 
 #[derive(Debug)]
@@ -79,10 +76,9 @@ impl ShaderTechCompiler {
         source_path.set_extension("toml");
 
         let source =
-            std::fs::read_to_string(&source_path).map_err(|e| anyhow::anyhow!("{} {:?}", e, p))?;
+            std::fs::read_to_string(&source_path).map_err(|e| anyhow::anyhow!("{} {:?}", e, source_path))?;
 
         let config = {
-            profiling::scope!("parse shader config");
             let mut config: Config = toml::from_str(&source)?;
             config.pass.sort_by_key(|k| k.index);
             config
@@ -96,10 +92,14 @@ impl ShaderTechCompiler {
         })
     }
 
-    pub fn compile_pass(
+    pub fn total_pass(&self) -> usize {
+        self.config.pass.len()
+    }
+
+    pub fn compile_pass<S: AsRef<str>>(
         &self,
         pass_index: usize,
-        variants: &[&'static str],
+        variants: &[S],
     ) -> anyhow::Result<PassShaderSourceDescriptor> {
         profiling::scope!("compile pass");
         let mut cfg = PreprocessorConfig::default();
@@ -113,14 +113,14 @@ impl ShaderTechCompiler {
         }
 
         for variant in variants {
-            if !set.contains(*variant) {
+            if !set.contains(variant.as_ref()) {
                 return Err(anyhow::anyhow!(
                     "variant {} not exists in pass {}",
-                    *variant,
+                    variant.as_ref(),
                     pass_index
                 ));
             }
-            cfg = cfg.with_define(variant.to_string(), "True");
+            cfg = cfg.with_define(variant.as_ref().to_string(), "True");
         }
         cfg = cfg.with_include(self.base_path.to_str().unwrap());
         cfg = cfg.with_include(self.include_base_path.to_str().unwrap());
@@ -131,10 +131,11 @@ impl ShaderTechCompiler {
         let res = preprocessor.process(real_path.as_os_str().to_str().unwrap())?;
 
         log::debug!(
-            "compile {} pass {} success \n{}",
+            "compile {} pass {} {:?} success: \n{}",
             self.source,
             pass_index,
-            res
+            set,
+            res.data
         );
         let shaders = self.config.pass[pass_index]
             .shaders
@@ -143,8 +144,11 @@ impl ShaderTechCompiler {
             .collect::<Result<Vec<_>, strum::ParseError>>()?;
 
         Ok(PassShaderSourceDescriptor {
-            source: res,
-            include_shaders: shaders,
+            source: res.data,
+            struct_variables: res.loc_struct_map,
+            global_variables: res.loc_global_map,
+            entries: shaders,
+            name: self.config.pass[pass_index].name.clone(),
         })
     }
 

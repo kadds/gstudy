@@ -13,7 +13,7 @@ app = {path = "../../app"}
 env_logger = "0.11"
 egui-render = {path = "../../egui-render"}
 rfd = "0.14"
-nalgebra = "0.32.2"
+nalgebra = "0.33.0"
 log = "0.4"
 phong-render = {path="../../phong-render"}
 profiling = "1.0"

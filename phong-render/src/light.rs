@@ -1,7 +1,5 @@
 use core::{
-    scene::Camera,
-    types::{Color, Mat4x4f, Vec2f, Vec3f, Vec4f},
-    util::{angle2rad, any_as_u8_slice},
+    material::bind::{BindingResourceMap, BindingResourceProvider, ShaderBindingResource}, render::{pso::BindGroupType, tech::ShaderTechProvider}, scene::Camera, types::{Color, Mat4x4f, Vec2f, Vec3f, Vec4f}, util::{angle2rad, any_as_u8_slice}
 };
 use std::sync::{Arc, Mutex};
 
@@ -325,12 +323,14 @@ impl Default for SceneLightsInner {
 
 pub struct SceneLights {
     inner: Mutex<SceneLightsInner>,
+    resource: BindingResourceMap,
 }
 
 impl Default for SceneLights {
     fn default() -> Self {
         Self {
             inner: Mutex::new(SceneLightsInner::default()),
+            resource: BindingResourceMap::new(BindGroupType::Light),
         }
     }
 }
@@ -425,6 +425,27 @@ impl SceneLights {
             }
         }
         false
+    }
+}
+
+impl BindingResourceProvider for SceneLights {
+    fn query_resource(&self, key: &str) -> ShaderBindingResource {
+        self.resource.query_resource(key)
+    }
+    fn bind_group(&self) -> BindGroupType {
+        self.resource.bind_group()
+    }
+}
+
+impl ShaderTechProvider for SceneLights {
+    fn variants(&self) ->  &tshader::VariantFlags {
+        
+    }
+    fn instance_id(&self) -> u64 {
+        0
+    }
+    fn tech_id(&self) -> std::any::TypeId {
+        
     }
 }
 

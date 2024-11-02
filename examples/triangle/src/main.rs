@@ -1,7 +1,7 @@
 use core::{
     context::RContext,
     material::{
-        basic::BasicMaterialFaceBuilder, InputResource, InputResourceBuilder, MaterialBuilder,
+        basic::BasicMaterialFaceBuilder, input::InputResourceBuilder, MaterialBuilder
     },
     mesh::{
         builder::{MeshBuilder, MeshPropertiesBuilder, MeshPropertyType},

@@ -1,4 +1,4 @@
-use std::{ops::Add, sync::Arc};
+use std::ops::Add;
 
 use nalgebra::{SMatrix, SimdPartialOrd, Vector2, Vector3, Vector4};
 use ordered_float::OrderedFloat;

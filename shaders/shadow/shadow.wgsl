@@ -1,11 +1,11 @@
 ///#include "camera.wgsl"
 
 struct VertexInput {
-    @location(0) position: vec3<f32>,
+    @loc_struct(VertexInput) position: vec3<f32>,
 }
 
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    @loc_struct(VertexOutput) @builtin(position) position: vec4<f32>,
 };
 
 struct Object {
@@ -21,9 +21,9 @@ struct ShadowUniform {
     need_transform_to_linear: f32,
 }
 
-@group(0) @binding(0) var<uniform> shadow_uniform: ShadowUniform;
+@loc_global(ShadowUniform) var<uniform> shadow_uniform: ShadowUniform;
 
-var<push_constant> object: Object;
+@loc_global(ObjectUniform) var<push_constant> object: Object;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput{

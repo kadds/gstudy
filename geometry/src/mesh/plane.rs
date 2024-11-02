@@ -41,7 +41,7 @@ impl PlaneMeshBuilder {
     }
 
     pub fn set_color_face_at_index(mut self, index: usize, color: Color) -> Self {
-        if self.colors.len() < index {
+        if self.colors.len() <= index {
             self.colors.resize(index + 1, self.default_color);
         }
         self.colors[index] = color;

@@ -1,5 +1,6 @@
 use anyhow::bail;
 use lazy_static::lazy_static;
+use log::debug;
 use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, tag, take_while},
@@ -157,6 +158,16 @@ fn atomic_counter(
     })))
 }
 
+pub struct ParsedLocation {
+    pub group: u32,
+    pub binding: u32,
+}
+
+pub struct Variable {
+    pub location: ParsedLocation,
+    pub option: Option<String>, // builtin?
+}
+
 struct IfCondition {
     disabled: bool,
     enter: bool,
@@ -177,6 +188,19 @@ struct PreprocessorContext<'a> {
         String,
         Box<dyn Fn(&[EvalVal], &mut HashMap<String, EvalVal>) -> anyhow::Result<EvalVal>>,
     >,
+    loc_struct_map: HashMap<String, HashMap<String, Variable>>,
+    loc_global_map: HashMap<String, HashMap<String, Variable>>,
+
+    loc_struct_state: HashMap<String, ParsedLocation>,
+
+    loc_global_state: HashMap<String, ParsedLocation>,
+    global_group_state: u32,
+}
+
+pub struct PreprocessorResult {
+    pub data: String,
+    pub loc_struct_map: HashMap<String, HashMap<String, Variable>>,
+    pub loc_global_map: HashMap<String, HashMap<String, Variable>>,
 }
 
 impl<'a> PreprocessorContext<'a> {
@@ -317,6 +341,7 @@ impl<'a> PreprocessorContext<'a> {
     fn build_commands(&mut self, node: NodeIndex<u32>) -> anyhow::Result<()> {
         let r = self.graph.node_weight_mut(node).unwrap();
         let commands = r.commands.take().unwrap();
+        debug!("{:?}", commands);
 
         let mut index = 0;
         let mut if_stack = Vec::<IfCondition>::new();
@@ -348,7 +373,7 @@ impl<'a> PreprocessorContext<'a> {
                         }
                     }
 
-                    log::debug!("enter [{}] if {:?}", enter, cond.cond);
+                    log::trace!("enter [{}] if {:?}", enter, cond.cond);
                     if_stack.push(IfCondition {
                         enter,
                         disabled,
@@ -362,7 +387,7 @@ impl<'a> PreprocessorContext<'a> {
                         _ => return Err(anyhow::anyhow!("if expr result type is not expected")),
                     };
                     if let Some(v) = if_stack.last() {
-                        log::debug!(
+                        log::trace!(
                             "enter [{}] before {} elseif {:?}",
                             enter,
                             v.disabled,
@@ -388,7 +413,7 @@ impl<'a> PreprocessorContext<'a> {
                 }
                 Command::Else(_cond) => {
                     if let Some(v) = if_stack.last() {
-                        log::debug!("enter [true] before {} else", v.disabled);
+                        log::trace!("enter [true] before {} else", v.disabled);
                         if !v.disabled {
                             if_stack.push(IfCondition {
                                 disabled: true,
@@ -412,7 +437,7 @@ impl<'a> PreprocessorContext<'a> {
                         return Err(anyhow::anyhow!("endif condition is not expected"));
                     }
                     let last_condition = if_stack.pop().unwrap();
-                    log::debug!("pop {} endif", last_condition.depth - 1);
+                    log::trace!("pop {} endif", last_condition.depth - 1);
                     for _ in 0..(last_condition.depth - 1) {
                         if_stack.pop();
                     }
@@ -468,13 +493,118 @@ impl<'a> PreprocessorContext<'a> {
                     } else {
                     }
                 }
+                Command::LocStruct(loc) => {
+                    if let Some(v) = if_stack.last() {
+                        if !v.enter {
+                            continue;
+                        }
+                    }
+                    if !self.loc_struct_state.contains_key(loc.name) {
+                        self.loc_struct_state.insert(
+                            loc.name.to_string(),
+                            ParsedLocation {
+                                group: 0,
+                                binding: 0,
+                            },
+                        );
+                    }
+
+                    let option = loc.builtin.map(|v| v.to_string());
+                    let state = self.loc_struct_state.get_mut(loc.name).unwrap();
+                    let mut cur_binding = state.binding;
+
+                    if let Some(option) = &option {
+                        self.buf
+                            .write_fmt(format_args!("@builtin({}) {}", option, loc.var_name))?;
+                        cur_binding = 0;
+                    } else {
+                        self.buf.write_fmt(format_args!(
+                            "@location({}) {}",
+                            cur_binding, loc.var_name
+                        ))?;
+                        state.binding += 1;
+                    }
+
+                    self.loc_struct_map
+                        .entry(loc.name.to_string())
+                        .or_default()
+                        .insert(
+                            loc.var_name.to_string(),
+                            Variable {
+                                location: ParsedLocation {
+                                    binding: cur_binding,
+                                    group: 0,
+                                },
+                                option,
+                            },
+                        );
+                }
+                Command::LocGlobal(loc) => {
+                    if let Some(v) = if_stack.last() {
+                        if !v.enter {
+                            continue;
+                        }
+                    }
+                    if !self.loc_global_state.contains_key(loc.name) {
+                        self.loc_global_state.insert(
+                            loc.name.to_string(),
+                            ParsedLocation {
+                                group: self.global_group_state,
+                                binding: 0,
+                            },
+                        );
+                        self.global_group_state += 1;
+                    }
+
+                    let state = self.loc_global_state.get_mut(loc.name).unwrap();
+                    let cur_binding = state.binding;
+                    let cur_group = state.group;
+
+                    let option = loc.var_tag.map(|v| v.to_string());
+
+                    if let Some(option) = &option {
+                        let push_constant =  option == "push_constant";
+                        if push_constant {
+                            self.buf.write_fmt(format_args!(
+                                "var<{}> {}",
+                                option, loc.var_name
+                            ))?;
+                        } else {
+                            self.buf.write_fmt(format_args!(
+                                "@group({}) @binding({}) var<{}> {}",
+                                cur_group, cur_binding, option, loc.var_name
+                            ))?;
+                            state.binding += 1;
+                        }
+                    } else {
+                        self.buf.write_fmt(format_args!(
+                            "@group({}) @binding({}) var {}",
+                            cur_group, cur_binding, loc.var_name
+                        ))?;
+                        state.binding += 1;
+                    }
+
+                    self.loc_global_map
+                        .entry(loc.name.to_string())
+                        .or_default()
+                        .insert(
+                            loc.var_name.to_string(),
+                            Variable {
+                                location: ParsedLocation {
+                                    binding: cur_binding,
+                                    group: cur_group,
+                                },
+                                option,
+                            },
+                        );
+                }
             }
         }
 
         Ok(())
     }
 
-    fn build(mut self) -> anyhow::Result<String> {
+    fn build(mut self) -> anyhow::Result<PreprocessorResult> {
         let path = self
             .file_path
             .canonicalize()
@@ -485,7 +615,13 @@ impl<'a> PreprocessorContext<'a> {
 
         self.build_commands(node)?;
 
-        Ok(self.buf)
+        Ok(
+            PreprocessorResult {
+                data: self.buf,
+                loc_global_map: self.loc_global_map,
+                loc_struct_map: self.loc_struct_map,
+            }
+        )
     }
 
     fn parse_file(&mut self, path: String) -> anyhow::Result<NodeIndex<u32>> {
@@ -524,7 +660,7 @@ impl Preprocessor {
         Self { config }
     }
 
-    pub fn process<P: Into<PathBuf>>(&self, path: P) -> anyhow::Result<String> {
+    pub fn process<P: Into<PathBuf>>(&self, path: P) -> anyhow::Result<PreprocessorResult> {
         let ctx: PreprocessorContext<'_> =
             PreprocessorContext::new(self.config.clone(), path.into())?;
         ctx.build()
@@ -558,6 +694,20 @@ struct Else {}
 
 #[derive(Debug)]
 struct EndIf {}
+
+#[derive(Debug)]
+struct LocGlobal<'a> {
+    name: &'a str,
+    var_name: &'a str,
+    var_tag: Option<&'a str>,
+}
+
+#[derive(Debug)]
+struct LocStruct<'a> {
+    name: &'a str,
+    var_name: &'a str,
+    builtin: Option<&'a str>,
+}
 
 #[derive(Debug)]
 enum Expr<'a> {
@@ -608,6 +758,8 @@ enum Command<'a> {
     Decl(Decl<'a>),
     Assign(Assign<'a>),
     Reference(Reference<'a>),
+    LocStruct(LocStruct<'a>),
+    LocGlobal(LocGlobal<'a>),
 }
 
 fn parse_commands(i: &str) -> IResult<&str, Vec<Command>> {
@@ -629,6 +781,8 @@ fn raw(i: &str) -> IResult<&str, &str> {
                 break;
             }
         } else if ch == '#' {
+            break;
+        } else if ch == '@' && len != 0 {
             break;
         }
         len += ch.len_utf8();
@@ -676,6 +830,8 @@ fn parse_command(i: &str) -> IResult<&str, Command> {
                 ),
             ))),
         ),
+        map_opt(loc_global, |cmd| Some(Command::LocGlobal(cmd))),
+        map_opt(loc_struct, |cmd| Some(Command::LocStruct(cmd))),
         map_opt(raw, |raw| Some(Command::Raw(raw))),
     ))(i)
 }
@@ -1212,4 +1368,72 @@ fn endif_cmd(i: &str) -> IResult<&str, EndIf> {
 
 fn else_cmd(i: &str) -> IResult<&str, Else> {
     map_opt(tuple((tag("else"),)), |_| Some(Else {}))(i)
+}
+
+fn loc_struct(i: &str) -> IResult<&str, LocStruct> {
+    map_opt(
+        tuple((
+            tag("@loc_struct"),
+            delimited(
+                tuple((tag("("), space0)),
+                identifier,
+                tuple((space0, tag(")"))),
+            ),
+            space0,
+            opt(map_opt(
+                tuple((
+                    tag("@builtin"),
+                    delimited(
+                        tuple((tag("("), space0)),
+                        identifier,
+                        tuple((space0, tag(")"))),
+                    ),
+                    space0,
+                )),
+                |(_, f, _)| Some(f),
+            )),
+            identifier,
+        )),
+        |(_, name, _, builtin, var_name)| {
+            Some(LocStruct {
+                name,
+                var_name,
+                builtin,
+            })
+        },
+    )(i)
+}
+
+fn loc_global(i: &str) -> IResult<&str, LocGlobal> {
+    map_opt(
+        tuple((
+            tag("@loc_global"),
+            delimited(
+                tuple((tag("("), space0)),
+                identifier,
+                tuple((space0, tag(")"))),
+            ),
+            space0,
+            map_opt(
+                tuple((
+                    tag("var"),
+                    opt(delimited(
+                        tuple((space0, tag("<"), space0)),
+                        identifier,
+                        tuple((space0, tag(">"))),
+                    )),
+                )),
+                |(_, is)| Some(is),
+            ),
+            space1,
+            identifier,
+        )),
+        |(_, name, _, var_tag, _, var_name)| {
+            Some(LocGlobal {
+                name,
+                var_name,
+                var_tag,
+            })
+        },
+    )(i)
 }

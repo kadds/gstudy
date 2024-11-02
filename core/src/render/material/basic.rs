@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use tshader::{LoadTechConfig, ShaderTech};
 
 use crate::{
     backends::wgpu_backend::WGPUResource,
@@ -9,23 +8,22 @@ use crate::{
         pass::*,
         RenderPassBuilder,
     },
-    material::{basic::*, Material},
+    material::basic::*,
     render::{
-        collector::{
-            MaterialBufferInstantCollector, MaterialBufferInstantiation, MeshBufferCollector,
-        },
-        resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
-        ResolvePipelineConfig,
+        collection::ShaderBindGroupCollection, collector::MeshBufferCollector, pso::{ColorTargetBuilder, RenderDescriptorObject}, tech::ShaderTechCollection
     },
     scene::LayerId,
     util::any_as_u8_slice,
 };
 
-use super::{take_rs, MaterialRendererFactory, RenderMaterialBuilderMap, SetupResource};
+use super::{
+    take_rs, MaterialRendererFactory, RenderMaterialPsoBuilder, SetupResource
+};
 
 struct BasicMaterialHardwareRendererInner {
-    material_buffer_collector: MaterialBufferInstantCollector,
+    shader_bind_group_collection: ShaderBindGroupCollection,
     mesh_buffer_collector: MeshBufferCollector,
+    material_shader_collector: Arc<ShaderTechCollection>,
 }
 
 pub struct BasicMaterialHardwareRenderer {
@@ -41,22 +39,12 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
         engine: &mut GraphCopyEngine,
     ) -> Option<()> {
         self.inner.mesh_buffer_collector.recall();
-        self.inner.material_buffer_collector.recall();
 
         let rs = take_rs::<BasicMaterialFace>(&context)?;
         let c = rs.scene.get_container();
 
         let layer = rs.layer(self.layer);
         for indirect in &layer.material {
-            let material = indirect.material.as_ref();
-            self.inner
-                .material_buffer_collector
-                .add_pipeline_and_copy_buffer(
-                    material,
-                    &layer.main_camera.bind_group_layout,
-                    &rs.gpu,
-                );
-
             // create index/vertex buffer
             let objects = layer.objects(indirect);
 
@@ -77,9 +65,10 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
 
         for indirect in &layer.material {
             let material = indirect.material.as_ref();
-            self.inner
-                .material_buffer_collector
-                .add_bind_group(material, device);
+            let pso = self.inner.material_shader_collector.get(
+                "basic", indirect.material.face().variants(), material.id().id(), "forward");
+
+            self.inner.shader_bind_group_collection.setup(device, material, material.id().id(), pso);
         }
     }
 
@@ -95,14 +84,13 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
             let objects = layer.objects(indirect);
             let material = indirect.material.as_ref();
 
-            let (pipeline, material_bind_groups) =
-                self.inner.material_buffer_collector.get(material);
+            let pso = self.inner.material_shader_collector.get(
+                "basic", indirect.material.face().variants(), material.id().id(), "forward");
 
-            pass.set_pipeline(pipeline.render());
-            pass.set_bind_group(0, &layer.main_camera.bind_group, &[]); // camera bind group
-            if let Some(b) = &material_bind_groups[0] {
-                pass.set_bind_group(1, b, &[]); // material bind group
-            }
+            pass.set_pipeline(pso.render());
+            pass.set_bind_group(0, &layer.main_camera.bind_group, &[0]); // camera bind group
+
+            self.inner.shader_bind_group_collection.bind(&mut pass, material, material.id().id(), &pso);
 
             // object bind_group
             for id in objects {
@@ -117,6 +105,7 @@ impl RenderPassExecutor for BasicMaterialHardwareRenderer {
 
                 if b.instance_data.is_none() {
                     let object_uniform = obj.geometry().transform();
+
                     pass.set_push_constants(
                         wgpu::ShaderStages::VERTEX,
                         0,
@@ -144,28 +133,46 @@ pub struct BasicMaterialRendererFactory {}
 impl MaterialRendererFactory for BasicMaterialRendererFactory {
     fn setup(
         &self,
-        materials_map: &RenderMaterialBuilderMap,
-        _gpu: &WGPUResource,
+        materials_map: &RenderMaterialPsoBuilder,
+        gpu: &WGPUResource,
         g: &mut crate::graph::rdg::RenderGraphBuilder,
         setup_resource: &SetupResource,
     ) {
-        let tech = setup_resource
-            .shader_loader
-            .load_tech(LoadTechConfig {
-                name: "basic_forward".into(),
-            })
-            .unwrap();
+        for (layer, materials) in &materials_map.map {
+            setup_resource
+                .shader_tech_collection
+                .setup_materials(gpu.device(), materials, "basic", |material, _| {
+                    let mut rdo = RenderDescriptorObject::new();
+                    rdo = rdo.set_msaa(setup_resource.msaa);
 
-        for (layer, _) in materials_map {
+                    if let Some(blend) = material.blend() {
+                        rdo = rdo.add_target(
+                            ColorTargetBuilder::new(gpu.surface_format())
+                                .set_blender(*blend)
+                                .build(),
+                        );
+                    } else {
+                        rdo = rdo.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
+                    }
+                    let depth_format = wgpu::TextureFormat::Depth32Float;
+
+                    rdo = rdo.set_primitive(|p: &mut _| *p = *material.primitive());
+                    rdo = rdo.set_depth(depth_format, |depth: &mut _| {
+                        depth.depth_compare = wgpu::CompareFunction::Less;
+                        depth.depth_write_enabled = !material.is_transparent();
+                    });
+
+                    rdo
+                })
+                .unwrap();
+
             let r = Arc::new(Mutex::new(BasicMaterialHardwareRenderer {
                 inner: BasicMaterialHardwareRendererInner {
-                    material_buffer_collector: MaterialBufferInstantCollector::new(
-                        BasicMaterialBufferInstantiation {
-                            tech: tech.clone(),
-                            msaa: setup_resource.msaa,
-                        },
-                    ),
                     mesh_buffer_collector: MeshBufferCollector::new(),
+                    shader_bind_group_collection: ShaderBindGroupCollection::new("basic_material_render".into()),
+                    material_shader_collector: setup_resource
+                        .shader_tech_collection
+                        .clone(),
                 },
                 layer: *layer,
             }));
@@ -180,101 +187,3 @@ impl MaterialRendererFactory for BasicMaterialRendererFactory {
     }
 }
 
-struct BasicMaterialBufferInstantiation {
-    tech: Arc<ShaderTech>,
-    msaa: u32,
-}
-
-impl MaterialBufferInstantiation for BasicMaterialBufferInstantiation {
-    #[profiling::function]
-    fn create_pipeline(
-        &self,
-        material: &Material,
-        global_layout: &wgpu::BindGroupLayout,
-        gpu: &WGPUResource,
-    ) -> PipelinePassResource {
-        let variants = &material.face_by::<BasicMaterialFace>().variants;
-        let template = self
-            .tech
-            .register_variant(&gpu.device(), &[variants])
-            .unwrap();
-
-        let mut ins = RenderDescriptorObject::new();
-        ins = ins.set_msaa(self.msaa);
-
-        if let Some(blend) = material.blend() {
-            ins = ins.add_target(
-                ColorTargetBuilder::new(gpu.surface_format())
-                    .set_blender(*blend)
-                    .build(),
-            );
-        } else {
-            ins = ins.add_target(ColorTargetBuilder::new(gpu.surface_format()).build());
-        }
-        let depth_format = wgpu::TextureFormat::Depth32Float;
-
-        ins = ins.set_primitive(|p: &mut _| *p = *material.primitive());
-        ins = ins.set_depth(depth_format, |depth: &mut _| {
-            depth.depth_compare = wgpu::CompareFunction::Less;
-            depth.depth_write_enabled = !material.is_transparent();
-        });
-
-        resolve_pipeline(
-            &gpu,
-            &template,
-            ins,
-            &ResolvePipelineConfig {
-                constant_stages: vec![wgpu::ShaderStages::VERTEX],
-                global_bind_group_layout: Some(global_layout),
-            },
-        )
-    }
-
-    #[profiling::function]
-    fn create_bind_group(
-        &self,
-        material: &Material,
-        buffers: &[wgpu::Buffer],
-        pipeline: &PipelinePassResource,
-        device: &wgpu::Device,
-    ) -> Vec<Option<wgpu::BindGroup>> {
-        let buffer = &buffers[0];
-
-        let mat = material.face_by::<BasicMaterialFace>();
-        let mut entries = vec![];
-        if buffer.size() != 0 {
-            entries.push(wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            });
-        }
-
-        if let Some(texture) = mat.texture.texture_ref() {
-            let sampler = mat.sampler.as_ref().unwrap();
-            entries.push(wgpu::BindGroupEntry {
-                binding: entries.len() as u32,
-                resource: wgpu::BindingResource::Sampler(sampler.sampler()),
-            });
-            entries.push(wgpu::BindGroupEntry {
-                binding: entries.len() as u32,
-                resource: wgpu::BindingResource::TextureView(texture.texture_view()),
-            });
-        }
-
-        if entries.len() == 0 {
-            return vec![None];
-        }
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("basic material"),
-            layout: &pipeline.pass[0].get_bind_group_layout(1),
-            entries: &entries,
-        });
-
-        vec![Some(bind_group)]
-    }
-}

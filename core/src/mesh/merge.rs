@@ -1,6 +1,5 @@
-use std::sync::Arc;
 
-use super::{builder::MeshBuilder, Mesh};
+use super::Mesh;
 
 #[derive(Debug)]
 pub struct MeshMerger {

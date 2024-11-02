@@ -6,32 +6,48 @@ use std::{
 
 use core::{
     backends::wgpu_backend::{ClearValue, GpuInputMainBuffers, ResourceOps, WGPUResource},
+    context::ResourceRef,
     graph::rdg::{backend::GraphCopyEngine, pass::*, RenderGraphBuilder, RenderPassBuilder},
-    material::MaterialId,
+    material::{bind::{BindingResourceProvider, ShaderBindingResource}, Material},
     render::{
-        common::FramedCache,
-        material::{take_rs, MaterialRendererFactory, RenderMaterialBuilderMap, SetupResource},
-        resolve_pipeline, ColorTargetBuilder, PipelinePassResource, RenderDescriptorObject,
-        ResolvePipelineConfig,
+        collection::ShaderBindGroupCollection,
+        material::{take_rs, MaterialRendererFactory, RenderMaterialPsoBuilder, SetupResource},
+        pso::{BindGroupType, ColorTargetBuilder, RenderDescriptorObject},
+        tech::ShaderTechCollection,
     },
     scene::LayerId,
     types::Rectu,
     wgpu,
 };
 
-use tshader::LoadTechConfig;
-
 use crate::material::EguiMaterialFace;
 
 struct EguiMaterialHardwareRendererInner {
     main_buffers: GpuInputMainBuffers,
+    sampler: ResourceRef,
 
-    sampler: wgpu::Sampler,
-    pipeline: PipelinePassResource,
-    tech: Arc<tshader::ShaderTech>,
-    material_bind_group_cache: FramedCache<MaterialId, wgpu::BindGroup>,
+    shader_bind_group_collection: ShaderBindGroupCollection,
+    material_shader_collector: Arc<ShaderTechCollection>,
 
     draw_index_buffer: Vec<(Range<u32>, i32, Option<Rectu>)>,
+}
+
+struct EguiMaterialShaderResourceProvider<'a> {
+    mat: &'a Material,
+    sampler: ResourceRef,
+}
+
+impl<'a> BindingResourceProvider for EguiMaterialShaderResourceProvider<'a> {
+    fn query_resource(&self,key: &str) -> ShaderBindingResource {
+        if key == "texture_sampler" {
+            return self.sampler.clone().into();
+        }
+        self.mat.query_resource(key)
+    }
+
+    fn bind_group(&self) -> BindGroupType {
+        self.mat.bind_group()
+    }
 }
 
 pub struct EguiMaterialHardwareRenderer {
@@ -104,28 +120,20 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         let rs = take_rs::<EguiMaterialFace>(&context).unwrap();
         let layer = rs.layer(self.layer);
         for indirect in &layer.material {
-            let mat = indirect.material.face_by::<EguiMaterialFace>();
+            let pso = inner
+                .material_shader_collector
+                .get("egui", indirect.material.face().variants(), indirect.material.id().id(), "egui");
 
-            inner
-                .material_bind_group_cache
-                .get_or(indirect.mat_id, |_| {
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("egui"),
-                        layout: &inner.pipeline.pass[0].get_bind_group_layout(1),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    mat.texture().texture_view(),
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&inner.sampler),
-                            },
-                        ],
-                    })
-                });
+            let rp = EguiMaterialShaderResourceProvider {
+                mat: &indirect.material,
+                sampler: inner.sampler.clone(),
+            };
+            inner.shader_bind_group_collection.setup(
+                device,
+                &rp,
+                indirect.material.id().id(),
+                pso,
+            );
         }
     }
 
@@ -141,19 +149,30 @@ impl RenderPassExecutor for EguiMaterialHardwareRenderer {
         let layer = rs.layer(self.layer);
         let mut pass = engine.begin(layer.layer);
 
-        pass.set_pipeline(inner.pipeline.pass[0].render());
-        pass.set_bind_group(0, &layer.main_camera.bind_group, &[]);
-        pass.set_index_buffer(
-            inner.main_buffers.index().buffer().slice(..),
-            wgpu::IndexFormat::Uint32,
-        );
-        pass.set_vertex_buffer(0, inner.main_buffers.vertex().buffer().slice(..));
         for indirect in &layer.material {
-            let material = indirect.material.as_ref();
+            let pso = inner
+                .material_shader_collector
+                .get("egui", indirect.material.face().variants(), indirect.material.id().id(), "egui");
 
-            let material_bind_group = inner.material_bind_group_cache.get(&material.id()).unwrap();
+            pass.set_pipeline(pso.render());
+            pass.set_bind_group(0, &layer.main_camera.bind_group, &[0]);
+            pass.set_index_buffer(
+                inner.main_buffers.index().buffer().slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.set_vertex_buffer(0, inner.main_buffers.vertex().buffer().slice(..));
 
-            pass.set_bind_group(1, material_bind_group, &[]);
+            let rp = EguiMaterialShaderResourceProvider {
+                mat: &indirect.material,
+                sampler: inner.sampler.clone(),
+            };
+
+            inner.shader_bind_group_collection.bind(
+                &mut pass,
+                &rp,
+                indirect.material.id().id(),
+                &pso,
+            );
 
             for (indices, vertices, rect) in &inner.draw_index_buffer {
                 if let Some(r) = rect {
@@ -176,52 +195,67 @@ pub struct EguiMaterialRendererFactory {}
 impl MaterialRendererFactory for EguiMaterialRendererFactory {
     fn setup(
         &self,
-        materials_map: &RenderMaterialBuilderMap,
+        materials_map: &RenderMaterialPsoBuilder,
         gpu: &WGPUResource,
         g: &mut RenderGraphBuilder,
         setup_resource: &SetupResource,
     ) {
+        let ctx = gpu.context();
         let label = Some("egui");
-        let tech = setup_resource
-            .shader_loader
-            .load_tech(LoadTechConfig {
-                name: "egui".into(),
-            })
-            .unwrap();
-        let template = tech.register_variant(gpu.device(), &[&[]]).unwrap();
+
+        let sampler = gpu.device().create_sampler(&wgpu::SamplerDescriptor {
+            label,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0f32,
+            lod_max_clamp: f32::MAX,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+        let sampler = ctx.register_sampler(sampler);
+
         let depth_format = wgpu::TextureFormat::Depth32Float;
 
-        let pipeline = resolve_pipeline(
-            gpu,
-            &template,
-            RenderDescriptorObject::new()
-                .set_depth(depth_format, |depth: &mut _| {
-                    depth.depth_compare = wgpu::CompareFunction::LessEqual;
-                })
-                .set_primitive(|primitive: &mut _| {
-                    primitive.cull_mode = None;
-                })
-                .set_msaa(setup_resource.msaa)
-                .add_target(
-                    ColorTargetBuilder::new(gpu.surface_format())
-                        .set_append_blender()
-                        .build(),
-                ),
-            &ResolvePipelineConfig {
-                global_bind_group_layout: Some(&setup_resource.ui_camera.bind_group_layout),
-                ..Default::default()
-            },
-        );
+        for (layer, materials) in &materials_map.map {
+            setup_resource
+                .shader_tech_collection
+                .setup_materials(gpu.device(), materials, "egui", |material, _| {
+                    let mut rdo = RenderDescriptorObject::new();
+                    rdo = rdo
+                        .set_depth(depth_format, |depth: &mut _| {
+                            depth.depth_compare = wgpu::CompareFunction::LessEqual;
+                        })
+                        .vertex_no_split()
+                        .set_primitive(|primitive: &mut _| {
+                            primitive.cull_mode = None;
+                        })
+                        .set_msaa(setup_resource.msaa)
+                        .add_target(
+                            ColorTargetBuilder::new(gpu.surface_format())
+                                .set_append_blender()
+                                .build(),
+                        );
 
-        for (layer, _) in materials_map {
+                    rdo
+                })
+                .unwrap();
+
             let r = Arc::new(Mutex::new(EguiMaterialHardwareRenderer {
                 inner: EguiMaterialHardwareRendererInner {
                     main_buffers: GpuInputMainBuffers::new(gpu, label),
-                    sampler: gpu.new_sampler(label),
-                    tech: tech.clone(),
-                    pipeline: pipeline.clone(),
-                    material_bind_group_cache: FramedCache::new(),
+                    sampler: sampler.clone(),
                     draw_index_buffer: vec![],
+                    material_shader_collector: setup_resource
+                        .shader_tech_collection
+                        .clone(),
+                    shader_bind_group_collection: ShaderBindGroupCollection::new(
+                        "egui_material_render".into(),
+                    ),
                 },
                 layer: *layer,
             }));

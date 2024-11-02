@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 core = {path = "../core"}
-nalgebra = "0.32.2"
+nalgebra = "0.33.0"

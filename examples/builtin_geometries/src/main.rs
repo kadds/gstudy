@@ -1,6 +1,6 @@
 use core::{
     context::RContext,
-    material::{basic::BasicMaterialFaceBuilder, InputResourceBuilder, MaterialBuilder},
+    material::{basic::BasicMaterialFaceBuilder, input::InputResourceBuilder, MaterialBuilder},
     mesh::StaticGeometry,
     scene::{
         controller::{orbit::OrbitCameraController, CameraController},

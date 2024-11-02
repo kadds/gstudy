@@ -74,6 +74,10 @@ impl Resource {
             _ => panic!("resource type invalid"),
         }
     }
+
+    pub fn ty(&self) -> &ResourceTy {
+        &self.ty
+    }
 }
 
 pub type TagId = u32;

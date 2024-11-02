@@ -10,7 +10,7 @@ use std::{
 };
 
 use instant::Duration;
-use log::{error, warn};
+use log::error;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
@@ -163,7 +163,7 @@ impl Looper {
             )));
             self.main_window.as_ref().unwrap().borrow().gpu()
         } else {
-            panic!("main window exists");
+            panic!("main window already registered");
             // self.ext_window.push(Window::new(w));
         }
     }

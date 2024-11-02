@@ -1,5 +1,5 @@
 [map]
-basic_forward = "./basic/forward.toml"
+basic = "./basic/forward.toml"
 depth = "./depth/depth.toml"
 phong = "./phong/phong.toml"
 egui = "./ui/ui.toml"

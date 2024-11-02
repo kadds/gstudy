@@ -1,14 +1,12 @@
 use std::{
-    any::{Any, TypeId},
-    fmt::Debug,
-    hash::{Hash, Hasher},
-    sync::Arc,
+    any::{Any, TypeId}, fmt::Debug, hash::Hash, sync::{Arc, Mutex}
 };
 
-use num_enum::{IntoPrimitive, TryFromPrimitive};
+use bind::{BindingResourceProvider, ShaderBindingResource};
+use tshader::VariantFlags;
 
 use crate::{
-    context::{RContext, ResourceRef},
+    context::RContext,
     mesh::builder::{InstancePropertyType, MeshPropertyType, PropertiesFrame},
 };
 
@@ -25,11 +23,13 @@ impl MaterialId {
     }
 }
 
-pub trait MaterialFace: Any + Sync + Send + Debug {
+pub trait MaterialFace: Any + Sync + Send + Debug + BindingResourceProvider {
+    fn name(&self) -> &str;
+
     fn sort_key(&self) -> u64;
-    fn hash_key(&self) -> u64;
-    fn material_uniform(&self) -> &[u8];
-    fn has_alpha_test(&self) -> bool;
+
+    fn variants(&self) -> &VariantFlags;
+
     fn validate(
         &self,
         t: &PropertiesFrame<MeshPropertyType>,
@@ -47,7 +47,19 @@ pub struct Material {
     blend: Option<wgpu::BlendState>,
 
     face: Box<dyn MaterialFace>, // material face
-    cached_hash: u64,
+
+    mutable_face: Mutex<Option<Box<dyn MaterialFace>>>,
+}
+
+pub type MaterialArc = Arc<Material>;
+
+impl BindingResourceProvider for Material {
+    fn query_resource(&self, name: &str) -> ShaderBindingResource {
+        self.face.query_resource(name)
+    }
+    fn bind_group(&self) -> crate::render::pso::BindGroupType {
+        crate::render::pso::BindGroupType::Material
+    }
 }
 
 impl Material {
@@ -67,7 +79,10 @@ impl Material {
     }
 
     pub fn has_alpha_test(&self) -> bool {
-        self.face.has_alpha_test()
+        if let ShaderBindingResource::Float(_) = self.face.query_resource("alpha_test") {
+            return true
+        }
+        false
     }
 
     pub fn id(&self) -> MaterialId {
@@ -87,10 +102,6 @@ impl Material {
             .downcast_ref::<M>()
             .unwrap()
     }
-
-    pub fn hash_key(&self) -> u64 {
-        self.cached_hash
-    }
 }
 
 #[derive(Debug)]
@@ -104,7 +115,6 @@ pub struct MaterialBuilder {
 impl Default for MaterialBuilder {
     fn default() -> Self {
         Self {
-            // RenderDescriptorObject
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
@@ -163,25 +173,16 @@ impl MaterialBuilder {
         self.face = Some(Box::new(face));
     }
 
-    pub fn build(mut self, context: &RContext) -> Arc<Material> {
+    pub fn build(mut self, context: &RContext) -> MaterialArc {
         let face = self.face.take().unwrap();
-        let hash = face.hash_key();
-
-        let mut h = fxhash::FxHasher::default();
-        h.write_u64(hash);
-        self.primitive.hash(&mut h);
-        if let Some(blend) = &self.blend {
-            blend.hash(&mut h);
-        }
-        let cached_hash = h.finish();
 
         Arc::new(Material {
             name: self.name,
             id: MaterialId::new(context.alloc_material_id()),
             primitive: self.primitive,
             blend: self.blend,
-            face,
-            cached_hash,
+            face: face,
+            mutable_face: Mutex::new(None),
         })
     }
 }
@@ -189,220 +190,8 @@ impl MaterialBuilder {
 pub trait MaterialShader: Any + Sync + Send + Debug + 'static {}
 
 pub mod basic;
-
-#[derive(Debug, Clone, IntoPrimitive, TryFromPrimitive)]
-#[repr(u8)]
-pub enum InputResourceType {
-    Constant,
-    PreVertex,
-    Texture,
-    Instance,
-}
-
-#[derive(Debug, Clone)]
-#[repr(u8)]
-pub enum InputResourceIterItem<'a, T> {
-    Constant(&'a T),
-    PreVertex,
-    Texture(&'a ResourceRef),
-    Instance,
-}
-
-pub struct InputResourceIter<'a, T> {
-    inner: &'a InputResource<T>,
-    idx: i8,
-}
-
-impl<'a, T> Iterator for InputResourceIter<'a, T> {
-    type Item = InputResourceIterItem<'a, T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= 4 {
-            return None;
-        }
-        let next = if self.idx < 0 {
-            self.inner.bitmap.first_index()?
-        } else {
-            self.inner.bitmap.next_index(self.idx as usize)?
-        };
-        self.idx = next as i8;
-        let ty = InputResourceType::try_from_primitive(next as u8).unwrap();
-        Some(match ty {
-            InputResourceType::Constant => InputResourceIterItem::Constant(&self.inner.constant),
-            InputResourceType::PreVertex => InputResourceIterItem::PreVertex,
-            InputResourceType::Texture => {
-                InputResourceIterItem::Texture(self.inner.texture.as_ref().unwrap())
-            }
-            InputResourceType::Instance => InputResourceIterItem::Instance,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
-pub struct InputResourceBits {
-    bitmap: bitmaps::Bitmap<4>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct InputResource<T> {
-    bitmap: bitmaps::Bitmap<4>,
-    constant: T,
-    texture: Option<ResourceRef>,
-}
-
-impl<T> InputResource<T> {
-    pub fn bits(&self) -> InputResourceBits {
-        InputResourceBits {
-            bitmap: self.bitmap,
-        }
-    }
-    pub fn is_texture(&self) -> bool {
-        let num: u8 = InputResourceType::Texture.into();
-        self.bitmap.get(num as usize)
-    }
-    pub fn is_constant(&self) -> bool {
-        let num: u8 = InputResourceType::Constant.into();
-        self.bitmap.get(num as usize)
-    }
-
-    pub fn sort_key(&self) -> u64 {
-        if self.is_texture() {
-            return self.texture.as_ref().map(|v| v.id()).unwrap_or_default();
-        }
-        0
-    }
-
-    pub fn iter(&self) -> InputResourceIter<T> {
-        InputResourceIter {
-            inner: &self,
-            idx: -1,
-        }
-    }
-
-    pub fn texture_ref(&self) -> Option<&ResourceRef> {
-        if self.is_texture() {
-            Some(self.texture.as_ref().unwrap())
-        } else {
-            None
-        }
-    }
-
-    pub fn merge(&mut self, rhs: &Self)
-    where
-        T: Clone,
-    {
-        if self.is_texture() && rhs.is_texture() {
-            panic!("merge texture fail")
-        }
-        if self.is_constant() && rhs.is_constant() {
-            panic!("merge constant fail")
-        }
-
-        if !self.is_texture() {
-            self.texture = rhs.texture.clone();
-        }
-
-        if !self.is_constant() {
-            self.constant = rhs.constant.clone();
-        }
-
-        self.bitmap |= rhs.bitmap;
-    }
-
-    pub fn merge_available(&mut self, rhs: &Self)
-    where
-        T: Clone,
-    {
-        if !self.is_texture() {
-            self.texture = rhs.texture.clone();
-        }
-
-        if !self.is_constant() {
-            self.constant = rhs.constant.clone();
-        }
-
-        self.bitmap |= rhs.bitmap;
-    }
-}
-
-pub struct InputResourceBuilder<T> {
-    m: InputResource<T>,
-}
-
-impl<T> InputResourceBuilder<T>
-where
-    T: Copy + Clone + Default,
-{
-    pub fn new() -> Self {
-        Self {
-            m: InputResource {
-                bitmap: bitmaps::Bitmap::new(),
-                constant: T::default(),
-                texture: None,
-            },
-        }
-    }
-    pub fn add_pre_vertex(&mut self) {
-        let num: u8 = InputResourceType::PreVertex.into();
-        self.m.bitmap.set(num as usize, true);
-    }
-    pub fn add_instance(&mut self) {
-        let num: u8 = InputResourceType::Instance.into();
-        self.m.bitmap.set(num as usize, true);
-    }
-
-    pub fn add_constant(&mut self, constant: T) {
-        let num: u8 = InputResourceType::Constant.into();
-        self.m.bitmap.set(num as usize, true);
-        self.m.constant = constant;
-    }
-
-    pub fn add_texture(&mut self, texture: ResourceRef) {
-        let num: u8 = InputResourceType::Texture.into();
-        self.m.bitmap.set(num as usize, true);
-        self.m.texture = Some(texture);
-    }
-
-    pub fn with_pre_vertex(mut self) -> Self {
-        self.add_pre_vertex();
-        self
-    }
-
-    pub fn with_constant(mut self, constant: T) -> Self {
-        self.add_constant(constant);
-        self
-    }
-
-    pub fn with_instance(mut self) -> Self {
-        self.add_instance();
-        self
-    }
-
-    pub fn with_texture(mut self, texture: ResourceRef) -> Self {
-        self.add_texture(texture);
-        self
-    }
-
-    pub fn build(self) -> InputResource<T> {
-        self.m
-    }
-
-    pub fn only_pre_vertex() -> InputResource<T> {
-        Self::new().with_pre_vertex().build()
-    }
-
-    pub fn only_instance() -> InputResource<T> {
-        Self::new().with_instance().build()
-    }
-
-    pub fn only_texture(texture: ResourceRef) -> InputResource<T> {
-        Self::new().with_texture(texture).build()
-    }
-
-    pub fn only_constant(c: T) -> InputResource<T> {
-        Self::new().with_constant(c).build()
-    }
-}
+pub mod input;
+pub mod bind;
 
 pub fn validate_material_properties(
     t: &PropertiesFrame<MeshPropertyType>,

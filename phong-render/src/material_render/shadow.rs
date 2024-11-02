@@ -1,6 +1,6 @@
 use core::{
     graph::rdg::pass::RenderPassExecutor,
-    render::{material::take_rs, PipelinePassResource},
+    render::{material::take_rs, pso::PipelineStateObject, tech::ShaderTechCollection},
     types::Vec2f,
     util::any_as_u8_slice,
     wgpu::{self, util::DeviceExt},
@@ -16,9 +16,7 @@ use super::{copy_vertex_data, PhongMaterialSharedData};
 
 pub struct ShadowRenderer {
     pub shared: Arc<Mutex<PhongMaterialSharedData>>,
-    pub pipeline: Arc<PipelinePassResource>,
     pub light: Arc<Light>,
-    pub cameras_bind_group: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
     pub size: Vec2f,
 }
 
@@ -58,7 +56,7 @@ impl RenderPassExecutor for ShadowRenderer {
             });
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
-                layout: &self.pipeline.pass[0].get_bind_group_layout(0),
+                layout: self.pso.get_bind_group_layout(core::render::pso::BindGroupType::Camera),
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -89,7 +87,7 @@ impl RenderPassExecutor for ShadowRenderer {
             for indirect in &layer.material {
                 let objects = layer.objects(indirect);
 
-                pass.set_pipeline(self.pipeline.pass[0].render());
+                pass.set_pipeline(self.pso.render());
                 pass.set_bind_group(0, &self.cameras_bind_group[0].1, &[]); // camera bind group
 
                 // object bind_group

@@ -422,6 +422,7 @@ fn request_optional_feature(
             label: Some("wgpu device"),
             required_features: req_features,
             required_limits: adapter.limits(),
+            memory_hints: MemoryHints::Performance,
         },
         None,
     );
@@ -574,14 +575,14 @@ impl WGPUBackend {
 
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("default sampler"),
-            address_mode_u: AddressMode::Repeat,
-            address_mode_v: AddressMode::Repeat,
-            address_mode_w: AddressMode::Repeat,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
             mipmap_filter: FilterMode::Linear,
             lod_min_clamp: 0f32,
-            lod_max_clamp: 20f32,
+            lod_max_clamp: std::f32::MAX,
             compare: None,
             anisotropy_clamp: 1,
             border_color: None,
@@ -679,13 +680,13 @@ pub struct WGPURenderer {
     command_buffers: Vec<CommandBuffer>,
 }
 
-pub struct WGPURenderTargetInner<'a, 'b> {
+pub struct WGPURenderTargetInner<'a> {
     color_attachments: Vec<RenderPassColorAttachment<'a>>,
     depth_attachment: Option<RenderPassDepthStencilAttachment<'a>>,
-    render_pass_desc: RenderPassDescriptor<'a, 'b>,
+    render_pass_desc: RenderPassDescriptor<'a>,
 }
 
-impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
+impl<'a> WGPURenderTargetInner<'a> {
     pub fn new(label: &'a str) -> Self {
         Self {
             color_attachments: Vec::new(),
@@ -699,7 +700,7 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
             depth_attachment: None,
         }
     }
-    pub fn desc(&mut self) -> &RenderPassDescriptor<'a, 'b> {
+    pub fn desc(&mut self) -> &RenderPassDescriptor<'a> {
         unsafe {
             self.render_pass_desc.color_attachments =
                 std::mem::transmute(self.color_attachments.as_slice());
@@ -709,7 +710,7 @@ impl<'a, 'b> WGPURenderTargetInner<'a, 'b> {
     }
 }
 
-impl<'a, 'b> std::fmt::Debug for WGPURenderTargetInner<'a, 'b> {
+impl<'a> std::fmt::Debug for WGPURenderTargetInner<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WGPURenderTargetInner")
             .field("color_attachments", &self.color_attachments)
@@ -741,11 +742,11 @@ impl WGPURenderTarget {
             label: label.into(),
         }
     }
-    fn get<'a, 'b>(&self) -> &mut WGPURenderTargetInner<'a, 'b> {
+    fn get<'a>(&self) -> &mut WGPURenderTargetInner<'a> {
         unsafe { std::mem::transmute(self.inner.as_ptr()) }
     }
 
-    pub fn desc<'a, 'b>(&self) -> &RenderPassDescriptor<'a, 'b> {
+    pub fn desc<'a>(&self) -> &RenderPassDescriptor<'a> {
         self.get().desc()
     }
 

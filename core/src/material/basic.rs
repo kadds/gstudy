@@ -1,62 +1,56 @@
-use std::{fmt::Debug, hash::Hasher, io::Write};
-
-use crate::{
-    backends::wgpu_backend::uniform_alignment,
-    context::ResourceRef,
-    mesh::builder::{InstancePropertyType, MeshPropertyType, INSTANCE_TRANSFORM},
-    types::{Color, Vec2f, Vec3f, Vec4f},
-    util::any_as_u8_slice,
+use std::{
+    fmt::Debug,
+    hash::Hasher,
+    io::Write,
 };
 
-use super::{validate_material_properties, InputResource, MaterialFace};
+use tshader::{VariantFlags, VariantFlagsBuilder};
+
+use crate::{
+    context::ResourceRef, material::input::*, mesh::builder::{InstancePropertyType, MeshPropertyType, INSTANCE_TRANSFORM}, render::pso::BindGroupType, types::{Color, Vec2f}
+};
+
+use super::{bind::{BindingResourceMap, BindingResourceProvider, ShaderBindingResource}, validate_material_properties, MaterialFace};
 
 pub struct BasicMaterialFace {
-    pub(crate) variants: Vec<&'static str>,
-    pub(crate) variants_name: String,
-    pub(crate) texture: InputResource<Color>,
-    pub(crate) sampler: Option<ResourceRef>,
-    pub(crate) alpha_test: Option<f32>,
-    pub(crate) instance: bool,
+    pub(crate) is_instance: bool,
+    pub(crate) variants: VariantFlags,
 
-    uniform: Vec<u8>,
+    pub(crate) properties: Vec<MeshPropertyType>,
+    pub(crate) instance_properties: Vec<InstancePropertyType>,
 
-    properties: Vec<MeshPropertyType>,
-    instance_properties: Vec<InstancePropertyType>,
+    resource: BindingResourceMap,
 }
 
 impl Debug for BasicMaterialFace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BasicMaterialFace")
             .field("variants", &self.variants)
-            .field("variants_name", &self.variants_name)
-            .field("texture", &self.texture)
-            .field("sampler", &self.sampler)
             .finish()
     }
 }
 
 impl MaterialFace for BasicMaterialFace {
     fn sort_key(&self) -> u64 {
-        let tid = self.texture.sort_key();
-
         let mut hasher = fxhash::FxHasher64::default();
-        hasher.write(self.variants_name.as_bytes());
+        let tid = if let ShaderBindingResource::Resource(texture) = &self.resource.query_resource("texture") {
+            texture.id()
+        } else {
+            0
+        };
 
+        hasher.write(self.variants.key().as_bytes());
         let sid = hasher.finish();
 
         (sid & 0xFFFF_FFFF) | (tid >> 32)
     }
-    fn has_alpha_test(&self) -> bool {
-        self.alpha_test.is_some()
-    }
-    fn hash_key(&self) -> u64 {
-        let mut h = fxhash::FxHasher::default();
-        h.write(self.variants_name.as_bytes());
-        h.finish()
+
+    fn name(&self) -> &str {
+        "basic_material"
     }
 
-    fn material_uniform(&self) -> &[u8] {
-        &self.uniform
+    fn variants(&self) -> &VariantFlags {
+        &self.variants
     }
 
     fn validate(
@@ -68,18 +62,26 @@ impl MaterialFace for BasicMaterialFace {
     }
 }
 
+impl BindingResourceProvider for BasicMaterialFace {
+    fn query_resource(&self, name: &str) -> ShaderBindingResource {
+        self.resource.query_resource(name)
+    }
+    fn bind_group(&self) -> crate::render::pso::BindGroupType {
+        self.resource.bind_group()
+    }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct BasicMaterialFaceBuilder {
-    alpha_test: Option<f32>,
-    instance: bool,
-    sampler: Option<ResourceRef>,
+    alpha_test: InputAlphaTest,
     texture: InputResource<Color>,
+    sampler: Option<ResourceRef>,
+    is_instance: bool,
 }
 
 impl BasicMaterialFaceBuilder {
     pub fn new() -> Self {
         Self {
-            alpha_test: None,
             ..Default::default()
         }
     }
@@ -89,7 +91,7 @@ impl BasicMaterialFaceBuilder {
     }
 
     pub fn set_instance(&mut self) {
-        self.instance = true;
+        self.is_instance = true;
     }
 
     pub fn texture(mut self, texture: InputResource<Color>) -> Self {
@@ -124,62 +126,57 @@ impl BasicMaterialFaceBuilder {
     }
 
     pub fn set_alpha_test(&mut self, cut: f32) {
-        self.alpha_test = Some(cut);
+        self.alpha_test = InputAlphaTest::make_enabled(cut);
     }
 
     pub fn build(self) -> BasicMaterialFace {
         let mut properties = vec![];
         let mut instance_properties = vec![];
-        let mut uniform = vec![];
+        let resource = BindingResourceMap::new(BindGroupType::Material);
 
-        if self.instance {
+        if self.is_instance {
             instance_properties.push(INSTANCE_TRANSFORM);
         }
 
-        let mut variants = vec![];
+        let mut variants = VariantFlagsBuilder::default();
         for res_ty in self.texture.iter() {
             match res_ty {
-                super::InputResourceIterItem::Constant(c) => {
-                    variants.push("CONST_COLOR");
-                    uniform.write_all(any_as_u8_slice(&Vec3f::new(c.x, c.y, c.z)));
+                InputResourceIterItem::Constant(c) => {
+                    variants.add_flag("CONST_COLOR");
+                    resource.upsert("const_color", c);
                 }
-                super::InputResourceIterItem::PreVertex => {
+                InputResourceIterItem::PreVertex => {
                     properties.push(MeshPropertyType::new::<Color>("color"));
-                    variants.push("VERTEX_COLOR");
+                    variants.add_flag("VERTEX_COLOR");
                 }
-                super::InputResourceIterItem::Texture(_) => {
-                    variants.push("TEXTURE");
+                InputResourceIterItem::Texture(t) => {
+                    variants.add_flag("TEXTURE");
                     properties.push(MeshPropertyType::new::<Vec2f>("texture"));
+                    resource.upsert("const_color", t.clone());
                 }
-                super::InputResourceIterItem::Instance => {
-                    variants.push("INSTANCE");
+                InputResourceIterItem::Instance => {
+                    // variants.add_flag("INSTANCE");
                     instance_properties.push(InstancePropertyType::new::<Color>("color"));
-                    variants.push("CONST_COLOR_INSTANCE");
+                    variants.add_flag("CONST_COLOR_INSTANCE");
                 }
             }
         }
-        if let Some(cut) = self.alpha_test {
-            uniform.write_all(any_as_u8_slice(&cut));
+        if self.alpha_test.is_enable() {
+            variants.add_flag("ALPHA_TEST");
+            resource.upsert("alpha_test", self.alpha_test.cutoff().unwrap());
+        }
+        if self.is_instance {
+            variants.add_flag("INSTANCE");
         }
 
-        if self.alpha_test.is_some() {
-            variants.push("ALPHA_TEST");
-        }
-        if self.instance {
-            variants.push("INSTANCE");
-        }
-        uniform_alignment(&mut uniform);
-
-        BasicMaterialFace {
-            variants_name: tshader::variants_name(&variants[..]),
-            variants,
-            texture: self.texture,
-            sampler: self.sampler,
-            alpha_test: self.alpha_test,
-            uniform,
-            instance: self.instance,
+        let face = BasicMaterialFace {
+            variants: variants.build(),
+            is_instance: self.is_instance,
             properties,
             instance_properties,
-        }
+            resource,
+        };
+
+        face
     }
 }

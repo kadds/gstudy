@@ -1,6 +1,6 @@
 [[pass]]
 index = 0
-name = "basic-forward"
+name = "forward"
 source = "forward.wgsl"
 binding = ["pre_camera"]
 camera = "D3"

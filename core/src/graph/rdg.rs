@@ -97,7 +97,6 @@ impl Default for ResourceLifetime {
 pub struct RenderGraph {
     name: String,
     g: Graph,
-    union_find: UnionFind<NodeIndex>,
     render_jobs_list: Vec<DependencyRenderJobs>,
 
     registry: ResourceRegistry,
@@ -675,7 +674,6 @@ impl RenderGraphBuilder {
             name: self.name,
             g,
             render_jobs_list,
-            union_find,
             registry: ResourceRegistry {
                 desc_map: self.resource_map,
                 underlying_map: HashMap::new(),

@@ -183,7 +183,7 @@ where
         let obj = self.storage.get(&object).unwrap();
         let obj = obj.o();
 
-        let material = obj.material();
+        let material = obj.material_arc();
         let material_id = material.id();
         let face_id = material.face_id();
 
@@ -229,7 +229,7 @@ where
 
     fn remove(&mut self, object: u64) {
         if let Some(obj) = self.storage.get(&object) {
-            let material = obj.o().material();
+            let material = obj.o().material_arc();
             let material_id = material.id();
             let face_id = material.face_id();
 

@@ -6,54 +6,47 @@
 ///#decl UV
 ///#endif
 
-///#decl POSITION_VERTEX_INPUT = _atomic_counter(0, 1)
-///#decl POSITION_VERTEX_OUTPUT = _atomic_counter(0, 1)
-///#decl BINDING_GLOBAL_GROUP1 = _atomic_counter(1, 1)
-
-///#if EMISSIVE_TEXTURE || EMISSIVE_CONSTANT || EMISSIVE_VERTEX
-///#endif
-
 struct Object {
     model: mat4x4<f32>,
     inverse_model: mat4x4<f32>,
 }
 
 struct VertexInput {
-    @location(#{POSITION_VERTEX_INPUT}) position: vec3<f32>,
+    @loc_struct(VertexInput) position: vec3<f32>,
 ///#if NORMAL_VERTEX
-    @location(#{POSITION_VERTEX_INPUT}) normal: vec3<f32>,
+    @loc_struct(VertexInput) normal: vec3<f32>,
 ///#endif
 ///#if DIFFUSE_VERTEX
-    @location(#{POSITION_VERTEX_INPUT}) diffuse: vec4<f32>,
+    @loc_struct(VertexInput) diffuse: vec4<f32>,
 ///#endif
 ///#if SPECULAR_VERTEX
-    @location(#{POSITION_VERTEX_INPUT}) specular: vec4<f32>,
+    @loc_struct(VertexInput) specular: vec4<f32>,
 ///#endif
 ///#if EMISSIVE_VERTEX
-    @location(#{POSITION_VERTEX_INPUT}) emissive: vec4<f32>,
+    @loc_struct(VertexInput) emissive: vec4<f32>,
 ///#endif
 ///#if UV
-    @location(#{POSITION_VERTEX_INPUT}) uv: vec2<f32>,
+    @loc_struct(VertexInput) uv: vec2<f32>,
 ///#endif
 }
 
 struct VertexOutput {
 ///#if NORMAL_VERTEX
-    @location(#{POSITION_VERTEX_OUTPUT}) normal: vec3<f32>,
+    @loc_struct(VertexOutput) normal: vec3<f32>,
 ///#endif
 ///#if DIFFUSE_VERTEX
-    @location(#{POSITION_VERTEX_OUTPUT}) diffuse: vec3<f32>,
+    @loc_struct(VertexOutput) diffuse: vec3<f32>,
 ///#endif
 ///#if EMISSIVE_VERTEX
-    @location(#{POSITION_VERTEX_INPUT}) emissive: vec3<f32>,
+    @loc_struct(VertexOutput) emissive: vec3<f32>,
 ///#endif
 ///#if UV
-    @location(#{POSITION_VERTEX_OUTPUT}) uv: vec2<f32>,
+    @loc_struct(VertexOutput) uv: vec2<f32>,
 ///#endif
 ///#if SHADOW
-    @location(#{POSITION_VERTEX_OUTPUT}) shadow_position: vec3<f32>,
+    @loc_struct(VertexOutput) shadow_position: vec3<f32>,
 ///#endif
-    @builtin(position) position: vec4<f32>,
+    @loc_struct(VertexOutput) @builtin(position) position: vec4<f32>,
 };
 
 struct BaseLightUniform {
@@ -64,37 +57,48 @@ struct BaseLightUniform {
 ///#endif
 }
 
-@group(0) @binding(0) var<uniform> camera_uniform: CameraUniform;
-@group(1) @binding(0) var<uniform> light_uniform: BaseLightUniform;
-
-@group(2) @binding(0) var<uniform> material_uniform: MaterialUniform;
-
-///#if UV
-@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var sampler_tex: sampler;
+///#if MATERIAL
+struct MaterialUniform {
+///#if CONST_COLOR
+    color: vec3<f32>,
+///#endif
+///#if ALPHA_TEST
+    alpha_test: f32,
+///#endif
+}
 ///#endif
 
+@loc_global(CameraUniform) var<uniform> camera_uniform: CameraUniform;
+@loc_global(LightUniform) var<uniform> light_uniform: BaseLightUniform;
+
+///#if MATERIAL
+@loc_global(MaterialUniform) var<uniform> material_uniform: MaterialUniform;
+///#endif
+///#if UV
+@loc_global(MaterialUniform) var sampler_tex: sampler;
+///#endif
 ///#if DIFFUSE_TEXTURE
-@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_diffuse: texture_2d<f32>;
+@loc_global(MaterialUniform) var texture_diffuse: texture_2d<f32>;
 ///#endif
 
 ///#if NORMAL_TEXTURE
-@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_normal: texture_2d<f32>;
+@loc_global(MaterialUniform) var texture_normal: texture_2d<f32>;
 ///#endif
 
 ///#if SPECULAR_TEXTURE
-@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_specular: texture_2d<f32>;
+@loc_global(MaterialUniform) var texture_specular: texture_2d<f32>;
 ///#endif
 
 ///#if EMISSIVE_TEXTURE
-@group(2) @binding(#{BINDING_GLOBAL_GROUP1}) var texture_emissive: texture_2d<f32>;
+@loc_global(MaterialUniform) var texture_emissive: texture_2d<f32>;
 ///#endif
 
 ///#if SHADOW
-@group(3) @binding(0) var shadow_sampler: sampler_comparison;
-@group(3) @binding(1) var shadow_map: texture_depth_2d;
+@loc_global(ShadowUniform) var shadow_sampler: sampler_comparison;
+@loc_global(ShadowUniform) var shadow_map: texture_depth_2d;
 ///#endif
 
-var<push_constant> object: Object;
+@loc_global(ObjectUniform) var<push_constant> object: Object;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput{

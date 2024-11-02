@@ -3,6 +3,7 @@ author="kadds"
 
 [[pass]]
 index = 0
+name = "egui"
 source = "ui.wgsl"
 camera = "D2ScreenSize"
 shaders=["vs", "fs"]

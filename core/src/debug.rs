@@ -1,10 +1,8 @@
-use std::sync::Arc;
 
 use crate::{
     context::RContext,
     material::{
-        basic::{BasicMaterialFace, BasicMaterialFaceBuilder},
-        InputResourceBuilder, Material, MaterialBuilder,
+        basic::BasicMaterialFaceBuilder, input::InputResourceBuilder, MaterialBuilder, MaterialArc
     },
     mesh::Mesh,
     types::Color,
@@ -14,7 +12,7 @@ pub trait DebugMeshGenerator {
     fn generate(&self, color: Color) -> Mesh;
 }
 
-pub fn new_debug_material(context: &RContext) -> Arc<Material> {
+pub fn new_debug_material(context: &RContext) -> MaterialArc {
     let fb = BasicMaterialFaceBuilder::new().texture(InputResourceBuilder::only_pre_vertex());
     MaterialBuilder::default()
         .name("debug material")

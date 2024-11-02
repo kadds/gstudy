@@ -19,7 +19,7 @@ use app::container::{Container, LockResource};
 use app::plugin::{LooperPlugin, Plugin, PluginFactory};
 use app::AppEventProcessor;
 pub use looper::Looper;
-use raw_window_handle::{HasWindowHandle, WindowHandle};
+use raw_window_handle::WindowHandle;
 use statistics::Statistics;
 pub use winit;
 mod util;
