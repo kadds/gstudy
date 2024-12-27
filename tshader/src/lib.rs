@@ -11,6 +11,16 @@ pub struct VariantFlags {
     hash_key: u64,
 }
 
+impl Default for VariantFlags {
+    fn default() -> Self {
+        Self {
+            full_key: "-".to_owned(),
+            view: vec![],
+            hash_key: 123,
+        }
+    }
+}
+
 impl VariantFlags {
     pub fn new(view: Vec<String> ) -> Self {
         let full_key = view.clone().into_iter().join("+");

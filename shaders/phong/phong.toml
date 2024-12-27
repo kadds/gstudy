@@ -1,6 +1,6 @@
 [[pass]]
 index = 0
-name = "phong-forward"
+name = "phong-forward-base"
 source = "forward_base.wgsl"
 binding = ["pre_camera"]
 camera = "D3"
@@ -35,4 +35,4 @@ unit = ["DIFFUSE_CONSTANT", "DIFFUSE_VERTEX", "DIFFUSE_TEXTURE", "POINT_LIGHT", 
 
 [tech]
 author="kadds"
-name="phong_forward"
+name="phong-forward"

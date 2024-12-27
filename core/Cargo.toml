@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { version = "22.1.0" , features = ["webgl"]}
+wgpu = { version = "23.0.0" , features = ["webgl"]}
 log = "0.4"
 lazy_static = "1.4"
 anyhow = "1.0.57"
@@ -16,7 +16,7 @@ spirv_headers = "1.5"
 ouroboros = "0.18"
 atomic = "0.6"
 parking_lot = "0.12"
-pollster="0.3"
+pollster="0.4"
 bitflags = "2.3"
 murmur3 = "0.5"
 smallvec = "1.10"

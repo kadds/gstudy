@@ -169,7 +169,7 @@ fn create_compute_pipeline(
         label: Some(&pass.name),
         layout: Some(&pipeline_layout),
         module: &pass.cs.as_ref().unwrap().device_module,
-        entry_point: "cs_main",
+        entry_point: Some("cs_main"),
         compilation_options: wgpu::PipelineCompilationOptions::default(),
         cache: None,
     };
@@ -254,7 +254,7 @@ fn create_render_pipeline(
         layout: Some(pipeline_layout),
         vertex: wgpu::VertexState {
             module: &pass.vs.as_ref().unwrap().device_module,
-            entry_point: "vs_main",
+            entry_point: Some("vs_main"),
             buffers: &vertex_buffer_layouts,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
@@ -268,7 +268,7 @@ fn create_render_pipeline(
     if let Some(fs) = &pass.fs {
         desc.fragment = Some(wgpu::FragmentState {
             module: &fs.device_module,
-            entry_point: "fs_main",
+            entry_point: Some("fs_main"),
             targets: &rdo.color_targets,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         })

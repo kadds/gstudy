@@ -24,7 +24,7 @@ use statistics::Statistics;
 pub use winit;
 mod util;
 
-pub type DEvent = Box<dyn Any + Send>;
+pub type DEvent = Option<Box<dyn Any + Send>>;
 pub type WEvent = winit::event::Event<DEvent>;
 pub type CEvent = core::event::Event;
 
@@ -279,33 +279,31 @@ impl LooperPlugin for WindowLooperPlugin {
         container: &app::container::Container,
         runner: Rc<RefCell<dyn app::plugin::Runner>>,
     ) {
-        let mut looper = Looper::new();
-        let window_builder = winit::window::WindowBuilder::new()
+        let context = container.get::<RContext>().unwrap();
+
+        let attributes = winit::window::WindowAttributes::default()
             .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
                 self.size.x as f64,
                 self.size.y as f64,
             )))
             .with_resizable(true)
-            .with_visible(false)
+            // .with_visible(false)
             .with_title(self.title.clone());
+
+        let mut looper = Looper::new(attributes, context.clone());
 
         container.register(WindowSize::new((self.size, self.size)));
         container.register(ClearColor::new(Color::new(0.1f32, 0.1f32, 0.1f32, 1f32)));
 
-        let context = container.get::<RContext>().unwrap();
-
-        let gpu = looper.create_window(window_builder, context);
-
-        container.register(RawWindow {
-            handle: looper.handle().unwrap(),
-        });
-        container.register_arc(gpu);
         container.register(MsaaResource::new(Msaa(1)));
         container.register_arc(looper.statistics());
 
-        struct Process(Rc<RefCell<dyn app::plugin::Runner>>);
+        struct Process<'a>(
+            Rc<RefCell<dyn app::plugin::Runner>>,
+            &'a app::container::Container,
+        );
 
-        impl EventProcessor for Process {
+        impl<'a> EventProcessor for Process<'a> {
             fn on_event(
                 &mut self,
                 source: &dyn core::event::EventSource,
@@ -313,10 +311,20 @@ impl LooperPlugin for WindowLooperPlugin {
             ) -> core::event::ProcessEventResult {
                 self.0.borrow_mut().on_event(source, event)
             }
+
+            fn init(&mut self, source: &dyn core::event::EventSource) {
+                // self.1.register(RawWindow {
+                //     handle: source.source_information().handle,
+                // });
+                self.1.register_arc(source.source_information().gpu);
+            }
         }
+
         looper
             .event_registry()
-            .register_processor(Box::new(Process(runner.clone())));
+            .register_processor(Box::new(Process(runner.clone(), unsafe {
+                std::mem::transmute(container)
+            })));
 
         runner.borrow().startup(&looper.event_source());
         looper.run();

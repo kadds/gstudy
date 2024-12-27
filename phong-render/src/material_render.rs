@@ -16,7 +16,7 @@ use core::{
 };
 use std::sync::{Arc, Mutex};
 
-use tshader::ShaderTech;
+use tshader::{ShaderTech, VariantFlags};
 
 mod base;
 mod shadow;
@@ -87,7 +87,7 @@ impl PhongMaterialRendererFactory {
             1,
         );
 
-        let mut shadow_pass = RenderPassBuilder::new("phong's direct light shadow pass");
+        let mut shadow_pass = RenderPassBuilder::new("phong's light shadow pass");
         shadow_pass.render_target(RenderTargetDescriptor {
             colors: smallvec::smallvec![],
             depth: Some(DepthRenderTargetDescriptor {
@@ -134,17 +134,23 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         if any_shadow_cast {
             setup_resource
                 .shader_tech_collection
-                .setup(gpu.device(), lights.as_ref(), "shadow", |pass_name| {
-                    let mut rdo = RenderDescriptorObject::new();
+                .setup(
+                    gpu.device(),
+                    "shadow",
+                    &VariantFlags::default(),
+                    0,
+                    |pass_name| {
+                        let mut rdo = RenderDescriptorObject::new();
 
-                    let depth_format = wgpu::TextureFormat::Depth32Float;
+                        let depth_format = wgpu::TextureFormat::Depth32Float;
 
-                    rdo = rdo.set_depth(depth_format, |depth: &mut _| {
-                        depth.depth_compare = wgpu::CompareFunction::Less;
-                        depth.depth_write_enabled = true;
-                    });
-                    rdo
-                })
+                        rdo = rdo.set_depth(depth_format, |depth: &mut _| {
+                            depth.depth_compare = wgpu::CompareFunction::Less;
+                            depth.depth_write_enabled = true;
+                        });
+                        rdo
+                    },
+                )
                 .unwrap();
         }
 
@@ -201,6 +207,34 @@ impl MaterialRendererFactory for PhongMaterialRendererFactory {
         };
 
         let shared = Arc::new(Mutex::new(shared));
+
+        setup_resource
+            .shader_tech_collection
+            .setup(
+                gpu.device(),
+                "phong",
+                &VariantFlags::default(),
+                0,
+                |pass_name| {
+                    let mut rdo = RenderDescriptorObject::new();
+                    let depth_format = wgpu::TextureFormat::Depth32Float;
+
+                    if pass_name == "phong-forward-base" {
+                        rdo = rdo.set_depth(depth_format, |depth: &mut _| {
+                            depth.depth_compare = wgpu::CompareFunction::Less;
+                            depth.depth_write_enabled = true;
+                        });
+                    } else {
+                        // add
+                        rdo = rdo.set_depth(depth_format, |depth: &mut _| {
+                            depth.depth_compare = wgpu::CompareFunction::Equal;
+                            depth.depth_write_enabled = false;
+                        });
+                    }
+                    rdo
+                },
+            )
+            .unwrap();
 
         for (layer, _) in &materials_map.map {
             let mut base_pass =

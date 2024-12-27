@@ -135,47 +135,25 @@ impl Window {
                 logical: Size::new(logical.width.max(1), logical.height.max(1)),
             };
             proxy.send_event(Box::new(e));
+            proxy.send_event(Box::new(Event::ScaleFactorChanged(self.inner.scale_factor())));
             self.has_resize_event = false;
         }
     }
 
     pub fn on_translate_event(
         &mut self,
-        original_event: WEvent,
+        original_event: WindowEvent,
         proxy: &EventLoopProxy<DEvent>,
     ) -> Option<DEvent> {
-        match original_event {
-            WEvent::WindowEvent {
-                event,
-                window_id: _,
-            } => {
-                if let WindowEvent::Resized(_) = &event {
-                    let size = self.inner.inner_size();
-                    self.size = Size::new(size.width.max(1), size.height.max(1));
-                    self.has_resize_event = true;
-                }
 
-                let ev = map_event(&self.inner, event, proxy);
-                return ev;
-            }
-            WEvent::NewEvents(cause) => match cause {
-                winit::event::StartCause::ResumeTimeReached {
-                    start: _,
-                    requested_resume: _,
-                } => {
-                    self.inner.request_redraw();
-                }
-                winit::event::StartCause::Init => {
-                    let scale = self.inner.scale_factor();
-                    log::info!("init window scale {}", scale);
-                    self.inner.set_visible(true);
-                    return Some(Box::new(Event::ScaleFactorChanged(scale)));
-                }
-                _ => {}
-            },
-            _ => (),
+        if let WindowEvent::Resized(_) = &original_event {
+            let size = self.inner.inner_size();
+            self.size = Size::new(size.width.max(1), size.height.max(1));
+            self.has_resize_event = true;
         }
-        None
+
+        let ev = map_event(&self.inner, original_event, proxy);
+        ev
     }
 }
 
@@ -184,14 +162,14 @@ fn map_event(
     event: WindowEvent,
     proxy: &EventLoopProxy<DEvent>,
 ) -> Option<DEvent> {
-    Some(Box::new(match event {
+    Some(Some(Box::new(match event {
         WindowEvent::Resized(_) => {
             return None;
         }
         // WindowEvent::Moved(pos) => Event::Moved(Size::new(pos.x as u32, pos.y as u32)),
         WindowEvent::CloseRequested => {
-            log::info!("close request");
-            return Some(Box::new(Event::CloseRequested));
+            log::info!("close requested");
+            return Some(Some(Box::new(Event::CloseRequested)));
         }
         WindowEvent::Focused(f) => {
             if f {
@@ -199,7 +177,7 @@ fn map_event(
             } else {
                 log::info!("lose focus");
             }
-            return Some(Box::new(Event::Focused(f)));
+            return Some(Some(Box::new(Event::Focused(f))));
         }
         ev => CEvent::Input(match ev {
             // WindowEvent::ReceivedCharacter(c) => InputEvent::ReceivedCharacter(c),
@@ -216,9 +194,9 @@ fn map_event(
             } => {
                 if let Key::Character(c) = event.logical_key {
                     if event.state.is_pressed() {
-                        _ = proxy.send_event(Box::new(CEvent::Input(InputEvent::ReceivedString(
+                        _ = proxy.send_event(Some(Box::new(CEvent::Input(InputEvent::ReceivedString(
                             c.to_string(),
-                        ))));
+                        )))));
                     }
                 }
                 let vk = util::match_vk(event.physical_key);
@@ -277,21 +255,21 @@ fn map_event(
                 }
             }
             WindowEvent::ThemeChanged(theme) => {
-                return Some(Box::new(match theme {
+                return Some(Some(Box::new(match theme {
                     winit::window::Theme::Light => Event::Theme(Theme::Light),
                     winit::window::Theme::Dark => Event::Theme(Theme::Dark),
-                }));
+                })));
             }
             WindowEvent::ScaleFactorChanged {
                 scale_factor,
                 inner_size_writer: _,
             } => {
                 log::info!("scale factor changed {}", scale_factor);
-                return Some(Box::new(Event::ScaleFactorChanged(scale_factor)));
+                return Some(Some(Box::new(Event::ScaleFactorChanged(scale_factor))));
             }
             _ => {
                 return None;
             }
         }),
-    }))
+    })))
 }

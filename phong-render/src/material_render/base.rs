@@ -7,26 +7,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use tshader::VariantFlags;
+
 use crate::{light::{SceneLights, TLight}, material::PhongMaterialFace};
 
-use super::{copy_vertex_data, LightUniformHolder, PhongMaterialSharedData};
-
-fn copy_light_uniform(light: &LightUniformHolder, buffer: &wgpu::Buffer, gpu: &WGPUResource) {
-    let mut data = vec![];
-    match &light {
-        super::LightUniformHolder::Base(base) => {
-            let _ = data.write_all(base.lock().unwrap().as_bytes());
-        }
-        super::LightUniformHolder::Light(light) => {
-            data = light.light_uniform();
-        }
-        super::LightUniformHolder::BaseLight((base, light)) => {
-            let _= data.write_all(base.lock().unwrap().as_bytes());
-            let _ = data.write_all(&light.light_uniform());
-        }
-    }
-    gpu.queue().write_buffer(buffer, 0, &data);
-}
+use super::{copy_vertex_data, PhongMaterialSharedData};
 
 fn get_object_constant(to_world: &Mat4x4f) -> Vec<u8> {
     let mut constant = vec![];
@@ -92,7 +77,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
 
         for indirect in &layer.material {
             let material = indirect.material.as_ref();
-            let pso = shared.material_shader_collector.get(&material, 0);
+            let pso = shared.material_shader_collector.get(&material, &VariantFlags::default(), 0, "shadow");
             shared
                 .shader_bind_group_collection
                 .setup(device, material, material.id().id(), pso);
@@ -103,7 +88,7 @@ impl RenderPassExecutor for PhongMaterialBaseRenderer {
                 let lights = self.lights;
                 shared
                     .shader_bind_group_collection
-                    .setup(device, lights, material.id().id(), pso);
+                    .setup(device, lights.as_ref(), material.id().id(), pso);
 
                 // create shadow map bind_group
                 let mut layout = None;

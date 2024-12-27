@@ -58,18 +58,20 @@ pub fn load_font(
     name: &str,
     family: FontFamily,
 ) -> anyhow::Result<()> {
+    use std::sync::Arc;
+
     use rust_fontconfig::FcPattern;
     let font = cache
         .query(&FcPattern {
             name: Some(name.to_string()),
             ..Default::default()
         })
-        .ok_or(anyhow::anyhow!("query empty"))?;
+        .ok_or(anyhow::anyhow!("font not found"))?;
 
     let data = std::fs::read(&font.path)?;
 
     fd.font_data
-        .insert(name.to_string(), egui::FontData::from_owned(data));
+        .insert(name.to_string(), Arc::new(egui::FontData::from_owned(data)));
     fd.families
         .entry(family)
         .and_modify(|v| v.insert(0, name.to_string()))

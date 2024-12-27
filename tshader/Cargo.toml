@@ -9,15 +9,15 @@ edition = "2021"
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.8"
-naga = {version="22.1.0", features = ["wgsl-in"]}
+naga = {version="23.0.0", features = ["wgsl-in"]}
 anyhow = "1.0.57"
-wgpu-types = "22.0.0"
+wgpu-types = "23.0.0"
 num_enum = "0.7"
 dashmap = "6.0.1"
 tshader-builder = {path="../tshader-builder"}
-wgpu = { version = "22.1.0" }
+wgpu = { version = "23.0.0" }
 log = "0.4"
 profiling = "1.0"
 itertools = "0.13"
-pollster="0.3"
+pollster="0.4"
 fxhash = "0.2.1"

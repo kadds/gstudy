@@ -1,6 +1,10 @@
 use std::any::Any;
 use std::fmt::Debug;
+use std::sync::Arc;
 
+use raw_window_handle::RawWindowHandle;
+
+use crate::backends::wgpu_backend::WGPUResource;
 use crate::context::ResourceRef;
 use crate::types::*;
 
@@ -123,9 +127,8 @@ pub enum InputEvent {
 }
 
 pub enum Event {
+    Init,
     JustRenderOnce,
-
-    FirstSync,
 
     PreUpdate(f64),
     // need update window
@@ -147,8 +150,8 @@ pub enum Event {
 impl Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Init => write!(f, "Init"),
             Self::JustRenderOnce => write!(f, "JustRenderOnce"),
-            Self::FirstSync => write!(f, "FirstSync"),
             Self::PreUpdate(arg0) => f.debug_tuple("PreUpdate").field(arg0).finish(),
             Self::Update(arg0) => f.debug_tuple("Update").field(arg0).finish(),
             Self::PostUpdate(arg0) => f.debug_tuple("PostUpdate").field(arg0).finish(),
@@ -172,9 +175,16 @@ pub enum ProcessEventResult {
     ExitLoop,
 }
 
+#[derive(Debug, Clone)]
+pub struct EventSourceInformation {
+    pub gpu: Arc<WGPUResource>,
+    // pub handle: RawWindowHandle,
+}
+
 pub trait EventSource {
     fn event_sender(&self) -> &dyn EventSender;
     fn new_event_sender(&self) -> Box<dyn EventSender>;
+    fn source_information(&self) -> EventSourceInformation; 
 }
 
 pub trait EventRegistry {
@@ -183,6 +193,7 @@ pub trait EventRegistry {
 
 pub trait EventProcessor {
     fn on_event(&mut self, source: &dyn EventSource, event: &dyn Any) -> ProcessEventResult;
+    fn init(&mut self, source: &dyn EventSource) {}
 }
 
 #[derive(Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Clone, Copy)]

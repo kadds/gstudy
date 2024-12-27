@@ -714,13 +714,13 @@ impl AppEventProcessor for GltfPlugin {
     fn on_event(&mut self, context: &app::AppEventContext, event: &dyn Any) {
         if let Some(event) = event.downcast_ref::<core::event::Event>() {
             match event {
-                core::event::Event::FirstSync => {
-                    let mut gpu = self.loader.gpu.lock().unwrap();
-                    if gpu.is_none() {
-                        let g = context.container.get::<WGPUResource>().unwrap();
-                        *gpu = Some(g);
-                    }
-                }
+                // core::event::Event::FirstSync => {
+                //     let mut gpu = self.loader.gpu.lock().unwrap();
+                //     if gpu.is_none() {
+                //         let g = context.container.get::<WGPUResource>().unwrap();
+                //         *gpu = Some(g);
+                //     }
+                // }
                 core::event::Event::PostRender => {
                     let res = self.loader.take_result();
                     for r in res {

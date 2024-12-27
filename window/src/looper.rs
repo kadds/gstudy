@@ -1,7 +1,7 @@
 use core::{
     backends::wgpu_backend::WGPUResource,
-    context::RContextRef,
-    event::{EventProcessor, EventRegistry, EventSender, EventSource, ProcessEventResult},
+    context::{RContext, RContextRef},
+    event::{EventProcessor, EventRegistry, EventSender, EventSource, EventSourceInformation, ProcessEventResult},
 };
 use std::{
     any::Any,
@@ -11,34 +11,41 @@ use std::{
 
 use instant::Duration;
 use log::error;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use raw_window_handle::{HasRawWindowHandle, HasWindowHandle, RawWindowHandle};
 use winit::{
-    event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
-    window::WindowBuilder,
+    application::ApplicationHandler,
+    event::StartCause,
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy},
+    window::WindowAttributes,
 };
 
 use crate::{statistics::Statistics, window::Window, CEvent, DEvent, Event, WEvent};
 
+#[derive(Debug, Clone)]
 pub struct LooperEventSource {
     event_proxy: EventLoopProxy<DEvent>,
+    info: Option<EventSourceInformation>,
 }
 
 pub struct Looper {
     event_loop: RefCell<Option<EventLoop<DEvent>>>,
     main_window: Option<RefCell<Window>>,
 
-    event_proxy: EventLoopProxy<DEvent>,
     frame: Arc<Mutex<Statistics>>,
     event_registry: LoopEventRegistry,
 
     auto_exit: bool,
     has_render_event: bool,
     is_first_update: bool,
+
+    default_window_attr: Option<WindowAttributes>,
+    ctx: Arc<RContext>,
+    src: LooperEventSource,
 }
 
 impl EventSender for LooperEventSource {
     fn send_event(&self, ev: Box<dyn Any + Send>) {
-        self.event_proxy.send_event(ev).unwrap();
+        self.event_proxy.send_event(Some(ev)).unwrap();
     }
 }
 
@@ -50,7 +57,12 @@ impl EventSource for LooperEventSource {
     fn new_event_sender(&self) -> Box<dyn EventSender> {
         Box::new(Self {
             event_proxy: self.event_proxy.clone(),
+            info: self.info.clone() 
         })
+    }
+
+    fn source_information(&self) -> EventSourceInformation {
+       self.info.as_ref().unwrap().clone()
     }
 }
 
@@ -61,7 +73,7 @@ pub struct LoopEventRegistry {
 
 impl LoopEventRegistry {
     fn run_event_processor(
-        &mut self,
+        &self,
         event: &dyn Any,
         s: &LooperEventSource,
     ) -> Option<ControlFlow> {
@@ -80,6 +92,16 @@ impl LoopEventRegistry {
         }
         Some(ControlFlow::Wait)
     }
+
+    fn run_init(
+        &mut self,
+        s: &LooperEventSource,
+    ) -> Option<ControlFlow> {
+        for process in &self.processors {
+            process.borrow_mut().init(s);
+        }
+        Some(ControlFlow::Poll)
+    }
 }
 
 impl EventRegistry for LoopEventRegistry {
@@ -89,14 +111,13 @@ impl EventRegistry for LoopEventRegistry {
 }
 
 impl Looper {
-    pub fn new() -> Self {
-        let event_loop = EventLoopBuilder::with_user_event().build().unwrap();
+    pub fn new(default_window: WindowAttributes, ctx: Arc<RContext>) -> Self {
+        let event_loop = EventLoopBuilder::default().build().unwrap();
         let event_proxy = event_loop.create_proxy();
         Self {
             event_loop: RefCell::new(Some(event_loop)),
             main_window: None,
 
-            event_proxy,
             frame: Arc::new(Mutex::new(Statistics::new(
                 Duration::from_millis(1000),
                 Some(1.0 / 60.0),
@@ -105,7 +126,17 @@ impl Looper {
             auto_exit: true,
             has_render_event: false,
             is_first_update: true,
+            default_window_attr: Some(default_window),
+            ctx,
+            src: LooperEventSource {
+                event_proxy,
+                info: None,
+            }
         }
+    }
+
+    fn gpu(&self) -> Arc<WGPUResource> {
+        self.main_window.as_ref().unwrap().borrow().gpu()
     }
 
     pub fn event_registry(&mut self) -> &mut dyn EventRegistry {
@@ -113,9 +144,7 @@ impl Looper {
     }
 
     pub fn event_source(&self) -> LooperEventSource {
-        LooperEventSource {
-            event_proxy: self.event_proxy.clone(),
-        }
+        self.src.clone()
     }
 
     pub fn statistics(&self) -> Arc<Mutex<Statistics>> {
@@ -128,10 +157,12 @@ impl Looper {
             .map(|v| v.borrow().inner.window_handle().unwrap().as_raw())
     }
 
-    pub fn create_window(&mut self, b: WindowBuilder, context: RContextRef) -> Arc<WGPUResource> {
-        let ev = self.event_loop.borrow();
-        let ev = ev.as_ref().unwrap();
-        let w = b.build(ev).unwrap();
+    pub fn create_window(
+        &mut self,
+        acl: &ActiveEventLoop,
+        b: WindowAttributes,
+    ) -> Arc<WGPUResource> {
+        let w = acl.create_window(b).unwrap();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -158,10 +189,11 @@ impl Looper {
         if self.main_window.is_none() {
             self.main_window = Some(RefCell::new(Window::new(
                 w,
-                context,
+                self.ctx.clone(),
                 &mut self.event_registry,
             )));
-            self.main_window.as_ref().unwrap().borrow().gpu()
+            let gpu = self.main_window.as_ref().unwrap().borrow().gpu();
+            gpu
         } else {
             panic!("main window already registered");
             // self.ext_window.push(Window::new(w));
@@ -170,59 +202,50 @@ impl Looper {
 
     pub fn run(&mut self) {
         let event_loop = self.event_loop.take().unwrap();
-        let this = self as *mut Self;
-
-        let err = event_loop.run(move |ev, w| {
-            let s = unsafe { this.as_mut().unwrap() };
-            let event_proxy = s.event_proxy.clone();
-            s.on_event(ev, w, &event_proxy);
-        });
+        let err = event_loop.run_app(self);
         if let Err(err) = err {
             error!("{}", err)
         }
     }
 
-    fn process_inner(&mut self, event: &dyn Any) -> Option<ControlFlow> {
-        let mut w = self.main_window.as_mut().unwrap().borrow_mut();
+    fn process_inner(&self, event: &dyn Any) -> Option<ControlFlow> {
+        let source = self.event_source();
+        let mut w = self.main_window.as_ref().unwrap().borrow_mut();
+
         w.on_event(
-            &LooperEventSource {
-                event_proxy: self.event_proxy.clone(),
-            },
+            &source,
             event,
         );
 
         self.event_registry.run_event_processor(
             event,
-            &LooperEventSource {
-                event_proxy: self.event_proxy.clone(),
-            },
+            &source,
         )
     }
 
-    fn process(&mut self, event: &dyn Any) -> Option<ControlFlow> {
+    fn process(&self, event_loop: &ActiveEventLoop, event_proxy: &EventLoopProxy<DEvent>, event: &dyn Any) -> Option<ControlFlow> {
         if let Some(c) = event.downcast_ref::<CEvent>() {
             match c {
                 core::event::Event::PreUpdate(delta) => {
                     profiling::finish_frame!();
-                    self.has_render_event = true;
+                    // self.has_render_event = true;
                     log::debug!("pre update event");
                     profiling::scope!("pre update");
                     self.frame.lock().unwrap().new_frame();
-                    let _ = self
-                        .event_proxy
-                        .send_event(Box::new(CEvent::Update(*delta)));
+                    let _ =  event_proxy
+                        .send_event(Some(Box::new(CEvent::Update(*delta))));
                     return self.process_inner(event);
                 }
                 core::event::Event::Update(delta) => {
                     log::debug!("update");
                     profiling::scope!("update event");
-                    let _ = self
-                        .event_proxy
-                        .send_event(Box::new(CEvent::PostUpdate(*delta)));
+                    let _ = 
+                        event_proxy
+                        .send_event(Some(Box::new(CEvent::PostUpdate(*delta))));
                     return self.process_inner(event);
                 }
                 core::event::Event::PostUpdate(_) => {
-                    self.has_render_event = false;
+                    // self.has_render_event = false;
                     profiling::scope!("post update event");
                     return self.process_inner(event);
                 }
@@ -246,79 +269,103 @@ impl Looper {
             }
         } else if let Some(c) = event.downcast_ref::<Event>() {
             if let Event::Exit = c {
+                log::warn!("EXIT");
                 return None;
             }
             if self.auto_exit {
                 if let Event::CloseRequested = c {
-                    let _ = self.event_proxy.send_event(Box::new(Event::Exit));
+                    let _ = event_proxy.send_event(Some(Box::new(Event::Exit)));
+                    return Some(ControlFlow::Wait);
                 }
             }
         }
 
         self.process_inner(event)
     }
+}
 
-    fn on_event(
-        &mut self,
-        original_event: WEvent,
-        target: &EventLoopWindowTarget<DEvent>,
-        event_proxy: &EventLoopProxy<DEvent>,
-    ) {
-        let mut ret = Some(ControlFlow::Wait);
+impl ApplicationHandler<DEvent> for Looper {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        log::info!("resumed");
+    }
 
-        match &original_event {
-            WEvent::WindowEvent {
-                event,
-                window_id: _,
-            } => {
-                match event {
-                    winit::event::WindowEvent::RedrawRequested => {
-                        let (_, d, ok) = self.frame.lock().unwrap().next_frame();
-                        if ok && !self.has_render_event {
-                            if self.is_first_update {
-                                self.is_first_update = false;
-                                let _ = event_proxy.send_event(Box::new(CEvent::FirstSync));
-                            } else {
-                                let to_event: Box<dyn Any + Send> =
-                                    Box::new(CEvent::PreUpdate(d.as_secs_f64()));
-                                let _ = event_proxy.send_event(to_event);
-                                ret = Some(ControlFlow::Poll);
-                            }
-                        }
-                    }
-                    _ => (),
-                }
-                let mut w = self.main_window.as_mut().unwrap().borrow_mut();
-                let ev = w.on_translate_event(original_event, event_proxy);
-                if let Some(ev) = ev {
-                    drop(w);
-                    ret = self.process(ev.as_ref())
-                }
-            }
-            WEvent::AboutToWait => {
-                #[cfg(windows)]
-                {
-                    let w = self.main_window.as_mut().unwrap().borrow_mut();
-                    w.inner.request_redraw();
-                }
-            }
-            WEvent::UserEvent(event) => {
-                ret = self.process(event.as_ref());
-            }
-            WEvent::NewEvents(_c) => {
-                let mut w = self.main_window.as_mut().unwrap().borrow_mut();
-                let ev = w.on_translate_event(original_event, event_proxy);
-                if let Some(ev) = ev {
-                    drop(w);
-                    ret = self.process(ev.as_ref())
-                }
-            }
-            _ => {}
-        };
-        if let Some(ret) = ret {
-            target.set_control_flow(ret);
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {  
+        #[cfg(windows)]
+        {
+            let w = self.main_window.as_mut().unwrap().borrow_mut();
+            w.inner.request_redraw();
+        }
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: DEvent) {  
+        let ctf = self.process(event_loop, &self.src.event_proxy, event.as_ref().unwrap().as_ref()); 
+        if let Some(ctf) = ctf {
+            event_loop.set_control_flow(ctf);
         } else {
-            target.exit();
+            event_loop.exit();
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        event_loop.set_control_flow(ControlFlow::Poll);
+        match &event {
+            winit::event::WindowEvent::RedrawRequested => {
+                let (_, d, ok) = self.frame.lock().unwrap().next_frame();
+                if ok {
+                    let to_event: Box<dyn Any + Send> =
+                        Box::new(CEvent::PreUpdate(d.as_secs_f64()));
+                    let _ = self.src.event_proxy.send_event(Some(to_event));
+                    event_loop.set_control_flow(ControlFlow::Poll);
+                } else {
+                    event_loop.set_control_flow(ControlFlow::wait_duration(d));
+                }
+            }
+            _ => {
+            },
+        }
+        let mut w = self.main_window.as_mut().unwrap().borrow_mut();
+        let ev = w.on_translate_event(event, &self.src.event_proxy);
+        if let Some(ev) = ev {
+            drop(w);
+
+            let ctf = self.process(event_loop, &self.src.event_proxy, ev.as_ref().unwrap().as_ref());
+            if let Some(ctf) = ctf {
+                event_loop.set_control_flow(ctf);
+            } else {
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        match cause {
+            StartCause::Init => {
+                log::info!("{:?}", cause);
+                let attr = self.default_window_attr.take();
+                let gpu = self.create_window(event_loop, attr.unwrap());
+                self.src.info = Some(EventSourceInformation { gpu });
+
+                let source = self.event_source();
+
+                self.event_registry.run_init(
+                    &source,
+                );
+            }
+            StartCause::ResumeTimeReached {
+                start: _,
+                requested_resume: _,
+            } => {
+                log::info!("{:?}", cause);
+                let w = self.main_window.as_mut().unwrap().borrow_mut();
+                w.inner.request_redraw();
+            }
+            _ => {
+            },
         }
     }
 }

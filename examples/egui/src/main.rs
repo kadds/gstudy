@@ -28,7 +28,7 @@ fn draw_egui(ctx: &egui::Context) {
         .hscroll(true)
         .show(ctx, |ui| ctx.settings_ui(ui));
     egui::Window::new("Memory").show(ctx, |ui| ctx.memory_ui(ui));
-    egui::Window::new("Style").show(ctx, |ui| ctx.style_ui(ui));
+    egui::Window::new("Style").show(ctx, |ui| ctx.style_ui(ui, egui::Theme::Dark));
     egui::Window::new("Texture").show(ctx, |ui| ctx.texture_ui(ui));
     egui::Window::new("Inspection").show(ctx, |ui| ctx.inspection_ui(ui));
 }

@@ -101,9 +101,9 @@ impl EguiRenderer {
 
             for (name, family) in fonts.into_iter() {
                 if let Err(e) = load_font(&mut fd, &cache, name, family) {
-                    log::warn!("load font {} fail {}", name, e);
+                    log::warn!("load font '{}' fail, {}", name, e);
                 } else {
-                    log::info!("load font {} ready", name);
+                    log::info!("load font '{}' ready", name);
                 }
             }
             let empty = egui::FontDefinitions::default();
